@@ -161,12 +161,23 @@ export const shopifyConnector = createFutureConnector({
   authType: "shopify_admin_api_token",
   requiredFields: [
     {
-      key: "admin_api_token",
+      key: "admin_access_token",
       label: "Admin API access token",
       description: "Shopify Admin API token with the minimum read scopes needed.",
       required: true,
       secret: true,
       type: "password",
+    },
+  ],
+  optionalFields: [
+    {
+      key: "shop_domain",
+      label: "Shop domain",
+      description: "Optional shop domain override, for example your-store.myshopify.com.",
+      required: false,
+      secret: false,
+      type: "text",
+      placeholder: "your-store.myshopify.com",
     },
   ],
   supportedMetrics: ["orders", "gross_sales", "current_total", "net_payment", "refunds", "top_products"],

@@ -124,6 +124,7 @@ export function CredentialForm({ sourceId, title = "Credentials" }: { sourceId: 
               <span className="text-xs leading-5 text-slate-500">{field.description}</span>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
+                  aria-label={field.label}
                   type={field.secret ? "password" : field.type ?? "text"}
                   value={values[field.key] ?? ""}
                   onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}

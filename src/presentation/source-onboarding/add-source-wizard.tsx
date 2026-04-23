@@ -29,13 +29,41 @@ const examples = [
   "https://www.instagram.com/account",
 ];
 
+type SavedSource = {
+  id: string;
+  display_name: string;
+  source_type_key: string;
+};
+
+function WebsiteTrackingSetup({ sourceId }: { sourceId: string }) {
+  return (
+    <div className="grid gap-3 rounded-lg border border-cyan-300/20 bg-cyan-300/8 p-4">
+      <div>
+        <h3 className="text-sm font-semibold text-white">Website tracking setup</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-300">
+          Website sources do not need an API secret for the MVP. Install the tracking snippet to send page views and custom events into MoonArq.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <LinkButton href={`/dashboard/sources/${sourceId}`} variant="primary">
+          <Clipboard className="h-4 w-4" />
+          Open Source Snippet
+        </LinkButton>
+        <LinkButton href="/dashboard/events" variant="secondary">
+          Event Dashboard
+        </LinkButton>
+      </div>
+    </div>
+  );
+}
+
 export function AddSourceWizard() {
   const [inputUrl, setInputUrl] = useState("");
   const [detections, setDetections] = useState<Detection[]>([]);
   const [selected, setSelected] = useState<Detection | null>(null);
   const [syncMode, setSyncMode] = useState("hybrid");
   const [saving, setSaving] = useState(false);
-  const [savedSource, setSavedSource] = useState<{ id: string; display_name: string } | null>(null);
+  const [savedSource, setSavedSource] = useState<SavedSource | null>(null);
   const [syncRunId, setSyncRunId] = useState<string | null>(null);
 
   const step = savedSource ? 4 : selected ? 3 : detections.length > 0 ? 2 : 1;
@@ -215,7 +243,11 @@ export function AddSourceWizard() {
           </h2>
           <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
             {savedSource ? (
-              <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" />
+              savedSource.source_type_key === "website" ? (
+                <WebsiteTrackingSetup sourceId={savedSource.id} />
+              ) : (
+                <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" />
+              )
             ) : (
               (selected?.requiredSetup ?? [
               "Paste a source link to see setup requirements.",

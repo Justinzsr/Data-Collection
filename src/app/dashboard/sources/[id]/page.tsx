@@ -28,7 +28,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
   const connector = getConnector(source.source_type_key);
   const credentials = await listCredentialHints(source.id);
   const trackingKey = String(source.metadata.public_tracking_key ?? "mq_demo_public_website");
-  const endpoint = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/track`;
+  const endpoint = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3100"}/api/track`;
   const setup = connector.getSetupInstructions(source);
 
   return (

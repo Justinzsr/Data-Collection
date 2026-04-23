@@ -15,6 +15,21 @@ for (const viewport of [
   });
 }
 
+for (const path of [
+  "/dashboard/sources",
+  "/dashboard/sources/new",
+  "/dashboard/events",
+  "/dashboard/sync",
+  "/dashboard/sources/22222222-2222-4222-8222-222222222222",
+]) {
+  test(`${path} has no horizontal overflow on narrow mobile`, async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.goto(path);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(overflow).toBe(false);
+  });
+}
+
 test("mobile navigation opens", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/dashboard");

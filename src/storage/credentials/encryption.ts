@@ -7,10 +7,15 @@ export interface EncryptedSecret {
   authTag: string;
 }
 
+const LOCAL_DEMO_KEY = "test-key-32-bytes-long-for-aes!!";
+
 function getEncryptionKey() {
   const raw = process.env.APP_ENCRYPTION_KEY;
   if (!raw) {
-    if (process.env.NODE_ENV === "test") return Buffer.from("test-key-32-bytes-long-for-aes!!").subarray(0, 32);
+    if (process.env.NODE_ENV === "test") return Buffer.from(LOCAL_DEMO_KEY).subarray(0, 32);
+    if (process.env.NODE_ENV !== "production" && !process.env.DATABASE_URL) {
+      return Buffer.from(LOCAL_DEMO_KEY).subarray(0, 32);
+    }
     throw new Error("APP_ENCRYPTION_KEY is required to encrypt source credentials.");
   }
   const base64 = Buffer.from(raw, "base64");

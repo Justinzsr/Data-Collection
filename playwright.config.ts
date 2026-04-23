@@ -13,6 +13,7 @@ export default defineConfig({
     reuseExistingServer: true,
     env: {
       DEV_AUTH_BYPASS: "true",
+      APP_ENCRYPTION_KEY: "test-key-32-bytes-long-for-aes!!",
       NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3100",
     },
   },

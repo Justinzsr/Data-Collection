@@ -12,7 +12,7 @@ export default async function EventsPage() {
   const [sources, events, trend] = await Promise.all([listSources(), listWebEvents(30), getMetricTimeseries({ metricKey: "page_views" })]);
   const website = sources.find((source) => source.source_type_key === "website");
   const trackingKey = String(website?.metadata.public_tracking_key ?? "mq_demo_public_website");
-  const endpoint = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/track`;
+  const endpoint = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3100"}/api/track`;
   const snippet = generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey });
   const helper = generateReactHelper({ endpoint, publicTrackingKey: trackingKey });
   const byPath = events.reduce<Record<string, number>>((acc, event) => {

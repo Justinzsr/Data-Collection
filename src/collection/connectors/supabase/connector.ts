@@ -207,15 +207,21 @@ export const supabaseConnector: ConnectorDefinition = {
       const client = createClient(projectUrl, serviceRole, { auth: { persistSession: false } });
       const perPage = 1000;
       const users = [];
+      let pagesFetched = 0;
+      let complete = false;
       for (let page = 1; page <= 100; page += 1) {
         const { data, error } = await client.auth.admin.listUsers({ page, perPage });
         if (error) throw error;
+        pagesFetched = page;
         users.push(...data.users);
-        if (data.users.length < perPage) break;
+        if (data.users.length < perPage) {
+          complete = true;
+          break;
+        }
       }
       const payload = {
         mode: "admin_list_users",
-        pagination: { perPage, pagesFetched: Math.ceil(users.length / perPage), complete: users.length % perPage !== 0 || users.length === 0 },
+        pagination: { perPage, pagesFetched, complete },
         users: users.map((user) => ({
           id: user.id,
           email: user.email ?? null,

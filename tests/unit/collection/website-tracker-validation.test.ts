@@ -37,7 +37,7 @@ describe("website tracker validation", () => {
     ).rejects.toThrow(/too large/i);
   });
 
-  it("increments daily rollups and path/referrer breakdowns without event_id dimensions", async () => {
+  it("increments daily page_view rollups and path/referrer breakdowns without event_id dimensions", async () => {
     await ingestTrackEvent(baseEvent, { origin: "https://example.com" });
     await ingestTrackEvent({ ...baseEvent, session_id: "session-two" }, { origin: "https://example.com" });
     const rows = await listMetrics({ metricKeys: ["page_views", "events_by_path", "events_by_referrer"], startDate: "2026-04-22", endDate: "2026-04-22" });
@@ -50,12 +50,29 @@ describe("website tracker validation", () => {
     expect(byReferrer?.metric_value).toBe(2);
   });
 
+  it("increments custom event daily rollups", async () => {
+    await ingestTrackEvent({ ...baseEvent, event_name: "cta_click", path: "/pricing", referrer: "https://google.com" }, { origin: "https://example.com" });
+    await ingestTrackEvent({ ...baseEvent, event_name: "signup_intent", path: "/pricing", referrer: "https://google.com" }, { origin: "https://example.com" });
+    const rows = await listMetrics({ metricKeys: ["custom_events", "events_by_path", "events_by_referrer"], startDate: "2026-04-22", endDate: "2026-04-22" });
+    const customEvents = rows.find((row) => row.metric_key === "custom_events" && row.dimensions.rollup === "daily");
+    const byPath = rows.find((row) => row.metric_key === "events_by_path" && row.dimensions.path === "/pricing" && row.dimensions.demo !== true);
+    const byReferrer = rows.find((row) => row.metric_key === "events_by_referrer" && row.dimensions.referrer === "https://google.com" && row.dimensions.demo !== true);
+    expect(customEvents?.metric_value).toBe(2);
+    expect(customEvents?.dimensions).not.toHaveProperty("event_id");
+    expect(byPath?.metric_value).toBe(2);
+    expect(byReferrer?.metric_value).toBe(2);
+  });
+
   it("generates copyable tracking snippets", () => {
     const snippet = generateTrackingSnippet({ endpoint: "https://app.example.com/api/track", publicTrackingKey: "mq_public" });
     const helper = generateReactHelper({ endpoint: "https://app.example.com/api/track", publicTrackingKey: "mq_public" });
+    expect(snippet.trim().length).toBeGreaterThan(0);
     expect(snippet).toContain("window.moonarqTrack");
     expect(snippet).toContain("moonarq_anonymous_id");
-    expect(snippet).toContain("session_id");
+    expect(snippet).toContain("moonarq_session_id");
+    expect(snippet).toContain("page_view");
+    expect(snippet).toContain("https://app.example.com/api/track");
+    expect(snippet).toContain("mq_public");
     expect(helper).toContain("usePageViewTracking");
     expect(helper).toContain("trackEvent");
   });
