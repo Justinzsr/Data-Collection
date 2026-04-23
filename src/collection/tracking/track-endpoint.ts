@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ingestWebsiteEvent } from "@/collection/tracking/website-event-ingestion";
-import { isWebsiteSourceKey } from "@/collection/tracking/website-sources";
+import { isWebsiteSourceKey, resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import type { JsonRecord, Source } from "@/storage/db/schema";
+import { storeWebEvent } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 
 export const trackEventSchema = z.object({
@@ -31,8 +32,7 @@ function hashIp(ip: string | null | undefined) {
   return createHash("sha256").update(`${process.env.APP_ENCRYPTION_KEY ?? "demo"}:${ip}`).digest("hex");
 }
 
-async function findTrackingSource(input: TrackEventInput): Promise<Source | null> {
-  const sources = await listSources();
+function findTrackingSource(input: TrackEventInput, sources: Source[]): Source | null {
   if (input.source_id) return sources.find((source) => source.id === input.source_id) ?? null;
   if (input.public_tracking_key) {
     return (
@@ -52,17 +52,59 @@ function assertAllowedOrigin(source: Source | null, origin: string | null) {
   }
 }
 
+function shouldSuppressTrackerPageViewRollup(input: {
+  source: Source | null;
+  sources: Source[];
+  eventName: string;
+}) {
+  if (!input.source || input.source.source_type_key !== "website" || input.eventName !== "page_view") {
+    return false;
+  }
+  const primaryWebsiteSource = resolvePrimaryWebsiteSource(input.sources);
+  return Boolean(
+    primaryWebsiteSource &&
+      primaryWebsiteSource.id !== input.source.id &&
+      primaryWebsiteSource.source_type_key === "vercel_web_analytics_drain",
+  );
+}
+
 export async function ingestTrackEvent(input: unknown, meta: { origin?: string | null; ip?: string | null; userAgent?: string | null }) {
   const parsed = trackEventSchema.parse(input);
   if (!propertiesAreSmall(parsed.properties)) {
     throw new Error("Event properties are too large. Limit is 8KB.");
   }
-  const source = await findTrackingSource(parsed);
+  const sources = await listSources();
+  const source = findTrackingSource(parsed, sources);
   if (source && !isWebsiteSourceKey(source.source_type_key)) {
     throw new Error("The selected source does not accept website tracker events.");
   }
   assertAllowedOrigin(source, meta.origin ?? null);
   const occurredAt = parsed.occurred_at ?? new Date().toISOString();
+  if (shouldSuppressTrackerPageViewRollup({ source, sources, eventName: parsed.event_name })) {
+    return storeWebEvent({
+      source_id: source?.id ?? parsed.source_id ?? null,
+      public_tracking_key: parsed.public_tracking_key ?? null,
+      anonymous_id: parsed.anonymous_id,
+      session_id: parsed.session_id,
+      user_id: parsed.user_id ?? null,
+      event_name: parsed.event_name,
+      path: parsed.path,
+      url: parsed.url,
+      referrer: parsed.referrer ?? null,
+      user_agent: parsed.user_agent ?? meta.userAgent ?? null,
+      ip_hash: hashIp(meta.ip),
+      country: null,
+      device_type: null,
+      properties: {
+        ...parsed.properties,
+        moonarq_ingestion: {
+          suppressed_rollup: true,
+          reason: "vercel_drain_primary",
+        },
+      } satisfies JsonRecord,
+      occurred_at: occurredAt,
+    });
+  }
   return ingestWebsiteEvent({
     sourceTypeKey: "website",
     sourceId: source?.id ?? parsed.source_id ?? null,

@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ingestTrackEvent } from "@/collection/tracking/track-endpoint";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { resetDemoStore } from "@/storage/repositories/demo-store";
+import { listWebEvents } from "@/storage/repositories/events-repository";
 import { listMetrics } from "@/storage/repositories/metrics-repository";
+import { createSource } from "@/storage/repositories/sources-repository";
 
 const baseEvent = {
   public_tracking_key: "mq_demo_public_website",
@@ -61,6 +63,73 @@ describe("website tracker validation", () => {
     expect(customEvents?.dimensions).not.toHaveProperty("event_id");
     expect(byPath?.metric_value).toBe(2);
     expect(byReferrer?.metric_value).toBe(2);
+  });
+
+  it("stores tracker page views as raw events but suppresses rollups when Vercel Drain is primary", async () => {
+    await createSource({
+      source_type_key: "vercel_web_analytics_drain",
+      display_name: "MoonArq Website Drain",
+      input_url: "https://moonarqstudio.com",
+      normalized_url: "https://moonarqstudio.com",
+      account_name: "moonarqstudio.com",
+      status: "healthy",
+      sync_mode: "webhook",
+      supports_webhook: true,
+      metadata: {
+        monitored_source: "moonarq_website",
+      },
+    });
+
+    await ingestTrackEvent(
+      {
+        ...baseEvent,
+        occurred_at: "2026-05-01T12:00:00.000Z",
+      },
+      { origin: "https://moonarqstudio.com" },
+    );
+
+    const rows = await listMetrics({ metricKeys: ["page_views"], startDate: "2026-05-01", endDate: "2026-05-01" });
+    const pageViews = rows.find((row) => row.metric_key === "page_views" && row.dimensions.demo !== true);
+    const events = await listWebEvents(20);
+    const stored = events.find((event) => event.occurred_at === "2026-05-01T12:00:00.000Z");
+
+    expect(pageViews).toBeUndefined();
+    expect(stored?.properties).toMatchObject({
+      moonarq_ingestion: {
+        suppressed_rollup: true,
+        reason: "vercel_drain_primary",
+      },
+    });
+  });
+
+  it("keeps tracker custom events available when Vercel Drain is primary", async () => {
+    await createSource({
+      source_type_key: "vercel_web_analytics_drain",
+      display_name: "MoonArq Website Drain",
+      input_url: "https://moonarqstudio.com",
+      normalized_url: "https://moonarqstudio.com",
+      account_name: "moonarqstudio.com",
+      status: "healthy",
+      sync_mode: "webhook",
+      supports_webhook: true,
+      metadata: {
+        monitored_source: "moonarq_website",
+      },
+    });
+
+    await ingestTrackEvent(
+      {
+        ...baseEvent,
+        event_name: "cta_click",
+        path: "/pricing",
+        occurred_at: "2026-05-02T12:00:00.000Z",
+      },
+      { origin: "https://moonarqstudio.com" },
+    );
+
+    const rows = await listMetrics({ metricKeys: ["custom_events"], startDate: "2026-05-02", endDate: "2026-05-02" });
+    const customEvents = rows.find((row) => row.metric_key === "custom_events" && row.dimensions.rollup === "daily");
+    expect(customEvents?.metric_value).toBe(1);
   });
 
   it("generates copyable tracking snippets", () => {
