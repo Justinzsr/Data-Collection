@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+:root {
+  --background: #070a0f;
+  --foreground: #f8fafc;
+  --surface: #0b111a;
+  --surface-elevated: #101827;
+  --muted: #94a3b8;
+  --border: rgba(148, 163, 184, 0.16);
+  --cyan: #38bdf8;
+  --teal: #2dd4bf;
+  --indigo: #818cf8;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #f43f5e;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  min-width: 320px;
+  overflow-x: hidden;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.35);
+}
+
+.app-bg {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.16), transparent 28rem),
+    radial-gradient(circle at 88% 12%, rgba(45, 212, 191, 0.12), transparent 30rem),
+    linear-gradient(180deg, #070a0f 0%, #0b111a 50%, #070a0f 100%);
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 78%);
+}
+
+.glass {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(16, 24, 39, 0.82), rgba(11, 17, 26, 0.72));
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.code-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
