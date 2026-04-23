@@ -15,7 +15,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </span>
             <span>
               <span className="block text-sm font-semibold text-white">MoonArq</span>
-              <span className="block text-xs text-slate-500">Data Collection Base</span>
+              <span className="block text-xs text-slate-500">Data Command Center</span>
             </span>
           </Link>
           <nav className="grid gap-1">
@@ -31,14 +31,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="absolute bottom-5 left-4 right-4 rounded-lg border border-cyan-200/15 bg-cyan-300/8 p-3 text-xs leading-5 text-slate-300">
-            Demo mode is live. Real private metrics require official API credentials, OAuth, webhooks, or tracking snippets.
+            The modules in this app are MoonArq source systems. The app&apos;s own runtime/storage stays separate, and real private metrics still require official credentials, webhooks, drains, or tracking setup.
           </div>
         </aside>
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-white/10 bg-[#070a0f]/78 px-4 backdrop-blur-xl sm:px-6 lg:px-8">
             <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/70">Internal command center</p>
-              <p className="text-sm text-slate-400">Official APIs, webhooks, cron, manual sync, first-party tracking.</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/70">MoonArq source monitoring</p>
+              <p className="text-sm text-slate-400">Website/Vercel, Supabase, sync health, official ingestion paths.</p>
             </div>
             <MobileNav />
           </header>

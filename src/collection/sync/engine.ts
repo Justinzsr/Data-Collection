@@ -1,5 +1,6 @@
 import { getConnector } from "@/collection/connectors/registry";
 import { acquireSourceLock, releaseSourceLock } from "@/collection/sync/locks";
+import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
 import type { SyncRun, SyncTrigger } from "@/storage/db/schema";
 import { getDecryptedCredentialMap } from "@/storage/repositories/credentials-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
@@ -36,7 +37,7 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
     source_type_key: source.source_type_key,
     trigger: input.trigger,
     idempotency_key: input.idempotencyKey ?? `${source.id}:${input.trigger}:${new Date().toISOString().slice(0, 13)}`,
-    metadata: { demoMode: !process.env.DATABASE_URL },
+    metadata: { demoMode: !isRuntimeDatabaseConfigured() },
   });
 
   const startedAt = new Date();
@@ -60,7 +61,7 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       source,
       credentials,
       trigger: input.trigger,
-      isDemoMode: source.status === "demo" || !process.env.DATABASE_URL,
+      isDemoMode: source.status === "demo" || !isRuntimeDatabaseConfigured(),
     });
     const raw = await storeRawPayloads(source, syncResult.rawPayloads);
     const normalized = await connector.normalize(syncResult.rawPayloads, source);

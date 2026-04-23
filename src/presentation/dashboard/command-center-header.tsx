@@ -17,10 +17,10 @@ export function CommandCenterHeader({ modules, range }: { modules: PlatformModul
     <header className="grid gap-5 rounded-lg border border-cyan-200/15 bg-[linear-gradient(135deg,rgba(8,47,73,0.65),rgba(15,23,42,0.7)_48%,rgba(20,83,45,0.24))] p-4 shadow-[0_24px_90px_rgba(8,145,178,0.16)] sm:p-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100/75">Internal platform command center</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100/75">MoonArq monitored sources</p>
           <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">MoonArq Data Command Center</h1>
           <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-300">
-            Source modules for official APIs, webhooks, manual sync, cron sync, and first-party website tracking. Links identify sources; private metrics need credentials, webhooks, or tracking snippets.
+            This dashboard monitors MoonArq&apos;s existing website/Vercel and Supabase sources. The Data Hub app has its own runtime and storage behind the scenes, but the modules here are the MoonArq systems being observed.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -54,7 +54,7 @@ export function CommandCenterHeader({ modules, range }: { modules: PlatformModul
           </select>
           <p className="flex items-center gap-2 text-sm text-slate-400">
             <RadioTower className="h-4 w-4 text-cyan-200" />
-            {active} active source{active === 1 ? "" : "s"} · {warnings} setup signal{warnings === 1 ? "" : "s"}
+            {active} active monitored source{active === 1 ? "" : "s"} · {warnings} setup signal{warnings === 1 ? "" : "s"}
           </p>
         </div>
       </div>

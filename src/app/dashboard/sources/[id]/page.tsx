@@ -1,6 +1,8 @@
-import { ArrowLeft, Clipboard, RadioTower } from "lucide-react";
+import { ArrowLeft, Clipboard, RadioTower, ShieldAlert, Webhook } from "lucide-react";
 import { getConnector } from "@/collection/connectors/registry";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
+import { getWebsiteModeLabel, isWebsiteSourceKey } from "@/collection/tracking/website-sources";
+import { getPublicAppUrl, getPublicAppUrlWarning } from "@/storage/runtime/app-config";
 import { getSource } from "@/storage/repositories/sources-repository";
 import { listCredentialHints } from "@/storage/repositories/credentials-repository";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
@@ -28,7 +30,9 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
   const connector = getConnector(source.source_type_key);
   const credentials = await listCredentialHints(source.id);
   const trackingKey = String(source.metadata.public_tracking_key ?? "mq_demo_public_website");
-  const endpoint = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3100"}/api/track`;
+  const publicAppUrl = getPublicAppUrl();
+  const publicAppUrlWarning = getPublicAppUrlWarning();
+  const endpoint = `${publicAppUrl ?? "http://127.0.0.1:3100"}/api/track`;
   const setup = connector.getSetupInstructions(source);
 
   return (
@@ -57,6 +61,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
           </div>
           <div className="grid gap-3 text-sm text-slate-300">
             <p>Platform: <span className="text-white">{connector.displayName}</span></p>
+            <p>Monitored mode: <span className="text-white">{source.source_type_key === "supabase" ? "MoonArq Supabase" : isWebsiteSourceKey(source.source_type_key) ? getWebsiteModeLabel(source) : connector.displayName}</span></p>
             <p>Sync mode: <span className="text-white">{source.sync_mode}</span></p>
             <p>Last success: <span className="text-white">{source.last_success_at ?? "never"}</span></p>
             <p>Next sync: <span className="text-white">{source.next_sync_at ?? "manual only"}</span></p>
@@ -85,6 +90,15 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
           <RadioTower className="h-4 w-4 text-cyan-200" />
           <h2 className="text-base font-semibold text-white">Setup instructions</h2>
         </div>
+        {publicAppUrlWarning ? (
+          <div className="mb-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">
+            <div className="mb-1 flex items-center gap-2 font-medium">
+              <ShieldAlert className="h-4 w-4" />
+              Public app URL warning
+            </div>
+            {publicAppUrlWarning}
+          </div>
+        ) : null}
         <div className="grid gap-3">
           {setup.map((item, index) => (
             <div key={`${index}-${item.slice(0, 24)}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-slate-300">
@@ -107,11 +121,25 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
             code={generateReactHelper({ endpoint, publicTrackingKey: trackingKey })}
           />
         </div>
+      ) : source.source_type_key === "vercel_web_analytics_drain" ? (
+        <GlassPanel className="p-4 sm:p-5">
+          <div className="mb-4 flex items-center gap-2 text-base font-semibold text-white">
+            <Webhook className="h-4 w-4 text-cyan-200" />
+            Vercel Drain endpoint
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">MoonArq Website / Vercel drain URL</p>
+            <p className="mt-2 break-all font-mono text-xs text-cyan-50">{`${publicAppUrl ?? "http://127.0.0.1:3100"}${source.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${source.id}`}`}</p>
+          </div>
+          <p className="mt-4 text-sm leading-6 text-slate-300">
+            Configure a Web Analytics Drain in the existing MoonArq Vercel project. If you add a Signature Verification Secret in Vercel, save the same value above as the encrypted <span className="font-mono text-cyan-100">drain_signature_secret</span>.
+          </p>
+        </GlassPanel>
       ) : (
         <GlassPanel className="p-4 sm:p-5">
           <div className="flex items-center gap-2 text-sm text-slate-300">
             <Clipboard className="h-4 w-4 text-cyan-200" />
-            Tracking snippets are only shown for Website / Vercel Site sources.
+            Tracking snippets are only shown for Website Tracker sources. Supabase setup lives in the instructions above.
           </div>
         </GlassPanel>
       )}

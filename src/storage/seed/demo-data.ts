@@ -107,10 +107,10 @@ function makeSources(): Source[] {
     source({
       id: DEMO_SOURCE_IDS.website,
       source_type_key: "website",
-      display_name: "MoonArq Website",
-      input_url: "https://example.com",
-      normalized_url: "https://example.com",
-      account_name: "example.com",
+      display_name: "MoonArq Website / Vercel",
+      input_url: "https://moonarqstudio.com",
+      normalized_url: "https://moonarqstudio.com",
+      account_name: "moonarqstudio.com",
       status: "demo",
       sync_mode: "hybrid",
       supports_webhook: true,
@@ -118,7 +118,9 @@ function makeSources(): Source[] {
       metadata: {
         demo: true,
         public_tracking_key: "mq_demo_public_website",
-        allowed_origins: ["https://example.com", "http://localhost:3000"],
+        website_mode: "website",
+        monitored_source: "moonarq_website",
+        allowed_origins: ["https://moonarqstudio.com", "http://127.0.0.1:3100", "http://localhost:3100"],
       },
     }),
     source({

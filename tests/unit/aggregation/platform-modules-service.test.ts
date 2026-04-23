@@ -8,18 +8,18 @@ describe("platform modules service", () => {
   it("returns normalized platform modules in product order", async () => {
     const modules = await getPlatformModules("30d");
     expect(modules.map((module) => module.platformLabel)).toEqual([
-      "Website / Vercel Site",
-      "Supabase",
-      "TikTok",
-      "Instagram",
-      "Shopify",
-      "Vercel Project",
-      "Custom API",
-      "Custom CSV",
+      "MoonArq Website / Vercel",
+      "MoonArq Supabase",
+      "MoonArq TikTok",
+      "MoonArq Instagram",
+      "MoonArq Commerce",
+      "MoonArq Custom API",
+      "MoonArq Custom CSV",
     ]);
-    expect(modules.find((module) => module.sourceTypeKey === "website")?.primaryMetric.key).toBe("page_views");
+    expect(modules.find((module) => module.sourceTypeKey === "website")?.primaryMetric.key).toBe("unique_visitors");
     expect(modules.find((module) => module.sourceTypeKey === "supabase")?.primaryMetric.key).toBe("signups");
     expect(modules.find((module) => module.sourceTypeKey === "shopify")?.status).toBe("disabled");
+    expect(modules.find((module) => module.sourceTypeKey === "website")?.sourceModeLabel).toBe("Demo");
   });
 
   it("computes delta vs previous period", () => {

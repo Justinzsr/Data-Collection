@@ -67,7 +67,10 @@ export function PlatformModuleCard({ module }: { module: PlatformModule }) {
             <p className="truncate text-xs text-slate-500">{module.displayName}</p>
           </div>
         </div>
-        <Badge tone={statusTone(module.status)}>{module.status}</Badge>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <Badge tone={statusTone(module.status)}>{module.status}</Badge>
+          <Badge tone="slate">{module.sourceModeLabel}</Badge>
+        </div>
       </div>
 
       <div className="min-w-0">
@@ -92,6 +95,17 @@ export function PlatformModuleCard({ module }: { module: PlatformModule }) {
           </div>
         ))}
       </div>
+
+      {module.insights.length > 0 ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {module.insights.slice(0, 4).map((insight) => (
+            <div key={`${insight.label}-${insight.value}`} className="min-w-0 rounded-lg border border-white/10 bg-black/25 px-3 py-2">
+              <p className="truncate text-[11px] uppercase tracking-[0.12em] text-slate-500">{insight.label}</p>
+              <p className="mt-1 truncate text-sm text-slate-200">{insight.value}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-2">

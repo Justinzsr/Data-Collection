@@ -12,6 +12,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const connector = getConnector(body.source_type_key as SourceTypeKey);
+    const needsCredentials = connector.requiredFields.some((field) => field.required) || connector.key === "supabase";
     const source = await createSource({
       source_type_key: connector.key,
       display_name: String(body.display_name ?? connector.displayName),
@@ -21,8 +22,8 @@ export async function POST(request: Request) {
       account_name: body.account_name ?? null,
       sync_mode: (body.sync_mode ?? "hybrid") as SyncMode,
       supports_webhook: connector.capabilities.supportsWebhook,
-      status: connector.requiredFields.some((field) => field.required) ? "needs_credentials" : "demo",
-      metadata: { demo: true },
+      status: needsCredentials ? "needs_credentials" : "demo",
+      metadata: body.metadata ?? undefined,
     });
     return Response.json({ source }, { status: 201 });
   } catch (error) {

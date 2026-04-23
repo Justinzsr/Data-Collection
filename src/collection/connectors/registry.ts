@@ -2,6 +2,7 @@ import type { ConnectorDefinition, DetectionResult } from "@/collection/connecto
 import type { SourceTypeDefinition, SourceTypeKey } from "@/storage/db/schema";
 import { supabaseConnector } from "@/collection/connectors/supabase/connector";
 import { websiteConnector } from "@/collection/connectors/website/connector";
+import { vercelWebAnalyticsDrainConnector } from "@/collection/connectors/vercel-web-analytics-drain/connector";
 import {
   customApiConnector,
   customCsvConnector,
@@ -12,6 +13,7 @@ import {
 } from "@/collection/connectors/future-connectors";
 
 export const connectorRegistry: ConnectorDefinition[] = [
+  vercelWebAnalyticsDrainConnector,
   supabaseConnector,
   vercelProjectConnector,
   shopifyConnector,

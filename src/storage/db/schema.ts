@@ -4,6 +4,7 @@ export type JsonRecord = Record<string, JsonValue>;
 
 export type SourceTypeKey =
   | "website"
+  | "vercel_web_analytics_drain"
   | "supabase"
   | "vercel_project"
   | "shopify"

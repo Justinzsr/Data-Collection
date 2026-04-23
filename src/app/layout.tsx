@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MoonArq Data Collection Base",
-  description: "Private internal data collection and visualization base.",
+  title: "MoonArq Data Command Center",
+  description: "MoonArq source monitoring for website/Vercel, Supabase, and future connected platforms.",
 };
 
 export default function RootLayout({

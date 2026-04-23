@@ -1,14 +1,28 @@
 # Architecture
 
-MoonArq is an extensible data collection base, not a one-off dashboard.
+MoonArq Data Command Center is an extensible source-monitoring base, not a one-off dashboard.
+
+## Two Separate Concerns
+
+### 1. Monitored MoonArq sources
+
+- MoonArq Website / Vercel
+- MoonArq Supabase
+- future MoonArq social, commerce, and custom sources
+
+### 2. The Data Hub app's own runtime/storage
+
+- where this app runs
+- where this app stores sources, credentials, sync runs, raw ingestions, web events, and metrics
+- where snippets and webhook endpoints are served from
 
 ## Collection Layer
 
-`src/collection` contains source onboarding concepts, connector registry, platform connectors, sync triggers, and first-party tracking.
+`src/collection` contains source onboarding concepts, connector registry, platform connectors, sync triggers, Vercel Drain ingestion, and first-party tracking.
 
 ## Storage Layer
 
-`src/storage` contains Supabase-targeted schema, migrations, repositories, encrypted credential handling, raw ingestions, sync runs, locks, source configs, events, and demo seed data.
+`src/storage` contains the app runtime schema, migrations, repositories, encrypted credential handling, raw ingestions, sync runs, locks, source configs, events, and demo seed data.
 
 ## Aggregation Layer
 
@@ -32,3 +46,14 @@ webhook/manual/cron/initial
   -> releaseSourceLock
   -> recordConnectorEvent
 ```
+
+## Website Ingestion Modes
+
+MoonArq Website / Vercel can use one of two ingestion modes:
+
+1. `vercel_web_analytics_drain`
+   official Vercel Web Analytics Drain payloads delivered to the Data Hub app.
+2. `website`
+   first-party Website Tracker fallback/helper events sent to `/api/track`.
+
+The dashboard chooses one primary website source module and avoids double counting by preferring the active Vercel Drain source when both are configured.

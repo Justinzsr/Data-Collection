@@ -1,8 +1,10 @@
-import { Activity, ShieldAlert } from "lucide-react";
+import { Activity, ShieldAlert, Webhook } from "lucide-react";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
+import { getWebsiteModeLabel, resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import { getMetricTimeseries } from "@/aggregation/services/timeseries-service";
 import { listWebEvents } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
+import { getPublicAppUrl, getPublicAppUrlWarning } from "@/storage/runtime/app-config";
 import { Badge } from "@/presentation/components/ui/badge";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
 import { MetricTrendChart } from "@/presentation/charts/metric-trend-chart";
@@ -10,9 +12,12 @@ import { SnippetCard } from "@/presentation/dashboard/snippet-card";
 
 export default async function EventsPage() {
   const [sources, events, trend] = await Promise.all([listSources(), listWebEvents(30), getMetricTimeseries({ metricKey: "page_views" })]);
-  const website = sources.find((source) => source.source_type_key === "website");
+  const website = resolvePrimaryWebsiteSource(sources);
+  const drainSource = sources.find((source) => source.source_type_key === "vercel_web_analytics_drain");
   const trackingKey = String(website?.metadata.public_tracking_key ?? "mq_demo_public_website");
-  const endpoint = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3100"}/api/track`;
+  const publicAppUrl = getPublicAppUrl();
+  const publicAppUrlWarning = getPublicAppUrlWarning();
+  const endpoint = `${publicAppUrl ?? "http://127.0.0.1:3100"}/api/track`;
   const snippet = generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey });
   const helper = generateReactHelper({ endpoint, publicTrackingKey: trackingKey });
   const byPath = events.reduce<Record<string, number>>((acc, event) => {
@@ -24,16 +29,25 @@ export default async function EventsPage() {
       <SectionHeader
         eyebrow="Website connector"
         title="Event dashboard"
-        description="First-party tracking works on Vercel or any website. It does not use private Vercel Analytics APIs."
+        description="MoonArq website monitoring supports the official Vercel Web Analytics Drain plus the Website Tracker fallback/helper path."
       />
+      {publicAppUrlWarning ? (
+        <GlassPanel className="p-4 sm:p-5">
+          <div className="mb-2 flex items-center gap-2 text-base font-semibold text-white">
+            <ShieldAlert className="h-4 w-4 text-amber-200" />
+            Public app URL warning
+          </div>
+          <p className="text-sm leading-6 text-amber-100">{publicAppUrlWarning}</p>
+        </GlassPanel>
+      ) : null}
       <MetricTrendChart data={trend} title="Website page views" />
       <div className="grid gap-5 lg:grid-cols-3">
         <GlassPanel className="p-4 sm:p-5">
           <h2 className="mb-3 text-base font-semibold text-white">Setup steps</h2>
           <ol className="grid gap-2 text-sm leading-6 text-slate-300">
-            <li>1. Save or open a Website / Vercel Site source.</li>
-            <li>2. Copy the JavaScript snippet or React helper into that website.</li>
-            <li>3. Use <span className="text-cyan-100">window.moonarqTrack</span> for custom events.</li>
+            <li>1. Save MoonArq Website / Vercel as either Vercel Drain or Website Tracker.</li>
+            <li>2. If Drain is primary, configure the custom endpoint in Vercel and optionally save the signature secret.</li>
+            <li>3. Keep the snippet/helper path available as the fallback for custom events or non-drain deployments.</li>
           </ol>
         </GlassPanel>
         <GlassPanel className="p-4 sm:p-5">
@@ -54,6 +68,22 @@ export default async function EventsPage() {
           </p>
         </GlassPanel>
       </div>
+      <GlassPanel className="p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Webhook className="h-4 w-4 text-cyan-200" />
+          <h2 className="text-base font-semibold text-white">Current MoonArq website mode</h2>
+          <Badge tone="cyan">{getWebsiteModeLabel(website)}</Badge>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Vercel Drain endpoint</p>
+            <p className="mt-2 break-all font-mono text-xs text-cyan-50">{`${publicAppUrl ?? "http://127.0.0.1:3100"}${drainSource?.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${drainSource?.id ?? "{sourceId}"}`}`}</p>
+          </div>
+          <p className="text-sm leading-6 text-slate-300">
+            Use this endpoint in Vercel when the MoonArq website runs on the official Web Analytics Drain path. The tracker snippet below remains the supported fallback/helper path for custom events and non-drain setups.
+          </p>
+        </div>
+      </GlassPanel>
       <div className="grid gap-5 xl:grid-cols-2">
         <SnippetCard title="Lightweight JavaScript snippet" description="Auto page_view plus window.moonarqTrack(eventName, properties)." code={snippet} />
         <SnippetCard title="React / Next.js helper" description="usePageViewTracking() and trackEvent(name, properties)." code={helper} />

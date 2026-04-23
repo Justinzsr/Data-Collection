@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { ingestWebsiteEvent } from "@/collection/tracking/website-event-ingestion";
+import { isWebsiteSourceKey } from "@/collection/tracking/website-sources";
 import type { JsonRecord, Source } from "@/storage/db/schema";
-import { incrementMetrics } from "@/storage/repositories/metrics-repository";
-import { storeWebEvent } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 
 export const trackEventSchema = z.object({
@@ -58,55 +58,27 @@ export async function ingestTrackEvent(input: unknown, meta: { origin?: string |
     throw new Error("Event properties are too large. Limit is 8KB.");
   }
   const source = await findTrackingSource(parsed);
+  if (source && !isWebsiteSourceKey(source.source_type_key)) {
+    throw new Error("The selected source does not accept website tracker events.");
+  }
   assertAllowedOrigin(source, meta.origin ?? null);
   const occurredAt = parsed.occurred_at ?? new Date().toISOString();
-  const event = await storeWebEvent({
-    source_id: source?.id ?? parsed.source_id ?? null,
-    public_tracking_key: parsed.public_tracking_key ?? null,
-    anonymous_id: parsed.anonymous_id,
-    session_id: parsed.session_id,
-    user_id: parsed.user_id ?? null,
-    event_name: parsed.event_name,
+  return ingestWebsiteEvent({
+    sourceTypeKey: "website",
+    sourceId: source?.id ?? parsed.source_id ?? null,
+    publicTrackingKey: parsed.public_tracking_key ?? null,
+    anonymousId: parsed.anonymous_id,
+    sessionId: parsed.session_id,
+    userId: parsed.user_id ?? null,
+    eventName: parsed.event_name,
     path: parsed.path,
     url: parsed.url,
     referrer: parsed.referrer ?? null,
-    user_agent: parsed.user_agent ?? meta.userAgent ?? null,
-    ip_hash: hashIp(meta.ip),
+    userAgent: parsed.user_agent ?? meta.userAgent ?? null,
+    ipHash: hashIp(meta.ip),
     country: null,
-    device_type: null,
+    deviceType: null,
     properties: parsed.properties as JsonRecord,
-    occurred_at: occurredAt,
+    occurredAt,
   });
-  const date = occurredAt.slice(0, 10);
-  const primaryMetric = parsed.event_name === "page_view" ? "page_views" : "custom_events";
-  await incrementMetrics([
-    {
-      date,
-      sourceId: event.source_id,
-      sourceTypeKey: "website",
-      metricKey: primaryMetric,
-      metricValue: 1,
-      unit: "count",
-      dimensions: { rollup: "daily" },
-    },
-    {
-      date,
-      sourceId: event.source_id,
-      sourceTypeKey: "website",
-      metricKey: "events_by_path",
-      metricValue: 1,
-      unit: "count",
-      dimensions: { path: parsed.path },
-    },
-    {
-      date,
-      sourceId: event.source_id,
-      sourceTypeKey: "website",
-      metricKey: "events_by_referrer",
-      metricValue: 1,
-      unit: "count",
-      dimensions: { referrer: parsed.referrer || "direct" },
-    },
-  ]);
-  return event;
 }

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CheckCircle2, Clipboard, DatabaseZap, KeyRound, LinkIcon, Play, Radar, ShieldAlert } from "lucide-react";
+import { CheckCircle2, Clipboard, DatabaseZap, KeyRound, LinkIcon, Play, Radar, ShieldAlert, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/presentation/components/ui/badge";
 import { Button, LinkButton } from "@/presentation/components/ui/button";
@@ -21,31 +21,70 @@ interface Detection {
 }
 
 const examples = [
+  "https://moonarqstudio.com",
   "https://xxxxx.supabase.co",
-  "https://example.com",
   "https://vercel.com/team/project",
   "https://your-store.myshopify.com",
-  "https://www.tiktok.com/@account",
-  "https://www.instagram.com/account",
 ];
 
 type SavedSource = {
   id: string;
   display_name: string;
   source_type_key: string;
+  webhook_url?: string | null;
 };
 
-function WebsiteTrackingSetup({ sourceId }: { sourceId: string }) {
+function WebsiteSourceSetup({ source }: { source: SavedSource }) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:3100";
+  const drainEndpoint = `${origin}${source.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${source.id}`}`;
+
+  if (source.source_type_key === "vercel_web_analytics_drain") {
+    return (
+      <div className="grid gap-3 rounded-lg border border-cyan-300/20 bg-cyan-300/8 p-4">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Vercel Web Analytics Drain setup</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            MoonArq Website / Vercel is configured for the official Vercel Drain path. Add this endpoint in the existing MoonArq Vercel project and optionally save the drain signature secret here.
+          </p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+          <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Drain endpoint</p>
+          <p className="mt-2 break-all font-mono text-xs text-cyan-50">{drainEndpoint}</p>
+        </div>
+        <div className="grid gap-2 text-sm text-slate-300">
+          <p>1. In Vercel, add a Web Analytics Drain with JSON or NDJSON delivery.</p>
+          <p>2. Paste the endpoint above.</p>
+          <p>3. Optional but recommended: set a Signature Verification Secret in Vercel and save the same value below.</p>
+          <p>4. Keep the Website Tracker fallback disabled if the drain is the live primary mode.</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <LinkButton href={`/dashboard/sources/${source.id}`} variant="primary">
+            <Webhook className="h-4 w-4" />
+            Open Source Detail
+          </LinkButton>
+          <LinkButton href="/dashboard/events" variant="secondary">
+            Tracker fallback page
+          </LinkButton>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-3 rounded-lg border border-cyan-300/20 bg-cyan-300/8 p-4">
       <div>
-        <h3 className="text-sm font-semibold text-white">Website tracking setup</h3>
+        <h3 className="text-sm font-semibold text-white">Website Tracker fallback / helper</h3>
         <p className="mt-2 text-sm leading-6 text-slate-300">
-          Website sources do not need an API secret for the MVP. Install the tracking snippet to send page views and custom events into MoonArq.
+          This path keeps MoonArq website tracking available when Vercel Drains are unavailable or when you want the lighter first-party helper path.
         </p>
       </div>
+      <div className="grid gap-2 text-sm text-slate-300">
+        <p>1. Open the source detail page to copy the exact tracker snippet.</p>
+        <p>2. Install it on moonarqstudio.com.</p>
+        <p>3. Use window.moonarqTrack(...) for custom events if you need product or marketing signals beyond page views.</p>
+      </div>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <LinkButton href={`/dashboard/sources/${sourceId}`} variant="primary">
+        <LinkButton href={`/dashboard/sources/${source.id}`} variant="primary">
           <Clipboard className="h-4 w-4" />
           Open Source Snippet
         </LinkButton>
@@ -62,11 +101,13 @@ export function AddSourceWizard() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [selected, setSelected] = useState<Detection | null>(null);
   const [syncMode, setSyncMode] = useState("hybrid");
+  const [websiteMode, setWebsiteMode] = useState<"vercel_web_analytics_drain" | "website">("vercel_web_analytics_drain");
   const [saving, setSaving] = useState(false);
   const [savedSource, setSavedSource] = useState<SavedSource | null>(null);
   const [syncRunId, setSyncRunId] = useState<string | null>(null);
 
   const step = savedSource ? 4 : selected ? 3 : detections.length > 0 ? 2 : 1;
+  const effectiveSourceTypeKey = selected?.sourceTypeKey === "website" ? websiteMode : selected?.sourceTypeKey ?? null;
 
   async function detect() {
     const response = await fetch("/api/sources/detect", {
@@ -80,25 +121,36 @@ export function AddSourceWizard() {
   }
 
   async function save() {
-    if (!selected) return;
+    if (!selected || !effectiveSourceTypeKey) return;
     setSaving(true);
     try {
+      const isMoonArqWebsite = selected.sourceTypeKey === "website";
       const response = await fetch("/api/sources", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          source_type_key: selected.sourceTypeKey,
-          display_name: selected.accountName ? `${selected.displayName}: ${selected.accountName}` : selected.displayName,
+          source_type_key: effectiveSourceTypeKey,
+          display_name: isMoonArqWebsite
+            ? "MoonArq Website / Vercel"
+            : selected.accountName
+              ? `${selected.displayName}: ${selected.accountName}`
+              : selected.displayName,
           input_url: inputUrl,
           normalized_url: selected.normalizedUrl,
           account_name: selected.accountName,
           sync_mode: syncMode,
+          metadata: isMoonArqWebsite ? { monitored_source: "moonarq_website", website_mode: effectiveSourceTypeKey } : undefined,
         }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Save failed");
       setSavedSource(body.source);
-      toast.success("Source saved", { description: "Demo mode is active until credentials/setup are added." });
+      toast.success("Source saved", {
+        description:
+          effectiveSourceTypeKey === "vercel_web_analytics_drain"
+            ? "MoonArq Website / Vercel is ready for the official drain endpoint setup."
+            : "MoonArq source saved. Finish credentials or tracking setup next.",
+      });
     } catch (error) {
       toast.error("Could not save source", { description: error instanceof Error ? error.message : "Unknown error" });
     } finally {
@@ -132,13 +184,13 @@ export function AddSourceWizard() {
           <motion.div key={step} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
             <div className="space-y-5">
               <div>
-                <label htmlFor="source-input" className="text-sm font-medium text-slate-200">Paste a source link or identifier</label>
+                <label htmlFor="source-input" className="text-sm font-medium text-slate-200">Paste a MoonArq source link or identifier</label>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                   <input
                     id="source-input"
                     value={inputUrl}
                     onChange={(event) => setInputUrl(event.target.value)}
-                    placeholder="https://xxxxx.supabase.co"
+                    placeholder="https://moonarqstudio.com"
                     className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-slate-600 focus:ring-2"
                   />
                   <Button onClick={detect} variant="primary">
@@ -184,7 +236,7 @@ export function AddSourceWizard() {
                 </div>
               ) : inputUrl ? (
                 <div className="rounded-lg border border-amber-300/20 bg-amber-400/10 p-4 text-sm text-amber-100">
-                  Unknown platform? You can save it later as a custom API or custom CSV connector when mapping support is added.
+                  Unknown platform? Save it later as a future custom MoonArq source when that connector is ready.
                 </div>
               ) : null}
 
@@ -196,9 +248,40 @@ export function AddSourceWizard() {
                       Reality check
                     </div>
                     <p className="mt-2 text-sm leading-6 text-slate-300">
-                      Links identify the source. Private metrics usually require an API key, OAuth token, webhook secret, service role key, or tracking snippet.
+                      Links identify the monitored source. Private metrics still require the right official ingestion path, such as a Vercel Drain, a website tracker, or a server-side Supabase credential.
                     </p>
                   </div>
+
+                  {selected.sourceTypeKey === "website" ? (
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-slate-200">MoonArq website data mode</p>
+                      <div className="grid gap-2 lg:grid-cols-2">
+                        <button
+                          onClick={() => setWebsiteMode("vercel_web_analytics_drain")}
+                          className={`rounded-lg border px-3 py-3 text-left transition ${
+                            websiteMode === "vercel_web_analytics_drain"
+                              ? "border-cyan-200/50 bg-cyan-300/10 text-cyan-50"
+                              : "border-white/10 bg-white/[0.03] text-slate-300"
+                          }`}
+                        >
+                          <div className="font-medium">Vercel Web Analytics Drain</div>
+                          <div className="mt-1 text-xs leading-5 text-slate-400">Use the official Vercel Analytics Drain now that the MoonArq Vercel team is on Pro.</div>
+                        </button>
+                        <button
+                          onClick={() => setWebsiteMode("website")}
+                          className={`rounded-lg border px-3 py-3 text-left transition ${
+                            websiteMode === "website"
+                              ? "border-cyan-200/50 bg-cyan-300/10 text-cyan-50"
+                              : "border-white/10 bg-white/[0.03] text-slate-300"
+                          }`}
+                        >
+                          <div className="font-medium">Website Tracker fallback</div>
+                          <div className="mt-1 text-xs leading-5 text-slate-400">Keep the first-party snippet/helper path available for fallback and custom event support.</div>
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div>
                     <p className="mb-2 text-sm font-medium text-slate-200">Sync mode</p>
                     <div className="grid gap-2 sm:grid-cols-4">
@@ -243,18 +326,18 @@ export function AddSourceWizard() {
           </h2>
           <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
             {savedSource ? (
-              savedSource.source_type_key === "website" ? (
-                <WebsiteTrackingSetup sourceId={savedSource.id} />
+              savedSource.source_type_key === "website" || savedSource.source_type_key === "vercel_web_analytics_drain" ? (
+                <WebsiteSourceSetup source={savedSource} />
               ) : (
                 <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" />
               )
             ) : (
               (selected?.requiredSetup ?? [
-              "Paste a source link to see setup requirements.",
-              "Credentials will be encrypted server-side when real database persistence is configured.",
+                "Paste a source link to see setup requirements.",
+                "The monitored MoonArq source stays separate from the Data Hub app's own runtime/storage.",
               ]).map((item) => (
                 <p key={item} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                  {item.length > 500 ? "SQL setup snippet available in Supabase connector docs and source setup instructions." : item}
+                  {item.length > 500 ? "Extended setup instructions are available in the source detail view after saving." : item}
                 </p>
               ))
             )}
@@ -269,10 +352,11 @@ export function AddSourceWizard() {
             {metrics.length > 0 ? metrics.map((metric) => <Badge key={metric} tone="indigo">{metric}</Badge>) : <Badge>No source selected</Badge>}
           </div>
           {selected?.sourceTypeKey === "website" ? (
-            <div className="mt-4">
+            <div className="mt-4 flex flex-col gap-2">
+              <Badge tone="cyan">{websiteMode === "vercel_web_analytics_drain" ? "Official Vercel Drain mode" : "Tracker fallback mode"}</Badge>
               <LinkButton href="/dashboard/events" variant="primary">
                 <Clipboard className="h-4 w-4" />
-                Get tracking snippet
+                Open website setup
               </LinkButton>
             </div>
           ) : null}
