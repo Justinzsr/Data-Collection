@@ -1,4 +1,4 @@
-import { Activity } from "lucide-react";
+import { Activity, ShieldAlert } from "lucide-react";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { getMetricTimeseries } from "@/aggregation/services/timeseries-service";
 import { listWebEvents } from "@/storage/repositories/events-repository";
@@ -27,6 +27,33 @@ export default async function EventsPage() {
         description="First-party tracking works on Vercel or any website. It does not use private Vercel Analytics APIs."
       />
       <MetricTrendChart data={trend} title="Website page views" />
+      <div className="grid gap-5 lg:grid-cols-3">
+        <GlassPanel className="p-4 sm:p-5">
+          <h2 className="mb-3 text-base font-semibold text-white">Setup steps</h2>
+          <ol className="grid gap-2 text-sm leading-6 text-slate-300">
+            <li>1. Save or open a Website / Vercel Site source.</li>
+            <li>2. Copy the JavaScript snippet or React helper into that website.</li>
+            <li>3. Use <span className="text-cyan-100">window.moonarqTrack</span> for custom events.</li>
+          </ol>
+        </GlassPanel>
+        <GlassPanel className="p-4 sm:p-5">
+          <h2 className="mb-3 text-base font-semibold text-white">What it collects</h2>
+          <div className="flex flex-wrap gap-2">
+            {["page_view", "anonymous_id", "session_id", "path", "url", "referrer", "custom properties"].map((item) => (
+              <Badge key={item} tone="cyan">{item}</Badge>
+            ))}
+          </div>
+        </GlassPanel>
+        <GlassPanel className="p-4 sm:p-5">
+          <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-white">
+            <ShieldAlert className="h-4 w-4 text-amber-200" />
+            Allowed origins
+          </h2>
+          <p className="text-sm leading-6 text-slate-300">
+            Configure allowed origins on the Website source before production. Unknown origins should not be able to send events into your private data base.
+          </p>
+        </GlassPanel>
+      </div>
       <div className="grid gap-5 xl:grid-cols-2">
         <SnippetCard title="Lightweight JavaScript snippet" description="Auto page_view plus window.moonarqTrack(eventName, properties)." code={snippet} />
         <SnippetCard title="React / Next.js helper" description="usePageViewTracking() and trackEvent(name, properties)." code={helper} />

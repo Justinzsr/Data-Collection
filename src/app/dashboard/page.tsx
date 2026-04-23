@@ -1,101 +1,147 @@
-import { Activity, Plus, RadioTower } from "lucide-react";
-import { getDashboardSummary } from "@/aggregation/services/summary-service";
-import { getMetricTimeseries, getSourceComparison } from "@/aggregation/services/timeseries-service";
-import { Badge, statusTone } from "@/presentation/components/ui/badge";
+import { ArrowRight, ShoppingBag, Sparkles, Video } from "lucide-react";
+import type { DateRangeKey } from "@/aggregation/services/summary-service";
+import { getGlobalPlatformHealth, getPlatformModules } from "@/aggregation/services/platform-modules-service";
+import { Badge } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
-import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
-import { KpiCard } from "@/presentation/dashboard/kpi-card";
-import { RunAllDueButton } from "@/presentation/dashboard/sync-action-button";
-import { MetricTrendChart, SourceComparisonChart } from "@/presentation/charts/metric-trend-chart";
+import { GlassPanel } from "@/presentation/components/ui/panel";
+import { PlatformTrendChart } from "@/presentation/charts/platform-trend-chart";
+import { CommandCenterHeader } from "@/presentation/dashboard/command-center-header";
+import { GlobalHealthStrip } from "@/presentation/dashboard/global-health-strip";
+import { PlatformModuleGrid } from "@/presentation/dashboard/platform-module-grid";
 
-export default async function DashboardPage() {
-  const [summary, trend, comparison] = await Promise.all([
-    getDashboardSummary("30d"),
-    getMetricTimeseries({ metricKey: "page_views", range: "30d" }),
-    getSourceComparison(),
-  ]);
+function parseRange(value: string | undefined): DateRangeKey {
+  if (value === "today" || value === "7d" || value === "30d") return value;
+  return "30d";
+}
+
+function moduleSeries(modules: Awaited<ReturnType<typeof getPlatformModules>>) {
+  const preferred = [
+    { key: "website", color: "#38bdf8" },
+    { key: "supabase", color: "#2dd4bf" },
+    { key: "tiktok", color: "#fb7185" },
+    { key: "instagram", color: "#818cf8" },
+  ] as const;
+  return preferred
+    .map((item) => {
+      const platformModule = modules.find((candidate) => candidate.sourceTypeKey === item.key);
+      if (!platformModule) return null;
+      return { key: platformModule.sourceTypeKey, label: platformModule.platformLabel, color: item.color, data: platformModule.sparkline };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+function compactMetric(value: number | string, unit: string) {
+  if (typeof value === "string") return value;
+  if (unit === "percent") return `${value.toFixed(1)}%`;
+  if (unit === "usd") return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+export default async function DashboardPage({ searchParams }: { searchParams?: Promise<{ range?: string }> }) {
+  const params = await searchParams;
+  const range = parseRange(params?.range);
+  const [modules, health] = await Promise.all([getPlatformModules(range), getGlobalPlatformHealth(range)]);
+  const socialModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "tiktok" || platformModule.sourceTypeKey === "instagram");
+  const commerceModule = modules.find((platformModule) => platformModule.sourceTypeKey === "shopify");
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-6">
-      <SectionHeader
-        eyebrow="Executive overview"
-        title="MoonArq Data Collection Base"
-        description="A private internal data hub for source onboarding, official API/webhook collection, idempotent storage, metrics aggregation, and responsive visualization."
-        action={
-          <>
-            <RunAllDueButton />
-            <LinkButton href="/dashboard/sources/new" variant="primary">
-              <Plus className="h-4 w-4" />
-              Add Source
-            </LinkButton>
-          </>
-        }
-      />
-
-      <div className="flex flex-wrap gap-2">
-        {["Today", "7 days", "30 days", "Custom"].map((range) => (
-          <button
-            key={range}
-            className={`rounded-lg border px-3 py-2 text-sm ${range === "30 days" ? "border-cyan-200/40 bg-cyan-300/12 text-cyan-50" : "border-white/10 bg-white/[0.03] text-slate-300"}`}
-          >
-            {range}
-          </button>
-        ))}
-        <select className="min-h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-200">
-          <option>All sources</option>
-          {summary.sources.map((source) => (
-            <option key={source.id}>{source.display_name}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {summary.kpis.map((kpi) => (
-          <KpiCard key={kpi.key} label={kpi.label} value={kpi.value} source={kpi.source} demo={kpi.demo} />
-        ))}
-      </div>
+    <div className="mx-auto grid max-w-[1600px] gap-6">
+      <CommandCenterHeader modules={modules} range={range} />
+      <GlobalHealthStrip health={health} />
+      <PlatformModuleGrid modules={modules} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.75fr)]">
-        <MetricTrendChart data={trend} title="Page views trend" />
-        <SourceComparisonChart data={comparison} />
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.75fr)]">
+        <PlatformTrendChart series={moduleSeries(modules)} />
         <GlassPanel className="p-4 sm:p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <RadioTower className="h-4 w-4 text-cyan-200" />
-            <h2 className="text-base font-semibold text-white">Sync health strip</h2>
+          <div className="mb-5 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-cyan-200" />
+            <h2 className="text-base font-semibold text-white">Command focus</h2>
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {summary.sources
-              .filter((source) => source.status !== "disabled")
-              .map((source) => (
-                <div key={source.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium text-white">{source.display_name}</p>
-                    <Badge tone={statusTone(source.status)}>{source.status}</Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500">Last success: {source.last_success_at ?? "never"} · Next: {source.next_sync_at ?? "manual"}</p>
+          <div className="grid gap-3">
+            {modules.slice(0, 4).map((platformModule) => (
+              <div key={platformModule.sourceId ?? platformModule.sourceTypeKey} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate text-sm font-medium text-white">{platformModule.platformLabel}</p>
+                  <Badge tone={platformModule.status === "healthy" ? "green" : platformModule.status === "error" ? "rose" : platformModule.status === "needs_credentials" ? "amber" : "cyan"}>
+                    {platformModule.status}
+                  </Badge>
                 </div>
-              ))}
-          </div>
-        </GlassPanel>
-
-        <GlassPanel className="p-4 sm:p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Activity className="h-4 w-4 text-teal-200" />
-            <h2 className="text-base font-semibold text-white">Future sources</h2>
-          </div>
-          <p className="text-sm leading-6 text-slate-300">
-            Shopify, TikTok, Instagram, Vercel project metadata, custom APIs, and custom CSV are scaffolded but intentionally not dominant. Commerce KPIs stay off the main top row until Shopify is connected.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {["Shopify", "TikTok", "Instagram", "Vercel Project", "Custom API", "Custom CSV"].map((item) => (
-              <Badge key={item} tone="slate">{item}</Badge>
+                <p className="mt-2 text-xs text-slate-500">{platformModule.primaryMetric.label}</p>
+                <p className="text-lg font-semibold text-slate-100">{compactMetric(platformModule.primaryMetric.value, platformModule.primaryMetric.unit)}</p>
+              </div>
             ))}
           </div>
         </GlassPanel>
       </div>
+
+      <section className="grid gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Social accounts</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">Content channels are scaffolded, not pretending to be live</h2>
+          </div>
+          <LinkButton href="/dashboard/content" variant="secondary">
+            Content dashboard
+            <ArrowRight className="h-4 w-4" />
+          </LinkButton>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          {socialModules.map((platformModule) => (
+            <GlassPanel key={platformModule.sourceTypeKey} className="p-4 sm:p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06]">
+                    <Video className="h-5 w-5 text-cyan-100" />
+                  </span>
+                  <div>
+                    <h3 className="font-semibold text-white">{platformModule.platformLabel}</h3>
+                    <p className="text-xs text-slate-500">{platformModule.displayName}</p>
+                  </div>
+                </div>
+                <Badge tone="cyan">{platformModule.setupState.label}</Badge>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-white/10 bg-black/20 p-3 sm:col-span-1">
+                  <p className="text-xs uppercase tracking-[0.12em] text-slate-500">{platformModule.primaryMetric.label}</p>
+                  <p className="mt-1 text-xl font-semibold text-white">{compactMetric(platformModule.primaryMetric.value, platformModule.primaryMetric.unit)}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm leading-6 text-slate-300 sm:col-span-2">
+                  {platformModule.setupState.message}
+                </div>
+              </div>
+            </GlassPanel>
+          ))}
+        </div>
+      </section>
+
+      {commerceModule ? (
+        <section className="grid gap-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200/80">Future commerce</p>
+              <h2 className="mt-1 text-xl font-semibold text-white">Shopify is present, but it does not dominate the MVP</h2>
+            </div>
+            <LinkButton href="/dashboard/commerce" variant="secondary">
+              Commerce setup
+              <ArrowRight className="h-4 w-4" />
+            </LinkButton>
+          </div>
+          <GlassPanel className="p-4 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-amber-200/20 bg-amber-300/10">
+                  <ShoppingBag className="h-5 w-5 text-amber-100" />
+                </span>
+                <div>
+                  <h3 className="font-semibold text-white">{commerceModule.platformLabel}</h3>
+                  <p className="text-sm leading-6 text-slate-400">{commerceModule.setupState.message}</p>
+                </div>
+              </div>
+              <Badge tone="slate">future / disabled</Badge>
+            </div>
+          </GlassPanel>
+        </section>
+      ) : null}
     </div>
   );
 }

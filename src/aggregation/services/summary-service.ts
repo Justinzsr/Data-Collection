@@ -1,11 +1,12 @@
 import { aggregateMetrics, listMetrics } from "@/storage/repositories/metrics-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { listSyncRuns } from "@/storage/repositories/sync-runs-repository";
+import { getDemoNow } from "@/storage/seed/demo-data";
 
 export type DateRangeKey = "today" | "7d" | "30d";
 
 export function getDateRange(range: DateRangeKey = "30d") {
-  const end = new Date("2026-04-22T16:00:00.000Z");
+  const end = getDemoNow();
   const start = new Date(end);
   if (range === "today") start.setUTCDate(end.getUTCDate());
   if (range === "7d") start.setUTCDate(end.getUTCDate() - 6);

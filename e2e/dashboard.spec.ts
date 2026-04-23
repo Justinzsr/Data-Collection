@@ -4,8 +4,9 @@ test("dev bypass dashboard loads demo data", async ({ page }) => {
   await page.goto("/login");
   await expect(page.getByText("Enter with dev bypass")).toBeVisible();
   await page.getByText("Enter with dev bypass").click();
-  await expect(page.getByRole("heading", { name: "MoonArq Data Collection Base" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Page views trend" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "MoonArq Data Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected platform command grid" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cross-platform trend" })).toBeVisible();
   await expect(page.getByText("Run All Due Sources")).toBeVisible();
 });
 

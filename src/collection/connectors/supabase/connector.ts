@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import type { ConnectorDefinition, RawPayload } from "@/collection/connectors/types";
-import type { MetricDefinition, Source } from "@/storage/db/schema";
+import type { JsonRecord, MetricDefinition, Source } from "@/storage/db/schema";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 
 function normalizeSupabaseUrl(inputUrl: string) {
@@ -12,6 +12,67 @@ function normalizeSupabaseUrl(inputUrl: string) {
   } catch {
     return null;
   }
+}
+
+type SupabaseUserLike = {
+  id?: unknown;
+  email?: unknown;
+  created_at?: unknown;
+  confirmed_at?: unknown;
+  email_confirmed_at?: unknown;
+  provider?: unknown;
+  app_metadata?: unknown;
+  raw_app_meta_data?: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function dateKey(value: unknown) {
+  const fallback = new Date().toISOString().slice(0, 10);
+  if (typeof value !== "string" || !value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toISOString().slice(0, 10);
+}
+
+function providerFor(user: SupabaseUserLike) {
+  if (typeof user.provider === "string" && user.provider) return user.provider;
+  if (isRecord(user.app_metadata) && typeof user.app_metadata.provider === "string") return user.app_metadata.provider;
+  if (isRecord(user.raw_app_meta_data) && typeof user.raw_app_meta_data.provider === "string") return user.raw_app_meta_data.provider;
+  return "email";
+}
+
+function isConfirmed(user: SupabaseUserLike) {
+  return Boolean(user.confirmed_at || user.email_confirmed_at);
+}
+
+function extractProfileRecord(payload: JsonRecord): SupabaseUserLike | null {
+  const record = payload.record ?? payload.new ?? payload.profile;
+  if (isRecord(record)) return record;
+  const data = payload.data;
+  if (isRecord(data)) {
+    const nestedRecord = data.record ?? data.new ?? data.profile;
+    if (isRecord(nestedRecord)) return nestedRecord;
+  }
+  return null;
+}
+
+function extractUsers(rawPayloads: RawPayload[]): SupabaseUserLike[] {
+  const extracted: SupabaseUserLike[] = [];
+  for (const payload of rawPayloads) {
+    const payloadUsers = payload.payload.users;
+    if (Array.isArray(payloadUsers)) {
+      for (const user of payloadUsers) {
+        if (isRecord(user)) extracted.push(user);
+      }
+      continue;
+    }
+    const record = extractProfileRecord(payload.payload);
+    if (record) extracted.push(record);
+  }
+  return extracted;
 }
 
 export const supabaseSetupSql = `-- MoonArq public.profiles setup
@@ -144,11 +205,18 @@ export const supabaseConnector: ConnectorDefinition = {
     const serviceRole = ctx.credentials.service_role_key;
     if (projectUrl && serviceRole) {
       const client = createClient(projectUrl, serviceRole, { auth: { persistSession: false } });
-      const { data, error } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
-      if (error) throw error;
+      const perPage = 1000;
+      const users = [];
+      for (let page = 1; page <= 100; page += 1) {
+        const { data, error } = await client.auth.admin.listUsers({ page, perPage });
+        if (error) throw error;
+        users.push(...data.users);
+        if (data.users.length < perPage) break;
+      }
       const payload = {
         mode: "admin_list_users",
-        users: data.users.map((user) => ({
+        pagination: { perPage, pagesFetched: Math.ceil(users.length / perPage), complete: users.length % perPage !== 0 || users.length === 0 },
+        users: users.map((user) => ({
           id: user.id,
           email: user.email ?? null,
           created_at: user.created_at,
@@ -167,7 +235,7 @@ export const supabaseConnector: ConnectorDefinition = {
           },
         ],
         cursorAfter: { fetchedAt, mode: "admin" },
-        recordsFetched: data.users.length,
+        recordsFetched: users.length,
         message: "Fetched Supabase Auth users with server-side service role.",
       };
     }
@@ -195,59 +263,65 @@ export const supabaseConnector: ConnectorDefinition = {
     };
   },
   async normalize(rawPayloads: RawPayload[], source: Source) {
-    const today = new Date().toISOString().slice(0, 10);
-    const users = rawPayloads.flatMap((payload) => {
-      const value = payload.payload.users;
-      return Array.isArray(value) ? value : [];
-    });
-    const confirmed = users.filter((user) => typeof user === "object" && user && "confirmed_at" in user).length;
-    const providers = users.reduce<Record<string, number>>((acc, user) => {
-      const provider =
-        typeof user === "object" && user && "provider" in user && typeof user.provider === "string"
-          ? user.provider
-          : "unknown";
-      acc[provider] = (acc[provider] ?? 0) + 1;
-      return acc;
-    }, {});
+    const users = extractUsers(rawPayloads);
+    const demo = source.status === "demo";
+    const byDate = new Map<string, SupabaseUserLike[]>();
+    for (const user of users) {
+      const date = dateKey(user.created_at);
+      byDate.set(date, [...(byDate.get(date) ?? []), user]);
+    }
+    const dates = Array.from(byDate.keys()).sort();
+    let cumulativeUsers = 0;
+    let cumulativeConfirmed = 0;
     return {
-      metrics: [
-        {
-          date: today,
-          sourceId: source.id,
-          sourceTypeKey: "supabase",
-          metricKey: "signups",
-          metricValue: users.length,
-          unit: "count",
-          dimensions: { demo: source.status === "demo" },
-        },
-        {
-          date: today,
-          sourceId: source.id,
-          sourceTypeKey: "supabase",
-          metricKey: "users_total",
-          metricValue: users.length,
-          unit: "count",
-          dimensions: { demo: source.status === "demo" },
-        },
-        {
-          date: today,
-          sourceId: source.id,
-          sourceTypeKey: "supabase",
-          metricKey: "confirmed_users",
-          metricValue: confirmed,
-          unit: "count",
-          dimensions: { demo: source.status === "demo" },
-        },
-        ...Object.entries(providers).map(([provider, count]) => ({
-          date: today,
-          sourceId: source.id,
-          sourceTypeKey: "supabase" as const,
-          metricKey: "signups_by_provider",
-          metricValue: count,
-          unit: "count",
-          dimensions: { provider, demo: source.status === "demo" },
-        })),
-      ],
+      metrics: dates.flatMap((date) => {
+        const usersForDate = byDate.get(date) ?? [];
+        cumulativeUsers += usersForDate.length;
+        cumulativeConfirmed += usersForDate.filter(isConfirmed).length;
+        const providers = usersForDate.reduce<Record<string, number>>((acc, user) => {
+          const provider = providerFor(user);
+          acc[provider] = (acc[provider] ?? 0) + 1;
+          return acc;
+        }, {});
+        return [
+          {
+            date,
+            sourceId: source.id,
+            sourceTypeKey: "supabase" as const,
+            metricKey: "signups",
+            metricValue: usersForDate.length,
+            unit: "count",
+            dimensions: { rollup: "daily", demo },
+          },
+          {
+            date,
+            sourceId: source.id,
+            sourceTypeKey: "supabase" as const,
+            metricKey: "users_total",
+            metricValue: cumulativeUsers,
+            unit: "count",
+            dimensions: { rollup: "cumulative", demo },
+          },
+          {
+            date,
+            sourceId: source.id,
+            sourceTypeKey: "supabase" as const,
+            metricKey: "confirmed_users",
+            metricValue: cumulativeConfirmed,
+            unit: "count",
+            dimensions: { rollup: "cumulative", demo },
+          },
+          ...Object.entries(providers).map(([provider, count]) => ({
+            date,
+            sourceId: source.id,
+            sourceTypeKey: "supabase" as const,
+            metricKey: "signups_by_provider",
+            metricValue: count,
+            unit: "count",
+            dimensions: { provider, demo },
+          })),
+        ];
+      }),
     };
   },
   getMetricDefinitions(): MetricDefinition[] {

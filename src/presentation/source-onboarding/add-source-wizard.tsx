@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/presentation/components/ui/badge";
 import { Button, LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel } from "@/presentation/components/ui/panel";
+import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
 
 interface Detection {
   sourceTypeKey: string;
@@ -103,9 +104,10 @@ export function AddSourceWizard() {
           <motion.div key={step} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
             <div className="space-y-5">
               <div>
-                <label className="text-sm font-medium text-slate-200">Paste a source link or identifier</label>
+                <label htmlFor="source-input" className="text-sm font-medium text-slate-200">Paste a source link or identifier</label>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                   <input
+                    id="source-input"
                     value={inputUrl}
                     onChange={(event) => setInputUrl(event.target.value)}
                     placeholder="https://xxxxx.supabase.co"
@@ -212,14 +214,18 @@ export function AddSourceWizard() {
             Credentials and setup
           </h2>
           <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-            {(selected?.requiredSetup ?? [
+            {savedSource ? (
+              <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" />
+            ) : (
+              (selected?.requiredSetup ?? [
               "Paste a source link to see setup requirements.",
               "Credentials will be encrypted server-side when real database persistence is configured.",
-            ]).map((item) => (
-              <p key={item} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                {item.length > 500 ? "SQL setup snippet available in Supabase connector docs and source setup instructions." : item}
-              </p>
-            ))}
+              ]).map((item) => (
+                <p key={item} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                  {item.length > 500 ? "SQL setup snippet available in Supabase connector docs and source setup instructions." : item}
+                </p>
+              ))
+            )}
           </div>
         </GlassPanel>
         <GlassPanel className="p-4 sm:p-5">

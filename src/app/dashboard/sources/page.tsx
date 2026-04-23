@@ -1,13 +1,16 @@
 import { Plus } from "lucide-react";
+import { getPlatformModules } from "@/aggregation/services/platform-modules-service";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { listCredentialHints } from "@/storage/repositories/credentials-repository";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
+import { PlatformModuleGrid } from "@/presentation/dashboard/platform-module-grid";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
+import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
 
 export default async function SourcesPage() {
-  const sources = await listSources();
+  const [sources, modules] = await Promise.all([listSources(), getPlatformModules("30d")]);
   const withCredentials = await Promise.all(
     sources.map(async (source) => ({ source, credentials: await listCredentialHints(source.id) })),
   );
@@ -24,6 +27,7 @@ export default async function SourcesPage() {
           </LinkButton>
         }
       />
+      <PlatformModuleGrid modules={modules} />
       <div className="hidden overflow-hidden rounded-lg border border-white/10 lg:block">
         <table className="w-full border-collapse text-left text-sm">
           <thead className="bg-white/[0.04] text-xs uppercase tracking-[0.14em] text-slate-500">
@@ -47,7 +51,13 @@ export default async function SourcesPage() {
                 <td className="px-4 py-4 text-slate-400">{source.last_cron_sync_at ?? "never"}</td>
                 <td className="px-4 py-4 text-slate-400">{source.last_webhook_sync_at ?? "never"}</td>
                 <td className="px-4 py-4 text-slate-400">{source.next_sync_at ?? "manual"}</td>
-                <td className="px-4 py-4"><SyncActionButton sourceId={source.id} compact /></td>
+                <td className="px-4 py-4">
+                  <div className="flex flex-wrap gap-2">
+                    <SyncActionButton sourceId={source.id} compact />
+                    <TestConnectionButton sourceId={source.id} compact />
+                    <LinkButton href={`/dashboard/sources/${source.id}`} variant="secondary" className="px-3">Edit Credentials</LinkButton>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -71,7 +81,11 @@ export default async function SourcesPage() {
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <SyncActionButton sourceId={source.id} compact />
-              <LinkButton href="/dashboard/events" variant="secondary">Setup Webhook</LinkButton>
+              <TestConnectionButton sourceId={source.id} compact />
+              <LinkButton href={`/dashboard/sources/${source.id}`} variant="secondary">Edit Credentials</LinkButton>
+              <LinkButton href={source.source_type_key === "website" ? "/dashboard/events" : `/dashboard/sources/${source.id}`} variant="secondary">
+                {source.source_type_key === "website" ? "Tracking Snippet" : "Setup Webhook"}
+              </LinkButton>
             </div>
           </GlassPanel>
         ))}

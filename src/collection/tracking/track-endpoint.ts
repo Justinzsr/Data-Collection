@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { JsonRecord, Source } from "@/storage/db/schema";
-import { upsertMetrics } from "@/storage/repositories/metrics-repository";
+import { incrementMetrics } from "@/storage/repositories/metrics-repository";
 import { storeWebEvent } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 
@@ -78,15 +78,34 @@ export async function ingestTrackEvent(input: unknown, meta: { origin?: string |
     occurred_at: occurredAt,
   });
   const date = occurredAt.slice(0, 10);
-  await upsertMetrics([
+  const primaryMetric = parsed.event_name === "page_view" ? "page_views" : "custom_events";
+  await incrementMetrics([
     {
       date,
       sourceId: event.source_id,
       sourceTypeKey: "website",
-      metricKey: parsed.event_name === "page_view" ? "page_views" : "custom_events",
+      metricKey: primaryMetric,
       metricValue: 1,
       unit: "count",
-      dimensions: { event_id: event.id, demo: !process.env.DATABASE_URL },
+      dimensions: { rollup: "daily" },
+    },
+    {
+      date,
+      sourceId: event.source_id,
+      sourceTypeKey: "website",
+      metricKey: "events_by_path",
+      metricValue: 1,
+      unit: "count",
+      dimensions: { path: parsed.path },
+    },
+    {
+      date,
+      sourceId: event.source_id,
+      sourceTypeKey: "website",
+      metricKey: "events_by_referrer",
+      metricValue: 1,
+      unit: "count",
+      dimensions: { referrer: parsed.referrer || "direct" },
     },
   ]);
   return event;

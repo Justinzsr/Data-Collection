@@ -15,6 +15,7 @@ export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upse
       (row) =>
         row.date === metric.date &&
         row.source_id === metric.sourceId &&
+        row.source_type_key === metric.sourceTypeKey &&
         row.metric_key === metric.metricKey &&
         row.dimensions_hash === hash,
     );
@@ -39,6 +40,51 @@ export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upse
       });
     }
     upserted += 1;
+  }
+  return { upserted };
+}
+
+export async function incrementMetric(metric: NormalizedMetric): Promise<{ upserted: number; value: number }> {
+  const store = getDemoStore();
+  const now = new Date().toISOString();
+  const dimensions = metric.dimensions ?? {};
+  const hash = dimensionsHash(dimensions);
+  const existing = store.metricsDaily.find(
+    (row) =>
+      row.date === metric.date &&
+      row.source_id === metric.sourceId &&
+      row.source_type_key === metric.sourceTypeKey &&
+      row.metric_key === metric.metricKey &&
+      row.dimensions_hash === hash,
+  );
+  if (existing) {
+    existing.metric_value += metric.metricValue;
+    existing.unit = metric.unit;
+    existing.dimensions = dimensions;
+    existing.updated_at = now;
+    return { upserted: 1, value: existing.metric_value };
+  }
+  store.metricsDaily.push({
+    id: randomUUID(),
+    date: metric.date,
+    source_id: metric.sourceId,
+    source_type_key: metric.sourceTypeKey,
+    metric_key: metric.metricKey,
+    metric_value: metric.metricValue,
+    unit: metric.unit,
+    dimensions,
+    dimensions_hash: hash,
+    created_at: now,
+    updated_at: now,
+  });
+  return { upserted: 1, value: metric.metricValue };
+}
+
+export async function incrementMetrics(metrics: NormalizedMetric[]): Promise<{ upserted: number }> {
+  let upserted = 0;
+  for (const metric of metrics) {
+    const result = await incrementMetric(metric);
+    upserted += result.upserted;
   }
   return { upserted };
 }

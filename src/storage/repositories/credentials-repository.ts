@@ -37,6 +37,13 @@ export async function listCredentialHints(sourceId: string) {
     }));
 }
 
+export async function deleteCredential(sourceId: string, fieldKey: string): Promise<boolean> {
+  const store = getDemoStore();
+  const before = store.credentials.length;
+  store.credentials = store.credentials.filter((credential) => credential.source_id !== sourceId || credential.field_key !== fieldKey);
+  return store.credentials.length !== before;
+}
+
 export async function getDecryptedCredentialMap(sourceId: string): Promise<Record<string, string>> {
   const entries = getDemoStore().credentials.filter((credential) => credential.source_id === sourceId);
   return Object.fromEntries(

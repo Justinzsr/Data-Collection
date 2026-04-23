@@ -13,7 +13,14 @@ import type {
 } from "@/storage/db/schema";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 
-export const DEMO_NOW = new Date("2026-04-22T16:00:00.000Z");
+export function getDemoNow() {
+  const override = process.env.DEMO_NOW;
+  if (override) {
+    const date = new Date(override);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return new Date();
+}
 
 export const DEMO_SOURCE_IDS = {
   website: "11111111-1111-4111-8111-111111111111",
@@ -27,14 +34,14 @@ function iso(date: Date) {
   return date.toISOString();
 }
 
-function day(offsetFromToday: number, base = DEMO_NOW) {
+function day(offsetFromToday: number, base = getDemoNow()) {
   const date = new Date(base);
   date.setUTCDate(date.getUTCDate() + offsetFromToday);
   return date.toISOString().slice(0, 10);
 }
 
 function at(offsetMinutes: number) {
-  return iso(new Date(DEMO_NOW.getTime() + offsetMinutes * 60_000));
+  return iso(new Date(getDemoNow().getTime() + offsetMinutes * 60_000));
 }
 
 export function dimensionsHash(dimensions: JsonRecord = {}) {
@@ -50,7 +57,7 @@ function metric(
   unit = "count",
   dimensions: JsonRecord = { demo: true },
 ): MetricDaily {
-  const now = iso(DEMO_NOW);
+  const now = iso(getDemoNow());
   return {
     id: randomUUID(),
     date,
@@ -168,16 +175,17 @@ function makeSources(): Source[] {
 
 function makeMetrics(): MetricDaily[] {
   const rows: MetricDaily[] = [];
-  for (let index = 29; index >= 0; index -= 1) {
+  for (let index = 59; index >= 0; index -= 1) {
     const offset = -index;
     const date = day(offset);
-    const wave = Math.sin(index / 4) * 90;
-    const pageViews = Math.round(780 + (29 - index) * 24 + wave);
+    const age = 59 - index;
+    const wave = Math.sin(age / 4) * 90;
+    const pageViews = Math.round(780 + age * 18 + wave);
     const visitors = Math.round(pageViews * 0.42 + (index % 4) * 12);
     const sessions = Math.round(visitors * 1.28);
     const customEvents = Math.round(pageViews * 0.12 + (index % 5) * 8);
-    const signups = Math.max(3, Math.round(12 + (29 - index) * 0.55 + Math.cos(index / 3) * 4));
-    const usersTotal = 500 + (29 - index) * 13;
+    const signups = Math.max(3, Math.round(12 + age * 0.55 + Math.cos(age / 3) * 4));
+    const usersTotal = 500 + age * 13;
     rows.push(
       metric(date, DEMO_SOURCE_IDS.website, "website", "page_views", pageViews),
       metric(date, DEMO_SOURCE_IDS.website, "website", "unique_visitors", visitors),
@@ -206,8 +214,8 @@ function makeMetrics(): MetricDaily[] {
         demo: true,
         provider: "google",
       }),
-      metric(date, DEMO_SOURCE_IDS.tiktok, "tiktok", "video_views", 1200 + (29 - index) * 33),
-      metric(date, DEMO_SOURCE_IDS.instagram, "instagram", "reach", 900 + (29 - index) * 21),
+      metric(date, DEMO_SOURCE_IDS.tiktok, "tiktok", "video_views", 1200 + age * 33),
+      metric(date, DEMO_SOURCE_IDS.instagram, "instagram", "reach", 900 + age * 21),
       metric(date, DEMO_SOURCE_IDS.shopify, "shopify", "orders", 0, "count", { demo: true, future: true }),
     );
   }
@@ -217,7 +225,7 @@ function makeMetrics(): MetricDaily[] {
 function makeSyncRuns(sources: Source[]): SyncRun[] {
   return Array.from({ length: 20 }, (_, index) => {
     const sourceItem = sources[index % sources.length];
-    const started = new Date(DEMO_NOW.getTime() - (index + 1) * 38 * 60_000);
+    const started = new Date(getDemoNow().getTime() - (index + 1) * 38 * 60_000);
     const failed = index === 6;
     return {
       id: randomUUID(),
@@ -248,7 +256,7 @@ function makeEvents(): WebEvent[] {
   const paths = ["/", "/pricing", "/dashboard", "/blog/source-onboarding", "/contact"];
   const referrers = [null, "https://google.com", "https://x.com", "https://linkedin.com", "direct"];
   return Array.from({ length: 90 }, (_, index) => {
-    const occurred = new Date(DEMO_NOW.getTime() - index * 41 * 60_000);
+    const occurred = new Date(getDemoNow().getTime() - index * 41 * 60_000);
     return {
       id: randomUUID(),
       source_id: DEMO_SOURCE_IDS.website,
@@ -272,7 +280,7 @@ function makeEvents(): WebEvent[] {
 }
 
 function makeContent(): { items: ContentItem[]; metrics: ContentMetric[] } {
-  const now = iso(DEMO_NOW);
+  const now = iso(getDemoNow());
   const items: ContentItem[] = [
     {
       id: randomUUID(),
