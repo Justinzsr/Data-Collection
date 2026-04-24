@@ -1,5 +1,3 @@
-import "server-only";
-
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow, types } from "pg";
 
 const PG_NUMERIC_OID = 1700;
