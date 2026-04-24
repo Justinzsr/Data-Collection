@@ -1,5 +1,3 @@
-import "server-only";
-
 import { randomUUID } from "node:crypto";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { ConnectorEvent, JsonRecord, WebEvent } from "@/storage/db/schema";

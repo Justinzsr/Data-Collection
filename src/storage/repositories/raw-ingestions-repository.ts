@@ -1,5 +1,3 @@
-import "server-only";
-
 import { createHash, randomUUID } from "node:crypto";
 import type { RawPayload } from "@/collection/connectors/types";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";

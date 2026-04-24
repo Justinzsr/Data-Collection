@@ -1,5 +1,3 @@
-import "server-only";
-
 import { randomUUID } from "node:crypto";
 import { decryptSecret, encryptSecret } from "@/storage/credentials/encryption";
 import { maskSecret } from "@/storage/credentials/masking";

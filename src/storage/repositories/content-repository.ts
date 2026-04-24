@@ -1,5 +1,3 @@
-import "server-only";
-
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { ContentItem, ContentMetric } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";

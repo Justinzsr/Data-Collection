@@ -1,5 +1,3 @@
-import "server-only";
-
 import { randomUUID } from "node:crypto";
 import type { NormalizedMetric } from "@/collection/connectors/types";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";

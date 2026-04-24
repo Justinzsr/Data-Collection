@@ -1,5 +1,3 @@
-import "server-only";
-
 import type { PoolClient } from "pg";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 import { listSourceTypes } from "@/collection/connectors/registry";

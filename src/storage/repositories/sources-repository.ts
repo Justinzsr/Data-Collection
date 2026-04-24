@@ -1,5 +1,3 @@
-import "server-only";
-
 import { randomUUID } from "node:crypto";
 import { listSourceTypes } from "@/collection/connectors/registry";
 import { isRuntimeDatabaseConfigured, query, queryRows } from "@/storage/db/client";
