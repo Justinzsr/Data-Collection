@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ingestWebsiteEvent } from "@/collection/tracking/website-event-ingestion";
-import { isWebsiteSourceKey, resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
+import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { storeWebEvent } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
@@ -23,6 +23,16 @@ export const trackEventSchema = z.object({
 
 export type TrackEventInput = z.infer<typeof trackEventSchema>;
 
+export class TrackingIngestionError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode = 400,
+  ) {
+    super(message);
+    this.name = "TrackingIngestionError";
+  }
+}
+
 function propertiesAreSmall(properties: Record<string, unknown>) {
   return Buffer.byteLength(JSON.stringify(properties), "utf8") <= 8192;
 }
@@ -43,12 +53,14 @@ function findTrackingSource(input: TrackEventInput, sources: Source[]): Source |
   return null;
 }
 
-function assertAllowedOrigin(source: Source | null, origin: string | null) {
-  if (!source || !origin) return;
+function assertAllowedOrigin(source: Source, origin: string | null) {
   const allowed = source.metadata.allowed_origins;
-  if (!Array.isArray(allowed) || allowed.length === 0) return;
+  if (process.env.NODE_ENV === "production" && (!origin || !Array.isArray(allowed) || allowed.length === 0)) {
+    throw new TrackingIngestionError("Allowed origins must be configured for this website tracker source.", 403);
+  }
+  if (!origin || !Array.isArray(allowed) || allowed.length === 0) return;
   if (!allowed.includes(origin)) {
-    throw new Error("Origin is not allowed for this website source.");
+    throw new TrackingIngestionError("Origin is not allowed for this website source.", 403);
   }
 }
 
@@ -73,16 +85,22 @@ export async function ingestTrackEvent(input: unknown, meta: { origin?: string |
   if (!propertiesAreSmall(parsed.properties)) {
     throw new Error("Event properties are too large. Limit is 8KB.");
   }
+  if (!parsed.source_id && !parsed.public_tracking_key) {
+    throw new TrackingIngestionError("source_id or public_tracking_key is required.", 401);
+  }
   const sources = await listSources();
   const source = findTrackingSource(parsed, sources);
-  if (source && !isWebsiteSourceKey(source.source_type_key)) {
-    throw new Error("The selected source does not accept website tracker events.");
+  if (!source) {
+    throw new TrackingIngestionError("Website tracker source was not found.", 404);
+  }
+  if (source.source_type_key !== "website") {
+    throw new TrackingIngestionError("The selected source does not accept website tracker events.", 404);
   }
   assertAllowedOrigin(source, meta.origin ?? null);
   const occurredAt = parsed.occurred_at ?? new Date().toISOString();
   if (shouldSuppressTrackerPageViewRollup({ source, sources, eventName: parsed.event_name })) {
     return storeWebEvent({
-      source_id: source?.id ?? parsed.source_id ?? null,
+      source_id: source.id,
       public_tracking_key: parsed.public_tracking_key ?? null,
       anonymous_id: parsed.anonymous_id,
       session_id: parsed.session_id,
@@ -107,7 +125,7 @@ export async function ingestTrackEvent(input: unknown, meta: { origin?: string |
   }
   return ingestWebsiteEvent({
     sourceTypeKey: "website",
-    sourceId: source?.id ?? parsed.source_id ?? null,
+    sourceId: source.id,
     publicTrackingKey: parsed.public_tracking_key ?? null,
     anonymousId: parsed.anonymous_id,
     sessionId: parsed.session_id,

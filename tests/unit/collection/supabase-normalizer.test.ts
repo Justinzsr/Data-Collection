@@ -18,33 +18,37 @@ function raw(payload: RawPayload["payload"]): RawPayload {
 describe("Supabase connector normalization", () => {
   beforeEach(() => resetDemoStore());
 
-  it("groups signups by created_at date with provider and confirmed rollups", async () => {
+  it("groups signups by created_at date and writes snapshot totals on sync date", async () => {
     const source = await getSource(DEMO_SOURCE_IDS.supabase);
     if (!source) throw new Error("Missing demo source");
     const bundle = await supabaseConnector.normalize(
       [
-        raw({
-          users: [
-            {
-              id: "user-1",
-              created_at: "2026-04-20T10:00:00.000Z",
-              confirmed_at: "2026-04-20T10:05:00.000Z",
-              provider: "email",
-            },
-            {
-              id: "user-2",
-              created_at: "2026-04-21T10:00:00.000Z",
-              confirmed_at: null,
-              provider: "google",
-            },
-            {
-              id: "user-3",
-              created_at: "2026-04-21T12:00:00.000Z",
-              email_confirmed_at: "2026-04-21T12:05:00.000Z",
-              provider: "email",
-            },
-          ],
-        }),
+        {
+          ...raw({
+            users: [
+              {
+                id: "user-1",
+                created_at: "2026-02-20T10:00:00.000Z",
+                confirmed_at: "2026-02-20T10:05:00.000Z",
+                provider: "email",
+              },
+              {
+                id: "user-2",
+                created_at: "2026-04-21T10:00:00.000Z",
+                confirmed_at: null,
+                provider: "google",
+              },
+              {
+                id: "user-3",
+                created_at: "2026-04-21T12:00:00.000Z",
+                email_confirmed_at: "2026-04-21T12:05:00.000Z",
+                provider: "email",
+              },
+            ],
+            mode: "admin_list_users",
+          }),
+          fetchedAt: "2026-04-22T12:00:00.000Z",
+        },
       ],
       source,
     );
@@ -53,10 +57,13 @@ describe("Supabase connector normalization", () => {
     const confirmed = bundle.metrics.filter((metric) => metric.metricKey === "confirmed_users");
     const provider = bundle.metrics.find((metric) => metric.metricKey === "signups_by_provider" && metric.date === "2026-04-21" && metric.dimensions?.provider === "google");
 
-    expect(signups.find((metric) => metric.date === "2026-04-20")?.metricValue).toBe(1);
+    expect(signups.find((metric) => metric.date === "2026-02-20")?.metricValue).toBe(1);
     expect(signups.find((metric) => metric.date === "2026-04-21")?.metricValue).toBe(2);
-    expect(usersTotal.find((metric) => metric.date === "2026-04-21")?.metricValue).toBe(3);
-    expect(confirmed.find((metric) => metric.date === "2026-04-21")?.metricValue).toBe(2);
+    expect(usersTotal).toHaveLength(1);
+    expect(usersTotal[0]).toMatchObject({ date: "2026-04-22", metricValue: 3, dimensions: { rollup: "snapshot" } });
+    expect(confirmed).toHaveLength(1);
+    expect(confirmed[0]).toMatchObject({ date: "2026-04-22", metricValue: 2, dimensions: { rollup: "snapshot" } });
+    expect(usersTotal[0]?.date).not.toBe("2026-02-20");
     expect(provider?.metricValue).toBe(1);
   });
 

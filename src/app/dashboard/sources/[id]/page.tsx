@@ -30,7 +30,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
     );
   }
   const connector = getConnector(source.source_type_key);
-  const credentials = await listCredentialHints(source.id);
+  const credentialKeys = new Set([...connector.requiredFields, ...connector.optionalFields].map((field) => field.key));
+  const credentials = (await listCredentialHints(source.id)).filter((credential) => credentialKeys.has(credential.field_key));
   const trackingKey = String(source.metadata.public_tracking_key ?? "mq_demo_public_website");
   const publicAppUrl = getPublicAppUrl();
   const publicAppUrlWarning = getPublicAppUrlWarning();

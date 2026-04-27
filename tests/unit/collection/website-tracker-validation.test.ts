@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ingestTrackEvent } from "@/collection/tracking/track-endpoint";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { resetDemoStore } from "@/storage/repositories/demo-store";
@@ -25,6 +25,43 @@ describe("website tracker validation", () => {
     const event = await ingestTrackEvent(baseEvent, { origin: "https://moonarqstudio.com" });
     expect(event.event_name).toBe("page_view");
     expect(event.ip_hash).toBeNull();
+    expect(event.source_id).not.toBeNull();
+  });
+
+  it("rejects tracker events without a source id or public tracking key", async () => {
+    const eventWithoutKey = { ...baseEvent, public_tracking_key: undefined };
+    await expect(ingestTrackEvent(eventWithoutKey, { origin: "https://moonarqstudio.com" })).rejects.toThrow(/source_id or public_tracking_key/i);
+  });
+
+  it("rejects unknown public tracking keys", async () => {
+    await expect(
+      ingestTrackEvent({ ...baseEvent, public_tracking_key: "mq_unknown_key" }, { origin: "https://moonarqstudio.com" }),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it("rejects disallowed origins", async () => {
+    await expect(ingestTrackEvent(baseEvent, { origin: "https://evil.example" })).rejects.toThrow(/origin/i);
+  });
+
+  it("rejects production tracker events when allowed origins are not configured", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const source = await createSource({
+        source_type_key: "website",
+        display_name: "Unconfigured Website Tracker",
+        input_url: "https://tracker.example",
+        normalized_url: "https://tracker.example",
+        status: "healthy",
+        sync_mode: "webhook",
+        supports_webhook: true,
+        metadata: { public_tracking_key: "mq_unconfigured", allowed_origins: [] },
+      });
+      await expect(
+        ingestTrackEvent({ ...baseEvent, source_id: source.id, public_tracking_key: undefined }, { origin: "https://tracker.example" }),
+      ).rejects.toThrow(/allowed origins/i);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("rejects overlong event names", async () => {

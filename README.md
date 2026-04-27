@@ -32,14 +32,27 @@ pnpm install
 cp .env.example .env.local
 pnpm db:migrate
 pnpm db:seed
-pnpm dev
+pnpm dev -- --port 3100 --hostname 127.0.0.1
 ```
 
 Open `http://127.0.0.1:3100`.
 
 Demo mode works without real credentials when `DATABASE_URL` is missing. When `DATABASE_URL` is configured, repositories switch to real Postgres-backed persistence automatically.
 
-Keep `DEV_AUTH_BYPASS=true` locally. Set it to `false` before deployment.
+Keep `DEV_AUTH_BYPASS=true` locally. Production ignores dev bypass and requires `DASHBOARD_ADMIN_PASSWORD` plus `DASHBOARD_SESSION_SECRET`.
+
+## Private Access
+
+Production dashboard pages and private APIs are protected by an app-level password session gate. A successful `/login` sets an httpOnly session cookie; `/api/auth/logout` clears it.
+
+Set these Vercel environment variables before relying on the deployed dashboard:
+
+```bash
+DASHBOARD_ADMIN_PASSWORD=use-a-long-private-password
+DASHBOARD_SESSION_SECRET=generate-at-least-32-random-bytes
+```
+
+Do not use Vercel Deployment Protection for the whole app if it would block webhook delivery. The app-level gate keeps `/dashboard`, `/settings`, and private APIs locked while leaving Vercel Drain, tracker validation, and cron authentication on their own paths.
 
 ## Demo Mode
 
@@ -75,6 +88,8 @@ The Supabase source connector supports:
 - server-side Auth admin mode with an encrypted `service_role_key`
 - optional `public.profiles` webhook mode
 
+Admin fallback mode uses only the monitored MoonArq Supabase project URL plus encrypted `service_role_key`. It does not require anon keys, database passwords, JWT secrets, publishable keys, or direct Postgres connection strings.
+
 `auth.users` is not available through normal public APIs. Use the SQL setup instructions in the source detail UI to mirror signups into `public.profiles` when you want the event-driven path.
 
 ## MoonArq Website / Vercel
@@ -98,9 +113,9 @@ If you set a Signature Verification Secret in Vercel, save the same value as the
 
 ### Website Tracker
 
-Use `/dashboard/events` to copy the lightweight JavaScript snippet or the React/Next helper with `usePageViewTracking()` and `trackEvent(name, properties)`. The tracker posts to `POST /api/track`.
+Use `/dashboard/events` to copy the lightweight JavaScript snippet or the React/Next helper with `usePageViewTracking()` and `trackEvent(name, properties)` after a real Website Tracker source exists. The tracker posts to `POST /api/track`.
 
-The tracker path remains available as the fallback/helper even when Vercel Drain is the preferred production mode.
+The tracker path remains available as the fallback/helper even when Vercel Drain is the preferred production mode. In production, tracker events must include a valid `source_id` or `public_tracking_key` and must come from an allowed origin configured on that Website Tracker source.
 
 ## Manual Sync
 

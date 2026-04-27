@@ -13,7 +13,15 @@ function areaPath(data: { value: number }[]) {
   return { line, area };
 }
 
-export function MetricTrendChart({ data, title = "Primary trend" }: { data: { date: string; value: number }[]; title?: string }) {
+export function MetricTrendChart({
+  data,
+  title = "Primary trend",
+  description = "30-day signal from demo metrics",
+}: {
+  data: { date: string; value: number }[];
+  title?: string;
+  description?: string;
+}) {
   const paths = areaPath(data);
   const first = data[0]?.date.slice(5) ?? "";
   const last = data.at(-1)?.date.slice(5) ?? "";
@@ -22,7 +30,7 @@ export function MetricTrendChart({ data, title = "Primary trend" }: { data: { da
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-white">{title}</h2>
-          <p className="text-sm text-slate-400">30-day signal from demo metrics</p>
+          <p className="text-sm text-slate-400">{description}</p>
         </div>
         <select className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-200">
           <option>Page views</option>

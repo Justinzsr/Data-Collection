@@ -131,15 +131,6 @@ export const supabaseConnector: ConnectorDefinition = {
       type: "password",
       placeholder: "eyJhbGciOi...",
     },
-    {
-      key: "anon_key",
-      label: "Anon key",
-      description: "Optional anon key for public profiles checks.",
-      required: false,
-      secret: true,
-      type: "password",
-      placeholder: "eyJhbGciOi...",
-    },
   ],
   authType: "public_profiles_or_service_role",
   docsUrl: "https://supabase.com/docs/guides/auth/managing-user-data",
@@ -271,63 +262,74 @@ export const supabaseConnector: ConnectorDefinition = {
   async normalize(rawPayloads: RawPayload[], source: Source) {
     const users = extractUsers(rawPayloads);
     const demo = source.status === "demo";
+    const hasSnapshotPayload = rawPayloads.some((payload) => {
+      const mode = payload.payload.mode;
+      return mode === "admin_list_users" || mode === "demo_public_profiles";
+    });
+    const snapshotDate = dateKey(
+      rawPayloads
+        .map((payload) => payload.fetchedAt)
+        .sort()
+        .at(-1),
+    );
     const byDate = new Map<string, SupabaseUserLike[]>();
     for (const user of users) {
       const date = dateKey(user.created_at);
       byDate.set(date, [...(byDate.get(date) ?? []), user]);
     }
     const dates = Array.from(byDate.keys()).sort();
-    let cumulativeUsers = 0;
-    let cumulativeConfirmed = 0;
-    return {
-      metrics: dates.flatMap((date) => {
-        const usersForDate = byDate.get(date) ?? [];
-        cumulativeUsers += usersForDate.length;
-        cumulativeConfirmed += usersForDate.filter(isConfirmed).length;
-        const providers = usersForDate.reduce<Record<string, number>>((acc, user) => {
-          const provider = providerFor(user);
-          acc[provider] = (acc[provider] ?? 0) + 1;
-          return acc;
-        }, {});
-        return [
+    const signupMetrics = dates.flatMap((date) => {
+      const usersForDate = byDate.get(date) ?? [];
+      const providers = usersForDate.reduce<Record<string, number>>((acc, user) => {
+        const provider = providerFor(user);
+        acc[provider] = (acc[provider] ?? 0) + 1;
+        return acc;
+      }, {});
+      return [
+        {
+          date,
+          sourceId: source.id,
+          sourceTypeKey: "supabase" as const,
+          metricKey: "signups",
+          metricValue: usersForDate.length,
+          unit: "count",
+          dimensions: { rollup: "daily", demo },
+        },
+        ...Object.entries(providers).map(([provider, count]) => ({
+          date,
+          sourceId: source.id,
+          sourceTypeKey: "supabase" as const,
+          metricKey: "signups_by_provider",
+          metricValue: count,
+          unit: "count",
+          dimensions: { provider, demo },
+        })),
+      ];
+    });
+    const snapshotMetrics = hasSnapshotPayload
+      ? [
           {
-            date,
-            sourceId: source.id,
-            sourceTypeKey: "supabase" as const,
-            metricKey: "signups",
-            metricValue: usersForDate.length,
-            unit: "count",
-            dimensions: { rollup: "daily", demo },
-          },
-          {
-            date,
+            date: snapshotDate,
             sourceId: source.id,
             sourceTypeKey: "supabase" as const,
             metricKey: "users_total",
-            metricValue: cumulativeUsers,
+            metricValue: users.length,
             unit: "count",
-            dimensions: { rollup: "cumulative", demo },
+            dimensions: { rollup: "snapshot", demo },
           },
           {
-            date,
+            date: snapshotDate,
             sourceId: source.id,
             sourceTypeKey: "supabase" as const,
             metricKey: "confirmed_users",
-            metricValue: cumulativeConfirmed,
+            metricValue: users.filter(isConfirmed).length,
             unit: "count",
-            dimensions: { rollup: "cumulative", demo },
+            dimensions: { rollup: "snapshot", demo },
           },
-          ...Object.entries(providers).map(([provider, count]) => ({
-            date,
-            sourceId: source.id,
-            sourceTypeKey: "supabase" as const,
-            metricKey: "signups_by_provider",
-            metricValue: count,
-            unit: "count",
-            dimensions: { provider, demo },
-          })),
-        ];
-      }),
+        ]
+      : [];
+    return {
+      metrics: [...signupMetrics, ...snapshotMetrics],
     };
   },
   getMetricDefinitions(): MetricDefinition[] {

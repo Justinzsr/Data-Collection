@@ -9,6 +9,11 @@ function credentialFields(sourceTypeKey: Parameters<typeof getConnector>[0]) {
   return [...connector.requiredFields, ...connector.optionalFields];
 }
 
+function filterSavedCredentials<T extends { field_key: string }>(saved: T[], fields: ReturnType<typeof credentialFields>) {
+  const fieldKeys = new Set(fields.map((field) => field.key));
+  return saved.filter((item) => fieldKeys.has(item.field_key));
+}
+
 function normalizeCredentials(body: unknown): Record<string, string> {
   if (!body || typeof body !== "object" || Array.isArray(body)) return {};
   const candidate = "credentials" in body ? (body as { credentials?: unknown }).credentials : body;
@@ -25,7 +30,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const source = await getSource(id);
   if (!source) return Response.json({ error: "Source not found." }, { status: 404 });
   const fields = credentialFields(source.source_type_key);
-  const saved = await listCredentialHints(source.id);
+  const saved = filterSavedCredentials(await listCredentialHints(source.id), fields);
   return Response.json({ fields, saved });
 }
 
@@ -42,7 +47,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     for (const [fieldKey, value] of Object.entries(credentials)) {
       if (value.trim()) await saveCredential(source.id, fieldKey, value.trim());
     }
-    const saved = await listCredentialHints(source.id);
+    const saved = filterSavedCredentials(await listCredentialHints(source.id), fields);
     const savedKeys = new Set(saved.map((item) => item.field_key));
     const missingRequired = fields.filter((field) => field.required && !savedKeys.has(field.key));
     if (missingRequired.length > 0) {

@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
 import { getPlatformModules } from "@/aggregation/services/platform-modules-service";
+import { getConnector } from "@/collection/connectors/registry";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { listCredentialHints } from "@/storage/repositories/credentials-repository";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
@@ -14,7 +15,11 @@ export const dynamic = "force-dynamic";
 export default async function SourcesPage() {
   const [sources, modules] = await Promise.all([listSources(), getPlatformModules("30d")]);
   const withCredentials = await Promise.all(
-    sources.map(async (source) => ({ source, credentials: await listCredentialHints(source.id) })),
+    sources.map(async (source) => {
+      const connector = getConnector(source.source_type_key);
+      const credentialKeys = new Set([...connector.requiredFields, ...connector.optionalFields].map((field) => field.key));
+      return { source, credentials: (await listCredentialHints(source.id)).filter((credential) => credentialKeys.has(credential.field_key)) };
+    }),
   );
   return (
     <div className="mx-auto grid max-w-7xl gap-6">

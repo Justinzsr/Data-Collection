@@ -14,6 +14,15 @@ export function getDateRange(range: DateRangeKey = "30d") {
   return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) };
 }
 
+function latestMetricValue(metrics: Awaited<ReturnType<typeof listMetrics>>, metricKey: string) {
+  return (
+    metrics
+      .filter((row) => row.metric_key === metricKey)
+      .sort((left, right) => left.date.localeCompare(right.date))
+      .at(-1)?.metric_value ?? 0
+  );
+}
+
 export async function getDashboardSummary(range: DateRangeKey = "30d") {
   const dateRange = getDateRange(range);
   const [metrics, sources, syncRuns] = await Promise.all([
@@ -32,7 +41,7 @@ export async function getDashboardSummary(range: DateRangeKey = "30d") {
       { key: "unique_visitors", label: "Unique visitors", value: aggregateMetrics(metrics, "unique_visitors"), unit: "count", source: "Website", demo: true },
       { key: "custom_events", label: "Custom events", value: aggregateMetrics(metrics, "custom_events"), unit: "count", source: "Website", demo: true },
       { key: "signups", label: "Signups", value: aggregateMetrics(metrics, "signups"), unit: "count", source: "Supabase", demo: true },
-      { key: "users_total", label: "Users total", value: Math.max(...metrics.filter((row) => row.metric_key === "users_total").map((row) => row.metric_value)), unit: "count", source: "Supabase", demo: true },
+      { key: "users_total", label: "Users total", value: latestMetricValue(metrics, "users_total"), unit: "count", source: "Supabase", demo: true },
       { key: "active_sources", label: "Active sources", value: activeSources, unit: "count", source: "System", demo: true },
       { key: "last_sync_status", label: "Last sync", value: latestRun?.status ?? "none", unit: "status", source: "System", demo: true },
       { key: "sync_errors", label: "Sync errors", value: syncErrors, unit: "count", source: "System", demo: true },

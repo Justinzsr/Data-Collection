@@ -18,7 +18,7 @@ test("add source wizard detects Supabase and Website and shows credentials after
   await expect(page.getByText("Supabase").first()).toBeVisible();
   await page.getByRole("button", { name: "Save Source" }).click();
   await expect(page.getByLabel("Service role key")).toBeVisible();
-  await expect(page.getByLabel("Anon key")).toBeVisible();
+  await expect(page.getByLabel("Anon key")).toHaveCount(0);
   await page.getByLabel("Service role key").fill("fake-service-role-value");
   await page.getByRole("button", { name: "Save Credentials" }).click();
   await expect(page.getByText("fake••••alue")).toBeVisible();
@@ -60,6 +60,7 @@ test("credential API routes save masked hints and delete credentials", async ({ 
   expect(fieldsResponse.ok()).toBeTruthy();
   const fieldsBody = await fieldsResponse.json();
   expect(fieldsBody.fields.map((field: { key: string }) => field.key)).toContain("service_role_key");
+  expect(fieldsBody.fields.map((field: { key: string }) => field.key)).not.toContain("anon_key");
 
   const saveResponse = await request.post(`/api/sources/${source.id}/credentials`, {
     data: { credentials: { service_role_key: "fake-service-role-value" } },

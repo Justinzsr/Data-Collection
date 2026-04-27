@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectSource, listSourceTypes } from "@/collection/connectors/registry";
+import { detectSource, getConnector, listSourceTypes } from "@/collection/connectors/registry";
 
 describe("connector detection", () => {
   it("detects Supabase URLs", () => {
@@ -26,5 +26,12 @@ describe("connector detection", () => {
     expect(keys).toContain("supabase");
     expect(keys).toContain("website");
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("asks for only service_role_key in Supabase admin fallback mode", () => {
+    const connector = getConnector("supabase");
+    const fields = [...connector.requiredFields, ...connector.optionalFields].map((field) => field.key);
+    expect(fields).toContain("service_role_key");
+    expect(fields).not.toContain("anon_key");
   });
 });

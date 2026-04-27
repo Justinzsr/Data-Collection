@@ -129,6 +129,10 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
   if (source.source_type_key === "website" && !source.metadata.public_tracking_key) {
     source.metadata.public_tracking_key = `mq_${randomUUID().replaceAll("-", "").slice(0, 20)}`;
   }
+  if (source.source_type_key === "website" && !source.metadata.allowed_origins) {
+    const origin = source.normalized_url ?? source.input_url;
+    if (origin) source.metadata.allowed_origins = [origin];
+  }
   if (source.supports_webhook) {
     source.webhook_url = `/api/webhooks/${
       source.source_type_key === "supabase"

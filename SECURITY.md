@@ -19,10 +19,19 @@ MoonArq Data Collection Base is private internal infrastructure. Treat source cr
 
 ## Auth
 
-- Supabase Auth is the production target.
-- `DEV_AUTH_BYPASS=true` is a local development convenience only.
-- Use `ALLOWED_EMAILS` when auth is enabled.
-- Disable dev bypass before deployment.
+- Production dashboard access is protected by the app-level single-user password gate.
+- Set `DASHBOARD_ADMIN_PASSWORD` and `DASHBOARD_SESSION_SECRET` in Vercel.
+- A successful login sets an httpOnly, secure session cookie.
+- `DEV_AUTH_BYPASS=true` is a local development convenience only and is ignored in production.
+- If production is missing dashboard auth env vars, protected UI redirects to `/login` with a setup warning and private APIs return a safe setup error.
+- Do not use whole-app Vercel Deployment Protection if it would block Vercel Drain delivery.
+
+## Public Ingestion Boundaries
+
+- Vercel Drain remains reachable at `/api/webhooks/vercel/analytics-drain/{sourceId}` and uses its drain signature secret when configured.
+- `GET /api/cron/sync` remains protected by `CRON_SECRET`.
+- `POST /api/track` is public only for valid Website Tracker sources. It rejects orphan events, unknown tracking keys, non-website sources, and disallowed production origins.
+- Tracker page views are not counted as primary website page views when Vercel Drain is the active primary ingestion mode.
 
 ## Cron
 
@@ -37,8 +46,9 @@ Computer Use may be used for setup, local browser checks, terminal/editor inspec
 
 - Set `APP_ENCRYPTION_KEY` to a 32-byte secret.
 - Set `CRON_SECRET`.
-- Configure Supabase Auth and `ALLOWED_EMAILS`.
-- Set `DEV_AUTH_BYPASS=false`.
+- Set `DASHBOARD_ADMIN_PASSWORD`.
+- Set `DASHBOARD_SESSION_SECRET`.
+- Set `DEV_AUTH_BYPASS=false` or leave it unset in production.
 - Apply database migrations.
 - Verify RLS policies.
 - Confirm no `.env.local` or real keys are committed.

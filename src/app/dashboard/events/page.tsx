@@ -16,12 +16,13 @@ export default async function EventsPage() {
   const [sources, events, trend] = await Promise.all([listSources(), listWebEvents(30), getMetricTimeseries({ metricKey: "page_views" })]);
   const website = resolvePrimaryWebsiteSource(sources);
   const drainSource = sources.find((source) => source.source_type_key === "vercel_web_analytics_drain");
-  const trackingKey = String(website?.metadata.public_tracking_key ?? "mq_demo_public_website");
+  const trackerSource = sources.find((source) => source.source_type_key === "website" && typeof source.metadata.public_tracking_key === "string" && source.status !== "disabled");
+  const trackingKey = typeof trackerSource?.metadata.public_tracking_key === "string" ? trackerSource.metadata.public_tracking_key : null;
   const publicAppUrl = getPublicAppUrl();
   const publicAppUrlWarning = getPublicAppUrlWarning();
   const endpoint = `${publicAppUrl ?? "http://127.0.0.1:3100"}/api/track`;
-  const snippet = generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey });
-  const helper = generateReactHelper({ endpoint, publicTrackingKey: trackingKey });
+  const snippet = trackingKey ? generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey }) : null;
+  const helper = trackingKey ? generateReactHelper({ endpoint, publicTrackingKey: trackingKey }) : null;
   const byPath = events.reduce<Record<string, number>>((acc, event) => {
     acc[event.path] = (acc[event.path] ?? 0) + 1;
     return acc;
@@ -42,7 +43,11 @@ export default async function EventsPage() {
           <p className="text-sm leading-6 text-amber-100">{publicAppUrlWarning}</p>
         </GlassPanel>
       ) : null}
-      <MetricTrendChart data={trend} title="Website page views" />
+      <MetricTrendChart
+        data={trend}
+        title="Website page views"
+        description={website?.source_type_key === "vercel_web_analytics_drain" ? "Live Vercel Drain metrics" : "Website Tracker metrics"}
+      />
       <div className="grid gap-5 lg:grid-cols-3">
         <GlassPanel className="p-4 sm:p-5">
           <h2 className="mb-3 text-base font-semibold text-white">Setup steps</h2>
@@ -82,14 +87,24 @@ export default async function EventsPage() {
             <p className="mt-2 break-all font-mono text-xs text-cyan-50">{`${publicAppUrl ?? "http://127.0.0.1:3100"}${drainSource?.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${drainSource?.id ?? "{sourceId}"}`}`}</p>
           </div>
           <p className="text-sm leading-6 text-slate-300">
-            Use this endpoint in Vercel when the MoonArq website runs on the official Web Analytics Drain path. The tracker snippet below remains the supported fallback/helper path for custom events and non-drain setups.
+            Use this endpoint in Vercel when the MoonArq website runs on the official Web Analytics Drain path. Website Tracker remains a fallback/helper path and should only be installed from a real tracker source.
           </p>
         </div>
       </GlassPanel>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <SnippetCard title="Lightweight JavaScript snippet" description="Auto page_view plus window.moonarqTrack(eventName, properties)." code={snippet} />
-        <SnippetCard title="React / Next.js helper" description="usePageViewTracking() and trackEvent(name, properties)." code={helper} />
-      </div>
+      {snippet && helper ? (
+        <div className="grid gap-5 xl:grid-cols-2">
+          <SnippetCard title="Lightweight JavaScript snippet" description="Fallback/helper: auto page_view plus window.moonarqTrack(eventName, properties)." code={snippet} />
+          <SnippetCard title="React / Next.js helper" description="Fallback/helper: usePageViewTracking() and trackEvent(name, properties)." code={helper} />
+        </div>
+      ) : (
+        <GlassPanel className="p-4 sm:p-5">
+          <h2 className="mb-2 text-base font-semibold text-white">Website Tracker fallback is not installed</h2>
+          <p className="text-sm leading-6 text-slate-300">
+            Create or enable a Website Tracker source before installing a snippet. The active MoonArq website path is currently{" "}
+            <span className="font-medium text-cyan-100">{getWebsiteModeLabel(website)}</span>, so this page is not showing a demo tracking key as production-ready.
+          </p>
+        </GlassPanel>
+      )}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
         <GlassPanel className="p-4 sm:p-5">
           <h2 className="mb-4 text-base font-semibold text-white">Events by path</h2>
