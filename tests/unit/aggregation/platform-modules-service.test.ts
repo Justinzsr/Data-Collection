@@ -77,7 +77,15 @@ describe("platform modules service", () => {
     const modules = await getPlatformModules("30d");
     const supabaseModule = modules.find((item) => item.sourceTypeKey === "supabase");
     expect(supabaseModule?.primaryMetric.value).toBe(0);
+    expect(supabaseModule?.primaryMetric.deltaLabel).toBe("No new signups");
+    expect(supabaseModule?.primaryMetric.deltaPercent).toBeNull();
     expect(supabaseModule?.secondaryMetrics.find((metric) => metric.key === "users_total")?.value).toBe(2);
     expect(supabaseModule?.secondaryMetrics.find((metric) => metric.key === "confirmed_users")?.value).toBe(1);
+  });
+
+  it("uses concise global freshness copy", async () => {
+    const { getGlobalPlatformHealth } = await import("@/aggregation/services/platform-modules-service");
+    const health = await getGlobalPlatformHealth("30d");
+    expect(health.dataFreshness).toBe("Fresh");
   });
 });

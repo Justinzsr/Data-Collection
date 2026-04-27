@@ -347,7 +347,10 @@ function createModule(input: {
   const status = source?.status ?? placeholderSourceStatus(moduleKey);
   const currentValue = metricValue(currentRows, source, metricSourceTypeKey, config.primaryKey);
   const previousValue = metricValue(previousRows, source, metricSourceTypeKey, config.primaryKey);
-  const deltaPercent = calculateDelta(currentValue, previousValue);
+  const latestUsersTotal =
+    moduleKey === "supabase" ? metricValue(currentRows, source, metricSourceTypeKey, "users_total", "latest", input.latestRows) : 0;
+  const isHealthySupabaseNoSignupWindow = moduleKey === "supabase" && currentValue === 0 && latestUsersTotal > 0;
+  const deltaPercent = isHealthySupabaseNoSignupWindow ? null : calculateDelta(currentValue, previousValue);
 
   return {
     sourceId: source?.id ?? null,
@@ -363,7 +366,7 @@ function createModule(input: {
       value: currentValue,
       unit: config.unit,
       deltaPercent,
-      deltaLabel: deltaLabel(deltaPercent),
+      deltaLabel: isHealthySupabaseNoSignupWindow ? "No new signups" : deltaLabel(deltaPercent),
     },
     secondaryMetrics: config.secondary.slice(0, 4).map((item) => ({
       key: item.key,
@@ -480,7 +483,7 @@ export async function getGlobalPlatformHealth(rangeKey: DateRangeKey = "30d") {
     activeSources: connected.length,
     syncErrors: errors,
     lastSuccessfulSync,
-    dataFreshness: lastSuccessfulSync ? "Fresh within the current MoonArq monitoring window" : "No successful source sync yet",
+    dataFreshness: lastSuccessfulSync ? "Fresh" : "No sync yet",
     modeLabel: modules.some((item) => item.status === "demo" || item.status === "needs_credentials") ? "Setup + live monitoring" : "Live monitoring",
     trackedEvents: aggregateMetrics(sourceTotals, "page_views") + aggregateMetrics(sourceTotals, "custom_events"),
   };
