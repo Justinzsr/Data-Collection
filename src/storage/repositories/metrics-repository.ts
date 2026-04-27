@@ -22,6 +22,37 @@ function toMetricRow(metric: NormalizedMetric, now: string): MetricDaily {
   };
 }
 
+function normalizeDateKey(value: unknown) {
+  if (typeof value === "string") return value.slice(0, 10);
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function normalizeJsonRecord(value: unknown): JsonRecord {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as JsonRecord : {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+export function normalizeMetricDailyRow(row: MetricDaily): MetricDaily {
+  const createdAt = row.created_at as unknown;
+  const updatedAt = row.updated_at as unknown;
+  return {
+    ...row,
+    date: normalizeDateKey(row.date),
+    metric_value: typeof row.metric_value === "number" ? row.metric_value : Number(row.metric_value ?? 0),
+    dimensions: normalizeJsonRecord(row.dimensions),
+    created_at: createdAt instanceof Date ? createdAt.toISOString() : row.created_at,
+    updated_at: updatedAt instanceof Date ? updatedAt.toISOString() : row.updated_at,
+  };
+}
+
 export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upserted: number }> {
   const now = new Date().toISOString();
 
@@ -163,7 +194,7 @@ export async function incrementMetric(metric: NormalizedMetric): Promise<{ upser
       now,
     ],
   );
-  return { upserted: 1, value: rows[0]?.metric_value ?? metric.metricValue };
+  return { upserted: 1, value: rows[0] ? normalizeMetricDailyRow(rows[0]).metric_value : metric.metricValue };
 }
 
 export async function incrementMetrics(metrics: NormalizedMetric[]): Promise<{ upserted: number }> {
@@ -215,7 +246,7 @@ export async function listMetrics(options: {
     values.push(options.endDate);
     where.push(`date <= $${values.length}`);
   }
-  return queryRows<MetricDaily>(
+  const rows = await queryRows<MetricDaily>(
     `
       select *
       from metrics_daily
@@ -224,6 +255,7 @@ export async function listMetrics(options: {
     `,
     values,
   );
+  return rows.map(normalizeMetricDailyRow);
 }
 
 export function aggregateMetrics(rows: MetricDaily[], metricKey: string, dimensions?: JsonRecord): number {
