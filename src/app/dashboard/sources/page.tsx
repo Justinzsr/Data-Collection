@@ -9,6 +9,7 @@ import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
 import { PlatformModuleGrid } from "@/presentation/dashboard/platform-module-grid";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
+import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
 
@@ -54,10 +55,10 @@ export default async function SourcesPage() {
                 </td>
                 <td className="px-4 py-4"><Badge tone={statusTone(source.status)}>{source.status}</Badge></td>
                 <td className="px-4 py-4 text-slate-300">{source.sync_mode} · {source.sync_frequency_minutes}m</td>
-                <td className="px-4 py-4 text-slate-400">{source.last_manual_sync_at ?? "never"}</td>
-                <td className="px-4 py-4 text-slate-400">{source.last_cron_sync_at ?? "never"}</td>
-                <td className="px-4 py-4 text-slate-400">{source.last_webhook_sync_at ?? "never"}</td>
-                <td className="px-4 py-4 text-slate-400">{source.next_sync_at ?? "manual"}</td>
+                <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.last_manual_sync_at)}</td>
+                <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.last_cron_sync_at)}</td>
+                <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.last_webhook_sync_at)}</td>
+                <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.next_sync_at, "manual")}</td>
                 <td className="px-4 py-4">
                   <div className="flex flex-wrap gap-2">
                     <SyncActionButton sourceId={source.id} compact />
@@ -82,9 +83,9 @@ export default async function SourcesPage() {
             </div>
             <div className="mt-4 grid gap-2 text-sm text-slate-400">
               <p>Sync mode: {source.sync_mode} · {source.sync_frequency_minutes}m</p>
-              <p>Last success: {source.last_success_at ?? "never"}</p>
+              <p>Last success: {formatAppDateTime(source.last_success_at)}</p>
               <p>Last error: {source.last_error ?? "none"}</p>
-              <p>Next: {source.next_sync_at ?? "manual only"}</p>
+              <p>Next: {formatAppDateTime(source.next_sync_at, "manual only")}</p>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <SyncActionButton sourceId={source.id} compact />

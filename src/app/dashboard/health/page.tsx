@@ -1,6 +1,7 @@
 import { getSystemHealth } from "@/aggregation/services/health-service";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
+import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export default async function HealthPage() {
                 <Badge tone={statusTone(event.severity)}>{event.severity}</Badge>
               </div>
               <p className="mt-1 text-sm text-slate-400">{event.message}</p>
+              <p className="mt-2 text-xs text-slate-500">{formatAppDateTime(event.created_at)}</p>
             </div>
           ))}
         </div>

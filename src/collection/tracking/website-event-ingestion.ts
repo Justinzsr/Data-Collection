@@ -2,6 +2,7 @@ import { incrementMetrics } from "@/storage/repositories/metrics-repository";
 import { hasWebEventIdentity, storeWebEvent } from "@/storage/repositories/events-repository";
 import type { JsonRecord, WebEvent } from "@/storage/db/schema";
 import type { WebsiteSourceKey } from "@/collection/tracking/website-sources";
+import { dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
 
 export interface WebsiteEventIngestionInput {
   sourceTypeKey: WebsiteSourceKey;
@@ -23,7 +24,7 @@ export interface WebsiteEventIngestionInput {
 }
 
 export async function ingestWebsiteEvent(input: WebsiteEventIngestionInput): Promise<WebEvent> {
-  const date = input.occurredAt.slice(0, 10);
+  const date = dateKeyInAppTimeZone(input.occurredAt);
   const [hasVisitorAlready, hasSessionAlready] = await Promise.all([
     hasWebEventIdentity({ sourceId: input.sourceId, occurredDate: date, anonymousId: input.anonymousId }),
     hasWebEventIdentity({ sourceId: input.sourceId, occurredDate: date, sessionId: input.sessionId }),

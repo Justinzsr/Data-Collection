@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { ConnectorDefinition, RawPayload } from "@/collection/connectors/types";
 import type { JsonRecord, MetricDefinition, Source } from "@/storage/db/schema";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
+import { dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
 
 function normalizeSupabaseUrl(inputUrl: string) {
   try {
@@ -30,11 +31,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function dateKey(value: unknown) {
-  const fallback = new Date().toISOString().slice(0, 10);
+  const fallback = dateKeyInAppTimeZone();
   if (typeof value !== "string" || !value) return fallback;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return fallback;
-  return date.toISOString().slice(0, 10);
+  return dateKeyInAppTimeZone(value);
 }
 
 function providerFor(user: SupabaseUserLike) {

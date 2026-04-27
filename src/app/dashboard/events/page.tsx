@@ -9,6 +9,7 @@ import { Badge } from "@/presentation/components/ui/badge";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
 import { MetricTrendChart } from "@/presentation/charts/metric-trend-chart";
 import { SnippetCard } from "@/presentation/dashboard/snippet-card";
+import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
 
@@ -126,7 +127,7 @@ export default async function EventsPage() {
                   <p className="text-sm font-medium text-white">{event.event_name}</p>
                   <Badge tone={event.event_name === "page_view" ? "cyan" : "indigo"}>{event.device_type ?? "unknown"}</Badge>
                 </div>
-                <p className="mt-1 truncate text-xs text-slate-500">{event.path} · {event.referrer ?? "direct"} · {event.occurred_at}</p>
+                <p className="mt-1 truncate text-xs text-slate-500">{event.path} · {event.referrer ?? "direct"} · {formatAppDateTime(event.occurred_at)}</p>
               </div>
             ))}
           </div>

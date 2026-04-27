@@ -55,7 +55,7 @@ describe("platform modules service", () => {
         dimensions: { rollup: "daily" },
       },
       {
-        date: "2026-04-22",
+        date: "2026-01-15",
         sourceId: DEMO_SOURCE_IDS.supabase,
         sourceTypeKey: "supabase",
         metricKey: "users_total",
@@ -64,7 +64,7 @@ describe("platform modules service", () => {
         dimensions: { rollup: "snapshot" },
       },
       {
-        date: "2026-04-22",
+        date: "2026-01-15",
         sourceId: DEMO_SOURCE_IDS.supabase,
         sourceTypeKey: "supabase",
         metricKey: "confirmed_users",

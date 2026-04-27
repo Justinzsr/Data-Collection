@@ -12,6 +12,7 @@ import { SnippetCard } from "@/presentation/dashboard/snippet-card";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
 import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
+import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
 
@@ -66,8 +67,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ i
             <p>Platform: <span className="text-white">{connector.displayName}</span></p>
             <p>Monitored mode: <span className="text-white">{source.source_type_key === "supabase" ? "MoonArq Supabase" : isWebsiteSourceKey(source.source_type_key) ? getWebsiteModeLabel(source) : connector.displayName}</span></p>
             <p>Sync mode: <span className="text-white">{source.sync_mode}</span></p>
-            <p>Last success: <span className="text-white">{source.last_success_at ?? "never"}</span></p>
-            <p>Next sync: <span className="text-white">{source.next_sync_at ?? "manual only"}</span></p>
+            <p>Last success: <span className="text-white">{formatAppDateTime(source.last_success_at)}</span></p>
+            <p>Next sync: <span className="text-white">{formatAppDateTime(source.next_sync_at, "manual only")}</span></p>
             <p>Last error: <span className="text-white">{source.last_error ?? "none"}</span></p>
             {source.webhook_url ? (
               <p className="break-all">Webhook URL: <span className="text-cyan-100">{source.webhook_url}</span></p>

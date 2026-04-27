@@ -67,6 +67,69 @@ describe("Supabase connector normalization", () => {
     expect(provider?.metricValue).toBe(1);
   });
 
+  it("writes admin snapshot totals on the Pacific sync date even when users are historical", async () => {
+    const source = await getSource(DEMO_SOURCE_IDS.supabase);
+    if (!source) throw new Error("Missing demo source");
+    const bundle = await supabaseConnector.normalize(
+      [
+        {
+          ...raw({
+            users: [
+              {
+                id: "user-1",
+                created_at: "2026-02-20T10:00:00.000Z",
+                confirmed_at: "2026-02-20T10:05:00.000Z",
+                provider: "email",
+              },
+              {
+                id: "user-2",
+                created_at: "2026-02-21T10:00:00.000Z",
+                email_confirmed_at: "2026-02-21T10:05:00.000Z",
+                provider: "google",
+              },
+            ],
+            mode: "admin_list_users",
+          }),
+          fetchedAt: "2026-04-27T06:30:00.000Z",
+        },
+      ],
+      source,
+    );
+
+    const usersTotal = bundle.metrics.find((metric) => metric.metricKey === "users_total");
+    const confirmed = bundle.metrics.find((metric) => metric.metricKey === "confirmed_users");
+    const signupDates = bundle.metrics
+      .filter((metric) => metric.metricKey === "signups")
+      .map((metric) => metric.date);
+
+    expect(usersTotal).toMatchObject({ date: "2026-04-26", metricValue: 2, dimensions: { rollup: "snapshot" } });
+    expect(confirmed).toMatchObject({ date: "2026-04-26", metricValue: 2, dimensions: { rollup: "snapshot" } });
+    expect(signupDates).toEqual(["2026-02-20", "2026-02-21"]);
+  });
+
+  it("uses Pacific business dates for signups near UTC midnight", async () => {
+    const source = await getSource(DEMO_SOURCE_IDS.supabase);
+    if (!source) throw new Error("Missing demo source");
+    const bundle = await supabaseConnector.normalize(
+      [
+        raw({
+          users: [
+            {
+              id: "user-late-pt",
+              created_at: "2026-04-27T06:30:00.000Z",
+              confirmed_at: null,
+              provider: "email",
+            },
+          ],
+          mode: "admin_list_users",
+        }),
+      ],
+      source,
+    );
+
+    expect(bundle.metrics.find((metric) => metric.metricKey === "signups")?.date).toBe("2026-04-26");
+  });
+
   it("normalizes public.profiles insert webhook payloads", async () => {
     const source = await getSource(DEMO_SOURCE_IDS.supabase);
     if (!source) throw new Error("Missing demo source");

@@ -102,6 +102,23 @@ describe("website tracker validation", () => {
     expect(byReferrer?.metric_value).toBe(2);
   });
 
+  it("rolls website event metrics up by Pacific business date", async () => {
+    await ingestTrackEvent(
+      {
+        ...baseEvent,
+        anonymous_id: "anon-pacific",
+        session_id: "session-pacific",
+        occurred_at: "2026-04-27T06:30:00.000Z",
+      },
+      { origin: "https://moonarqstudio.com" },
+    );
+
+    const pacificRows = await listMetrics({ metricKeys: ["page_views"], startDate: "2026-04-26", endDate: "2026-04-26" });
+    const utcRows = await listMetrics({ metricKeys: ["page_views"], startDate: "2026-04-27", endDate: "2026-04-27" });
+    expect(pacificRows.find((row) => row.dimensions.rollup === "daily")?.metric_value).toBe(1);
+    expect(utcRows.find((row) => row.dimensions.rollup === "daily" && row.dimensions.demo !== true)).toBeUndefined();
+  });
+
   it("stores tracker page views as raw events but suppresses rollups when Vercel Drain is primary", async () => {
     await createSource({
       source_type_key: "vercel_web_analytics_drain",

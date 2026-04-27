@@ -2,12 +2,12 @@ import { Activity, CheckCircle2, Clock3, DatabaseZap, ShieldAlert } from "lucide
 import type { getGlobalPlatformHealth } from "@/aggregation/services/platform-modules-service";
 import { GlassPanel } from "@/presentation/components/ui/panel";
 import { Badge } from "@/presentation/components/ui/badge";
+import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 type Health = Awaited<ReturnType<typeof getGlobalPlatformHealth>>;
 
 function formatTime(value: string | null) {
-  if (!value) return "No sync yet";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+  return formatAppDateTime(value, "No sync yet");
 }
 
 export function GlobalHealthStrip({ health }: { health: Health }) {

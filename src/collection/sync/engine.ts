@@ -15,6 +15,11 @@ export interface EnqueueSyncRunInput {
   idempotencyKey?: string;
 }
 
+function defaultIdempotencyKey(sourceId: string, trigger: SyncTrigger) {
+  if (trigger !== "cron") return null;
+  return `${sourceId}:${trigger}:${new Date().toISOString().slice(0, 13)}`;
+}
+
 export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRun> {
   const source = await getSource(input.sourceId);
   if (!source) {
@@ -36,7 +41,7 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
     source_id: source.id,
     source_type_key: source.source_type_key,
     trigger: input.trigger,
-    idempotency_key: input.idempotencyKey ?? `${source.id}:${input.trigger}:${new Date().toISOString().slice(0, 13)}`,
+    idempotency_key: input.idempotencyKey ?? defaultIdempotencyKey(source.id, input.trigger),
     metadata: { demoMode: !isRuntimeDatabaseConfigured() },
   });
 

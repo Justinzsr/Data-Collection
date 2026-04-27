@@ -4,6 +4,7 @@ import type { MetricDaily, Source, SourceStatus, SourceTypeKey, WebEvent } from 
 import { aggregateMetrics, listMetrics } from "@/storage/repositories/metrics-repository";
 import { findWebEvents } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
+import { endOfAppDateUtc, formatAppDateTime, startOfAppDateUtc } from "@/storage/runtime/app-time";
 
 export type PlatformModule = {
   sourceId: string | null;
@@ -204,8 +205,9 @@ function metricValue(
   metricSourceTypeKey: SourceTypeKey,
   metricKey: string,
   mode: "sum" | "latest" = "sum",
+  latestRows: MetricDaily[] = rows,
 ) {
-  if (mode === "latest") return latestValue(rows, source, metricSourceTypeKey, metricKey);
+  if (mode === "latest") return latestValue(latestRows, source, metricSourceTypeKey, metricKey);
   return metricRowsFor(rows, source, metricSourceTypeKey, metricKey).reduce((sum, row) => sum + row.metric_value, 0);
 }
 
@@ -333,6 +335,7 @@ function createModule(input: {
   metricSourceTypeKey: SourceTypeKey;
   currentRows: MetricDaily[];
   previousRows: MetricDaily[];
+  latestRows: MetricDaily[];
   range: { startDate: string; endDate: string };
   insights?: Array<{ label: string; value: string }>;
   secondaryWebsiteSources?: Source[];
@@ -365,7 +368,7 @@ function createModule(input: {
     secondaryMetrics: config.secondary.slice(0, 4).map((item) => ({
       key: item.key,
       label: item.label,
-      value: metricValue(currentRows, source, metricSourceTypeKey, item.key, item.mode ?? "sum"),
+      value: metricValue(currentRows, source, metricSourceTypeKey, item.key, item.mode ?? "sum", input.latestRows),
       unit: item.unit,
     })),
     sparkline: sparkline(currentRows, source, metricSourceTypeKey, config.primaryKey, range.startDate, range.endDate),
@@ -385,10 +388,11 @@ function createModule(input: {
 export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promise<PlatformModule[]> {
   const range = getDateRange(rangeKey);
   const previousRange = getPreviousRange(range);
-  const [sources, currentRows, previousRows] = await Promise.all([
+  const [sources, currentRows, previousRows, latestRows] = await Promise.all([
     listSources(),
     listMetrics({ startDate: range.startDate, endDate: range.endDate }),
     listMetrics({ startDate: previousRange.startDate, endDate: previousRange.endDate }),
+    listMetrics({ metricKeys: ["users_total", "confirmed_users", "followers", "engagement_rate", "latest_deployment_status"] }),
   ]);
 
   const websiteSource = resolvePrimaryWebsiteSource(sources);
@@ -396,8 +400,8 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
   const websiteEvents = websiteSource
     ? await findWebEvents({
         sourceId: websiteSource.id,
-        startOccurredAt: `${range.startDate}T00:00:00.000Z`,
-        endOccurredAt: `${range.endDate}T23:59:59.999Z`,
+        startOccurredAt: startOfAppDateUtc(range.startDate),
+        endOccurredAt: endOfAppDateUtc(range.endDate),
         limit: 2000,
       })
     : [];
@@ -408,6 +412,7 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
     metricSourceTypeKey: websiteSource?.source_type_key ?? "website",
     currentRows,
     previousRows,
+    latestRows,
     range,
     secondaryWebsiteSources,
     sourceModeLabel: getWebsiteModeLabel(websiteSource),
@@ -429,13 +434,14 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
       metricSourceTypeKey: "supabase",
       currentRows,
       previousRows,
+      latestRows,
       range,
       sourceModeLabel: supabaseSource?.metadata.mode === "public_profiles_or_service_role" ? "Profiles or Service Role" : supabaseSource ? "Supabase Source" : "Needs setup",
       insights: [
         { label: "Provider mix", value: providerBreakdownText(currentRows, supabaseSource, "supabase") },
         {
           label: "Freshness",
-          value: supabaseSource?.last_success_at ? `Last successful sync ${new Date(supabaseSource.last_success_at).toLocaleString()}` : "Waiting for first sync",
+          value: supabaseSource?.last_success_at ? `Last successful sync ${formatAppDateTime(supabaseSource.last_success_at)}` : "Waiting for first sync",
         },
       ],
     }),
@@ -450,6 +456,7 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
         metricSourceTypeKey: moduleKey,
         currentRows,
         previousRows,
+        latestRows,
         range,
         sourceModeLabel: source?.metadata.scaffoldOnly === true ? "Scaffold" : source ? "Monitored Source" : "Future",
       }),

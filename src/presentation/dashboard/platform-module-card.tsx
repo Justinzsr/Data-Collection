@@ -15,6 +15,7 @@ import { SparklineChart } from "@/presentation/charts/sparkline-chart";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
+import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 const icons = {
   website: Globe2,
@@ -48,8 +49,7 @@ function formatMetric(value: number | string, unit: string) {
 }
 
 function formatTime(value: string | null) {
-  if (!value) return "not scheduled";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+  return formatAppDateTime(value, "not scheduled");
 }
 
 export function PlatformModuleCard({ module }: { module: PlatformModule }) {
