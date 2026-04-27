@@ -5,6 +5,8 @@ import { Badge, statusTone } from "@/presentation/components/ui/badge";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
 import { RunAllDueButton, SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 
+export const dynamic = "force-dynamic";
+
 export default async function SyncPage() {
   const [health, sources] = await Promise.all([getSystemHealth(), listSources()]);
   return (

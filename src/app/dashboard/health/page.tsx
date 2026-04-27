@@ -2,6 +2,8 @@ import { getSystemHealth } from "@/aggregation/services/health-service";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
 
+export const dynamic = "force-dynamic";
+
 export default async function HealthPage() {
   const health = await getSystemHealth();
   return (

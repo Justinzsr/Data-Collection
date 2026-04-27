@@ -10,6 +10,8 @@ import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
 import { MetricTrendChart } from "@/presentation/charts/metric-trend-chart";
 import { SnippetCard } from "@/presentation/dashboard/snippet-card";
 
+export const dynamic = "force-dynamic";
+
 export default async function EventsPage() {
   const [sources, events, trend] = await Promise.all([listSources(), listWebEvents(30), getMetricTimeseries({ metricKey: "page_views" })]);
   const website = resolvePrimaryWebsiteSource(sources);

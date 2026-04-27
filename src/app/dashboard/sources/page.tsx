@@ -9,6 +9,8 @@ import { PlatformModuleGrid } from "@/presentation/dashboard/platform-module-gri
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
 
+export const dynamic = "force-dynamic";
+
 export default async function SourcesPage() {
   const [sources, modules] = await Promise.all([listSources(), getPlatformModules("30d")]);
   const withCredentials = await Promise.all(

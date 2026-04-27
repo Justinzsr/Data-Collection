@@ -13,6 +13,8 @@ import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
 import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function SourceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const source = await getSource(id);

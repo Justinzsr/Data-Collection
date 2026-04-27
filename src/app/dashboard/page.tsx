@@ -9,6 +9,8 @@ import { CommandCenterHeader } from "@/presentation/dashboard/command-center-hea
 import { GlobalHealthStrip } from "@/presentation/dashboard/global-health-strip";
 import { PlatformModuleCard } from "@/presentation/dashboard/platform-module-card";
 
+export const dynamic = "force-dynamic";
+
 function parseRange(value: string | undefined): DateRangeKey {
   if (value === "today" || value === "7d" || value === "30d") return value;
   return "30d";
