@@ -5,7 +5,7 @@ import type { DailyReportMetric, DailyReportRun, DailyReportSection, JsonRecord 
 import { getDemoStore } from "@/storage/repositories/demo-store";
 import { listConnectorEvents } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
-import { addDaysToDateKey, appDateTimeParts, dateKeyInAppTimeZone, formatAppDate, formatAppDateTime, startOfAppDateUtc } from "@/storage/runtime/app-time";
+import { addDaysToDateKey, appDateTimeParts, dateKeyInAppTimeZone, formatAppDate, formatAppDateTime, normalizeDateOnlyKey, startOfAppDateUtc } from "@/storage/runtime/app-time";
 
 export type DailyReport = {
   run: DailyReportRun;
@@ -96,7 +96,7 @@ async function buildReport(reportDatePt: string) {
 }
 
 function normalizeRun(row: DailyReportRun): DailyReportRun {
-  return { ...row, report_date: String(row.report_date).slice(0, 10), source_count: Number(row.source_count ?? 0) };
+  return { ...row, report_date: normalizeDateOnlyKey(row.report_date), source_count: Number(row.source_count ?? 0) };
 }
 
 function normalizeMetric(row: DailyReportMetric): DailyReportMetric {
@@ -138,12 +138,13 @@ export async function generateDailyReport(reportDatePt: string): Promise<DailyRe
   if (!(await isDailyReportStorageReady())) {
     throw new Error("Reporting migration is not applied yet. Run pnpm db:migrate before generating daily reports.");
   }
-  const built = await buildReport(reportDatePt);
+  const reportDate = normalizeDateOnlyKey(reportDatePt);
+  const built = await buildReport(reportDate);
   const generatedAt = new Date().toISOString();
   const run: DailyReportRun = {
     id: randomUUID(),
-    report_date: reportDatePt,
-    report_date_pt: `${formatAppDate(startOfAppDateUtc(reportDatePt))} PT`,
+    report_date: reportDate,
+    report_date_pt: `${formatAppDate(startOfAppDateUtc(reportDate))} PT`,
     status: "generated",
     generated_at: generatedAt,
     generated_at_pt: formatAppDateTime(generatedAt),
@@ -151,7 +152,7 @@ export async function generateDailyReport(reportDatePt: string): Promise<DailyRe
     source_count: built.sourceCount,
     health_status: built.healthStatus,
     error_message: null,
-    metadata: { report_date_pt: reportDatePt },
+    metadata: { report_date_pt: reportDate },
   };
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();

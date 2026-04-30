@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Download, FileText, RefreshCcw } from "lucide-react";
 import { getDailyReport, listDailyReports } from "@/aggregation/services/daily-report-service";
-import { addDaysToDateKey, dateKeyInAppTimeZone, formatAppDate, startOfAppDateUtc } from "@/storage/runtime/app-time";
+import { addDaysToDateKey, dateKeyInAppTimeZone, formatAppDate, normalizeDateOnlyKey, startOfAppDateUtc } from "@/storage/runtime/app-time";
 import { Badge } from "@/presentation/components/ui/badge";
 import { Button, LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
@@ -22,7 +22,7 @@ function displayMetric(value: number | null, textValue: string | null, unit: str
 
 export default async function DailyReportPage({ searchParams }: { searchParams?: Promise<{ date?: string }> }) {
   const params = await searchParams;
-  const reportDate = params?.date?.slice(0, 10) ?? yesterdayPt();
+  const reportDate = normalizeDateOnlyKey(params?.date, yesterdayPt());
   const [report, reports] = await Promise.all([getDailyReport(reportDate), listDailyReports(12)]);
   const metricsBySection = new Map<string, NonNullable<typeof report>["metrics"]>();
   for (const metric of report?.metrics ?? []) {

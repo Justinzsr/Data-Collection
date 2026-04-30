@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { dashboardAuthCookie, loginDashboard } from "./auth";
 
 test("dashboard shows platform modules and sparklines", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard");
   await expect(page.getByRole("heading", { name: "MoonArq Data Command Center" })).toBeVisible();
   await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" }).first()).toBeVisible();
@@ -12,7 +14,9 @@ test("dashboard shows platform modules and sparklines", async ({ page }) => {
 });
 
 test("add source wizard detects Supabase and Website and shows credentials after save", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard/sources/new");
+  await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
   await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://xxxxx.supabase.co");
   await page.getByRole("button", { name: "Detect" }).click();
   await expect(page.getByText("Supabase").first()).toBeVisible();
@@ -24,6 +28,7 @@ test("add source wizard detects Supabase and Website and shows credentials after
   await expect(page.getByText("fake••••alue")).toBeVisible();
 
   await page.goto("/dashboard/sources/new");
+  await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
   await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://moonarqstudio.com");
   await page.getByRole("button", { name: "Detect" }).click();
   await expect(page.getByText("MoonArq Website / Vercel").first()).toBeVisible();
@@ -34,6 +39,7 @@ test("add source wizard detects Supabase and Website and shows credentials after
 });
 
 test("events page shows non-empty JavaScript tracking snippet", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard/events");
   await expect(page.getByText("Lightweight JavaScript snippet")).toBeVisible();
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
@@ -43,7 +49,9 @@ test("events page shows non-empty JavaScript tracking snippet", async ({ page })
 });
 
 test("credential API routes save masked hints and delete credentials", async ({ request }) => {
+  const cookie = await dashboardAuthCookie(request);
   const createResponse = await request.post("/api/sources", {
+    headers: { cookie },
     data: {
       source_type_key: "supabase",
       display_name: "Supabase API route test",
@@ -56,13 +64,14 @@ test("credential API routes save masked hints and delete credentials", async ({ 
   expect(createResponse.ok()).toBeTruthy();
   const { source } = await createResponse.json();
 
-  const fieldsResponse = await request.get(`/api/sources/${source.id}/credentials`);
+  const fieldsResponse = await request.get(`/api/sources/${source.id}/credentials`, { headers: { cookie } });
   expect(fieldsResponse.ok()).toBeTruthy();
   const fieldsBody = await fieldsResponse.json();
   expect(fieldsBody.fields.map((field: { key: string }) => field.key)).toContain("service_role_key");
   expect(fieldsBody.fields.map((field: { key: string }) => field.key)).not.toContain("anon_key");
 
   const saveResponse = await request.post(`/api/sources/${source.id}/credentials`, {
+    headers: { cookie },
     data: { credentials: { service_role_key: "fake-service-role-value" } },
   });
   expect(saveResponse.ok()).toBeTruthy();
@@ -70,12 +79,13 @@ test("credential API routes save masked hints and delete credentials", async ({ 
   expect(JSON.stringify(saveBody)).not.toContain("fake-service-role-value");
   expect(saveBody.saved.find((item: { field_key: string }) => item.field_key === "service_role_key").value_hint).toBe("fake••••alue");
 
-  const deleteResponse = await request.delete(`/api/sources/${source.id}/credentials/service_role_key`);
+  const deleteResponse = await request.delete(`/api/sources/${source.id}/credentials/service_role_key`, { headers: { cookie } });
   expect(deleteResponse.ok()).toBeTruthy();
   expect((await deleteResponse.json()).deleted).toBe(true);
 });
 
 test("source detail pages show setup, credentials, actions, and website snippets", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard/sources/22222222-2222-4222-8222-222222222222");
   await expect(page.getByRole("heading", { name: "MoonArq Supabase" })).toBeVisible();
   await expect(page.getByText("Connection state")).toBeVisible();
@@ -91,6 +101,7 @@ test("source detail pages show setup, credentials, actions, and website snippets
 });
 
 test("sources page supports sync controls", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard/sources");
   await expect(page.getByRole("heading", { name: "Source management" })).toBeVisible();
   const supabaseCard = page.locator("article").filter({ hasText: "MoonArq Supabase" }).first();
@@ -98,10 +109,11 @@ test("sources page supports sync controls", async ({ page }) => {
   await supabaseCard.getByRole("button", { name: /^Sync$/ }).click();
   const response = await responsePromise;
   expect(response.status()).toBeLessThan(500);
-  await expect(page.getByText(/Sync (success|failed)/)).toBeVisible();
+  await expect(page.getByRole("main").getByText(/Sync (success|failed)/)).toBeVisible();
 });
 
 test("mobile dashboard has no horizontal overflow", async ({ page }) => {
+  await loginDashboard(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/dashboard");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

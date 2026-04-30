@@ -4,6 +4,7 @@ import {
   endOfAppDateUtc,
   formatAppDateTime,
   getAppDateRange,
+  normalizeDateOnlyKey,
   startOfAppDateUtc,
 } from "@/storage/runtime/app-time";
 
@@ -31,5 +32,11 @@ describe("app time helpers", () => {
 
   it("formats user-facing timestamps with a Pacific time-zone label", () => {
     expect(formatAppDateTime("2026-04-27T06:37:00.000Z")).toMatch(/Apr 26.*11:37.*P[SD]T/);
+  });
+
+  it("normalizes database date-only values without producing browser-hostile dates", () => {
+    expect(normalizeDateOnlyKey("2026-04-28T00:00:00.000Z", "2026-04-27")).toBe("2026-04-28");
+    expect(normalizeDateOnlyKey(new Date("2026-04-28T00:00:00.000Z"), "2026-04-27")).toBe("2026-04-28");
+    expect(normalizeDateOnlyKey("Tue Apr 28", "2026-04-27")).toBe("2026-04-27");
   });
 });

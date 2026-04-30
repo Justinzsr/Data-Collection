@@ -1,11 +1,12 @@
 import { dailyReportToExcelXml, generateDailyReport, getDailyReport } from "@/aggregation/services/daily-report-service";
-import { addDaysToDateKey, dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
+import { addDaysToDateKey, dateKeyInAppTimeZone, normalizeDateOnlyKey } from "@/storage/runtime/app-time";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const reportDate = url.searchParams.get("date")?.slice(0, 10) ?? addDaysToDateKey(dateKeyInAppTimeZone(), -1);
+  const fallbackReportDate = addDaysToDateKey(dateKeyInAppTimeZone(), -1);
+  const reportDate = normalizeDateOnlyKey(url.searchParams.get("date"), fallbackReportDate);
   const report = (await getDailyReport(reportDate)) ?? (await generateDailyReport(reportDate));
   const xml = dailyReportToExcelXml(report);
   return new Response(xml, {

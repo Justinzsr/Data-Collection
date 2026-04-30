@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { loginDashboard } from "./auth";
 
-test("dev bypass dashboard loads demo data", async ({ page }) => {
+test("dashboard login loads demo data", async ({ page }) => {
   await page.goto("/login");
-  await expect(page.getByText("Enter with dev bypass")).toBeVisible();
-  await page.getByText("Enter with dev bypass").click();
+  await page.getByLabel("Admin password").fill("e2e-dashboard-password");
+  await page.getByRole("button", { name: "Enter command center" }).click();
   await expect(page.getByRole("heading", { name: "MoonArq Data Command Center" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "MoonArq Website / Vercel" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Cross-platform trend" })).toBeVisible();
@@ -11,7 +12,9 @@ test("dev bypass dashboard loads demo data", async ({ page }) => {
 });
 
 test("add source wizard detects Supabase and website", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard/sources/new");
+  await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
   await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://xxxxx.supabase.co");
   await page.getByRole("button", { name: /Detect/ }).click();
   await expect(page.getByText("Supabase").first()).toBeVisible();
@@ -25,6 +28,7 @@ test("add source wizard detects Supabase and website", async ({ page }) => {
 });
 
 test("events page shows snippets", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard/events");
   await expect(page.getByText("Lightweight JavaScript snippet")).toBeVisible();
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
@@ -32,6 +36,7 @@ test("events page shows snippets", async ({ page }) => {
 });
 
 test("data explorer and daily report are reachable from the dashboard", async ({ page }) => {
+  await loginDashboard(page);
   await page.goto("/dashboard");
   await expect(page.getByRole("link", { name: /Open Report/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Explore Data/ })).toBeVisible();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, Clipboard, DatabaseZap, KeyRound, LinkIcon, Play, Radar, ShieldAlert, Webhook } from "lucide-react";
 import { toast } from "sonner";
@@ -26,6 +26,18 @@ const examples = [
   "https://vercel.com/team/project",
   "https://your-store.myshopify.com",
 ];
+
+function subscribeToHydration() {
+  return () => {};
+}
+
+function getClientHydrationSnapshot() {
+  return true;
+}
+
+function getServerHydrationSnapshot() {
+  return false;
+}
 
 type SavedSource = {
   id: string;
@@ -105,6 +117,7 @@ export function AddSourceWizard() {
   const [saving, setSaving] = useState(false);
   const [savedSource, setSavedSource] = useState<SavedSource | null>(null);
   const [syncRunId, setSyncRunId] = useState<string | null>(null);
+  const hydrated = useSyncExternalStore(subscribeToHydration, getClientHydrationSnapshot, getServerHydrationSnapshot);
 
   const step = savedSource ? 4 : selected ? 3 : detections.length > 0 ? 2 : 1;
   const effectiveSourceTypeKey = selected?.sourceTypeKey === "website" ? websiteMode : selected?.sourceTypeKey ?? null;
@@ -169,7 +182,7 @@ export function AddSourceWizard() {
   const metrics = useMemo(() => selected?.possibleMetrics ?? [], [selected]);
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]">
+    <div data-testid="add-source-wizard" data-onboarding-ready={hydrated ? "true" : "false"} className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]">
       <GlassPanel className="p-4 sm:p-6">
         <div className="mb-6 grid grid-cols-4 gap-2 text-xs text-slate-400">
           {["Input", "Detect", "Setup", "Saved"].map((label, index) => (
@@ -190,10 +203,11 @@ export function AddSourceWizard() {
                     id="source-input"
                     value={inputUrl}
                     onChange={(event) => setInputUrl(event.target.value)}
+                    disabled={!hydrated}
                     placeholder="https://moonarqstudio.com"
-                    className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-slate-600 focus:ring-2"
+                    className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-slate-600 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-55"
                   />
-                  <Button onClick={detect} variant="primary">
+                  <Button type="button" onClick={detect} disabled={!hydrated || !inputUrl.trim()} variant="primary">
                     <Radar className="h-4 w-4" />
                     Detect
                   </Button>
@@ -201,9 +215,11 @@ export function AddSourceWizard() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   {examples.map((example) => (
                     <button
+                      type="button"
                       key={example}
                       className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-400 transition hover:border-cyan-200/30 hover:text-cyan-100"
                       onClick={() => setInputUrl(example)}
+                      disabled={!hydrated}
                     >
                       {example}
                     </button>
@@ -215,6 +231,7 @@ export function AddSourceWizard() {
                 <div className="grid gap-3">
                   {detections.map((detection) => (
                     <button
+                      type="button"
                       key={`${detection.sourceTypeKey}-${detection.confidence}`}
                       onClick={() => setSelected(detection)}
                       className={`rounded-lg border p-4 text-left transition ${
@@ -257,6 +274,7 @@ export function AddSourceWizard() {
                       <p className="mb-2 text-sm font-medium text-slate-200">MoonArq website data mode</p>
                       <div className="grid gap-2 lg:grid-cols-2">
                         <button
+                          type="button"
                           onClick={() => setWebsiteMode("vercel_web_analytics_drain")}
                           className={`rounded-lg border px-3 py-3 text-left transition ${
                             websiteMode === "vercel_web_analytics_drain"
@@ -268,6 +286,7 @@ export function AddSourceWizard() {
                           <div className="mt-1 text-xs leading-5 text-slate-400">Use the official Vercel Analytics Drain now that the MoonArq Vercel team is on Pro.</div>
                         </button>
                         <button
+                          type="button"
                           onClick={() => setWebsiteMode("website")}
                           className={`rounded-lg border px-3 py-3 text-left transition ${
                             websiteMode === "website"
@@ -287,6 +306,7 @@ export function AddSourceWizard() {
                     <div className="grid gap-2 sm:grid-cols-4">
                       {["hybrid", "hourly", "webhook", "manual"].map((mode) => (
                         <button
+                          type="button"
                           key={mode}
                           onClick={() => setSyncMode(mode)}
                           className={`rounded-lg border px-3 py-3 text-sm capitalize transition ${
@@ -299,12 +319,12 @@ export function AddSourceWizard() {
                     </div>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <Button onClick={save} disabled={saving || !!savedSource} variant="primary">
+                    <Button type="button" onClick={save} disabled={!hydrated || saving || !!savedSource} variant="primary">
                       <CheckCircle2 className="h-4 w-4" />
                       {savedSource ? "Saved" : "Save Source"}
                     </Button>
                     {savedSource ? (
-                      <Button onClick={runInitialSync} variant="secondary">
+                      <Button type="button" onClick={runInitialSync} variant="secondary">
                         <Play className="h-4 w-4" />
                         Run Initial Sync
                       </Button>

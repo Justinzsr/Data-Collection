@@ -1,18 +1,19 @@
 import { generateDailyReport } from "@/aggregation/services/daily-report-service";
-import { dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
+import { addDaysToDateKey, dateKeyInAppTimeZone, normalizeDateOnlyKey } from "@/storage/runtime/app-time";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") ?? "";
-  let reportDatePt = dateKeyInAppTimeZone();
+  const fallbackReportDate = addDaysToDateKey(dateKeyInAppTimeZone(), -1);
+  let reportDatePt = fallbackReportDate;
   if (contentType.includes("application/json")) {
     const body = await request.json().catch(() => ({})) as { reportDatePt?: string };
-    reportDatePt = body.reportDatePt?.slice(0, 10) ?? reportDatePt;
+    reportDatePt = normalizeDateOnlyKey(body.reportDatePt, fallbackReportDate);
   } else {
     const form = await request.formData();
     const value = form.get("reportDatePt");
-    if (typeof value === "string" && value) reportDatePt = value.slice(0, 10);
+    reportDatePt = normalizeDateOnlyKey(typeof value === "string" ? value : null, fallbackReportDate);
   }
 
   const report = await generateDailyReport(reportDatePt);

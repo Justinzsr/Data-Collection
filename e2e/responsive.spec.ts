@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { loginDashboard } from "./auth";
+
+test.beforeEach(async ({ page }) => {
+  await loginDashboard(page);
+});
 
 for (const viewport of [
   { width: 1440, height: 1000 },

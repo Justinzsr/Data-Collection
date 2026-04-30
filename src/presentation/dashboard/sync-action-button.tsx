@@ -22,9 +22,11 @@ function errorMessage(body: Record<string, unknown>, fallback: string) {
 
 export function SyncActionButton({ sourceId, compact = false }: { sourceId: string; compact?: boolean }) {
   const [loading, setLoading] = useState(false);
+  const [resultLabel, setResultLabel] = useState<string | null>(null);
   const router = useRouter();
   async function run() {
     setLoading(true);
+    setResultLabel(null);
     try {
       const response = await fetch(`/api/sources/${sourceId}/sync`, { method: "POST" });
       const body = await readJson(response);
@@ -32,21 +34,26 @@ export function SyncActionButton({ sourceId, compact = false }: { sourceId: stri
       if (!response.ok || !run || run.status !== "success") {
         throw new Error(errorMessage(body, run?.status === "skipped" ? "Source is already syncing." : "Sync failed."));
       }
+      setResultLabel("Sync success");
       toast.success("Sync success", {
         description: `sync_run_id: ${String(run.id)} · records_fetched: ${String(run.records_fetched ?? 0)}`,
       });
-      router.refresh();
+      window.setTimeout(() => router.refresh(), 900);
     } catch (error) {
+      setResultLabel("Sync failed");
       toast.error("Sync failed", { description: error instanceof Error ? error.message : "Unknown error" });
     } finally {
       setLoading(false);
     }
   }
   return (
-    <Button onClick={run} disabled={loading} variant="primary" className={compact ? "px-3" : undefined}>
-      {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-      {compact ? "Sync" : "Run Sync Now"}
-    </Button>
+    <span className="inline-flex flex-col gap-1">
+      <Button type="button" onClick={run} disabled={loading} variant="primary" className={compact ? "px-3" : undefined}>
+        {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+        {compact ? "Sync" : "Run Sync Now"}
+      </Button>
+      {resultLabel ? <span className="text-xs text-slate-400">{resultLabel}</span> : null}
+    </span>
   );
 }
 
@@ -69,7 +76,7 @@ export function RunAllDueButton() {
     }
   }
   return (
-    <Button onClick={run} disabled={loading} variant="secondary">
+    <Button type="button" onClick={run} disabled={loading} variant="secondary">
       {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
       Run All Due Sources
     </Button>

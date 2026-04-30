@@ -51,6 +51,25 @@ export function dateKeyInAppTimeZone(value: DateInput = new Date()) {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
+export function isAppDateKey(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+export function normalizeDateOnlyKey(value: DateInput, fallback = dateKeyInAppTimeZone()) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(value.getUTCDate()).padStart(2, "0")}`;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed.slice(0, 10);
+    const isoDatePrefix = /^(\d{4}-\d{2}-\d{2})(?:[T\s]|$)/.exec(trimmed);
+    if (isoDatePrefix) return isoDatePrefix[1];
+  }
+
+  return fallback;
+}
+
 export function addDaysToDateKey(dateKey: string, days: number) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
