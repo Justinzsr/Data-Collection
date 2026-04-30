@@ -8,7 +8,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm exec next dev -p 3100",
+    command: "pnpm exec next dev -H 127.0.0.1 -p 3100",
     url: "http://127.0.0.1:3100",
     reuseExistingServer: true,
     env: {

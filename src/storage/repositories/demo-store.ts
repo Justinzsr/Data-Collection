@@ -9,6 +9,10 @@ export function getDemoStore(): DemoWorkspace {
   if (!globalThis.__MOONARQ_DEMO_STORE__) {
     globalThis.__MOONARQ_DEMO_STORE__ = createDemoWorkspace();
   }
+  globalThis.__MOONARQ_DEMO_STORE__.platformChangeEvents ??= [];
+  globalThis.__MOONARQ_DEMO_STORE__.dailyReportRuns ??= [];
+  globalThis.__MOONARQ_DEMO_STORE__.dailyReportSections ??= [];
+  globalThis.__MOONARQ_DEMO_STORE__.dailyReportMetrics ??= [];
   return globalThis.__MOONARQ_DEMO_STORE__;
 }
 

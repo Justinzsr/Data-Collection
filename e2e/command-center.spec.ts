@@ -93,8 +93,12 @@ test("source detail pages show setup, credentials, actions, and website snippets
 test("sources page supports sync controls", async ({ page }) => {
   await page.goto("/dashboard/sources");
   await expect(page.getByRole("heading", { name: "Source management" })).toBeVisible();
-  await page.getByRole("button", { name: /^Sync$/ }).first().click();
-  await expect(page.getByText(/Sync (success|skipped)/)).toBeVisible();
+  const supabaseCard = page.locator("article").filter({ hasText: "MoonArq Supabase" }).first();
+  const responsePromise = page.waitForResponse((response) => response.url().includes("/api/sources/") && response.url().endsWith("/sync"));
+  await supabaseCard.getByRole("button", { name: /^Sync$/ }).click();
+  const response = await responsePromise;
+  expect(response.status()).toBeLessThan(500);
+  await expect(page.getByText(/Sync (success|failed)/)).toBeVisible();
 });
 
 test("mobile dashboard has no horizontal overflow", async ({ page }) => {

@@ -32,6 +32,10 @@ function appDateParts(date: Date) {
   };
 }
 
+export function appDateTimeParts(value: DateInput = new Date()) {
+  return appDateParts(toDate(value) ?? new Date());
+}
+
 function appLocalDateTimeToUtc(dateKey: string, hour: number, minute: number, second: number, millisecond: number) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const desiredUtc = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);

@@ -224,6 +224,61 @@ export interface ConnectorEvent {
   created_at: string;
 }
 
+export type PlatformChangeType = "inserted" | "updated" | "deleted" | "snapshot" | "event";
+
+export interface PlatformChangeEvent {
+  id: string;
+  source_id: string | null;
+  source_type_key: SourceTypeKey;
+  platform_record_type: string;
+  external_record_id: string;
+  change_type: PlatformChangeType;
+  changed_at: string;
+  changed_at_pt: string;
+  previous_hash: string | null;
+  new_hash: string;
+  changed_fields: JsonValue[];
+  payload: JsonRecord;
+  created_at: string;
+}
+
+export interface DailyReportRun {
+  id: string;
+  report_date: string;
+  report_date_pt: string;
+  status: "generated" | "error";
+  generated_at: string;
+  generated_at_pt: string;
+  summary: string;
+  source_count: number;
+  health_status: string;
+  error_message: string | null;
+  metadata: JsonRecord;
+}
+
+export interface DailyReportSection {
+  id: string;
+  report_run_id: string;
+  section_key: string;
+  title: string;
+  summary: string;
+  sort_order: number;
+  metadata: JsonRecord;
+}
+
+export interface DailyReportMetric {
+  id: string;
+  report_run_id: string;
+  section_key: string;
+  metric_key: string;
+  label: string;
+  value: number | null;
+  text_value: string | null;
+  unit: string | null;
+  sort_order: number;
+  metadata: JsonRecord;
+}
+
 export interface DemoWorkspace {
   sources: Source[];
   credentials: SourceCredential[];
@@ -236,4 +291,8 @@ export interface DemoWorkspace {
   webEvents: WebEvent[];
   metricDefinitions: MetricDefinition[];
   connectorEvents: ConnectorEvent[];
+  platformChangeEvents: PlatformChangeEvent[];
+  dailyReportRuns: DailyReportRun[];
+  dailyReportSections: DailyReportSection[];
+  dailyReportMetrics: DailyReportMetric[];
 }

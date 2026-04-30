@@ -5,6 +5,7 @@ import type { SyncRun, SyncTrigger } from "@/storage/db/schema";
 import { getDecryptedCredentialMap } from "@/storage/repositories/credentials-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
 import { upsertMetrics } from "@/storage/repositories/metrics-repository";
+import { recordChangeEventsForRawPayloads } from "@/storage/repositories/platform-change-events-repository";
 import { storeRawPayloads } from "@/storage/repositories/raw-ingestions-repository";
 import { getSource, listDueSources, markSourceSyncState } from "@/storage/repositories/sources-repository";
 import { createSyncRun, updateSyncRun } from "@/storage/repositories/sync-runs-repository";
@@ -69,6 +70,7 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       isDemoMode: source.status === "demo" || !isRuntimeDatabaseConfigured(),
     });
     const raw = await storeRawPayloads(source, syncResult.rawPayloads);
+    await recordChangeEventsForRawPayloads(source, syncResult.rawPayloads);
     const normalized = await connector.normalize(syncResult.rawPayloads, source);
     const metrics = await upsertMetrics(normalized.metrics);
     const finishedAt = new Date();

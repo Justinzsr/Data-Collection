@@ -400,5 +400,9 @@ export function createDemoWorkspace(): DemoWorkspace {
     webEvents: makeEvents(),
     metricDefinitions,
     connectorEvents: makeConnectorEvents(sources),
+    platformChangeEvents: [],
+    dailyReportRuns: [],
+    dailyReportSections: [],
+    dailyReportMetrics: [],
   };
 }

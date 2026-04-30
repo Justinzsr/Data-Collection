@@ -88,6 +88,7 @@ export function isPublicIngestionOrAuthPath(pathname: string) {
   return (
     pathname === "/api/track" ||
     pathname === "/api/cron/sync" ||
+    pathname === "/api/cron/daily-report" ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/api/webhooks/vercel/analytics-drain/")
   );
@@ -103,8 +104,8 @@ export function isPrivateApiPath(pathname: string) {
     pathname.startsWith("/api/sources") ||
     pathname.startsWith("/api/sync") ||
     pathname.startsWith("/api/metrics") ||
+    pathname.startsWith("/api/reports") ||
     pathname.startsWith("/api/content") ||
     pathname.startsWith("/api/webhooks/supabase/")
   );
 }
-

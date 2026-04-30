@@ -1,6 +1,8 @@
-import { ArrowRight, DatabaseZap, ShoppingBag, Video } from "lucide-react";
+import { ArrowRight, DatabaseZap, FileText, ShoppingBag, TableProperties, Video } from "lucide-react";
+import { getDailyReport } from "@/aggregation/services/daily-report-service";
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
 import { getGlobalPlatformHealth, getPlatformModules } from "@/aggregation/services/platform-modules-service";
+import { addDaysToDateKey, dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
 import { Badge } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel } from "@/presentation/components/ui/panel";
@@ -42,7 +44,12 @@ function compactMetric(value: number | string, unit: string) {
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<{ range?: string }> }) {
   const params = await searchParams;
   const range = parseRange(params?.range);
-  const [modules, health] = await Promise.all([getPlatformModules(range), getGlobalPlatformHealth(range)]);
+  const yesterday = addDaysToDateKey(dateKeyInAppTimeZone(), -1);
+  const [modules, health, yesterdayReport] = await Promise.all([
+    getPlatformModules(range),
+    getGlobalPlatformHealth(range),
+    getDailyReport(yesterday),
+  ]);
   const websiteModule = modules.find((platformModule) => platformModule.sourceTypeKey === "website");
   const supabaseModule = modules.find((platformModule) => platformModule.sourceTypeKey === "supabase");
   const socialModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "tiktok" || platformModule.sourceTypeKey === "instagram");
@@ -53,6 +60,37 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
     <div className="mx-auto grid max-w-[1600px] gap-6">
       <CommandCenterHeader modules={modules} range={range} />
       <GlobalHealthStrip health={health} />
+
+      <GlassPanel className="p-4 sm:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10">
+              <FileText className="h-5 w-5 text-cyan-100" />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/75">Daily Morning Report</p>
+              <h2 className="mt-1 text-lg font-semibold text-white">
+                {yesterdayReport ? "Yesterday's report is ready" : "Yesterday's report has not been generated"}
+              </h2>
+              <p className="mt-1 text-sm text-slate-400">
+                {yesterdayReport
+                  ? `Generated ${yesterdayReport.run.generated_at_pt}. Website and Supabase summaries are fixed for review.`
+                  : "Generate a safe PT daily snapshot from the reporting layer when you are ready."}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <LinkButton href="/dashboard/reports/daily" variant="primary">
+              <FileText className="h-4 w-4" />
+              Open Report
+            </LinkButton>
+            <LinkButton href="/dashboard/data" variant="secondary">
+              <TableProperties className="h-4 w-4" />
+              Explore Data
+            </LinkButton>
+          </div>
+        </div>
+      </GlassPanel>
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
         {websiteModule ? (

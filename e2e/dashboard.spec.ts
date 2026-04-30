@@ -30,3 +30,16 @@ test("events page shows snippets", async ({ page }) => {
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
   await expect(page.getByText("React / Next.js helper")).toBeVisible();
 });
+
+test("data explorer and daily report are reachable from the dashboard", async ({ page }) => {
+  await page.goto("/dashboard");
+  await expect(page.getByRole("link", { name: /Open Report/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Explore Data/ })).toBeVisible();
+  await page.goto("/dashboard/data");
+  await expect(page.getByRole("heading", { name: "Source Data Explorer" })).toBeVisible();
+  await expect(page.getByText("Website / Vercel").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Copy JSON/ }).last()).toBeVisible();
+  await page.goto("/dashboard/reports/daily");
+  await expect(page.getByRole("heading", { name: "MoonArq Daily Report" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Generate/ })).toBeVisible();
+});

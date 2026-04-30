@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { ingestWebsiteEvent } from "@/collection/tracking/website-event-ingestion";
+import { recordChangeEventsForRawPayloads } from "@/storage/repositories/platform-change-events-repository";
 import { storeRawPayloads } from "@/storage/repositories/raw-ingestions-repository";
 import { markSourceSyncState } from "@/storage/repositories/sources-repository";
 import type { JsonRecord, Source } from "@/storage/db/schema";
@@ -127,15 +128,14 @@ export async function ingestVercelAnalyticsDrain(input: {
   }
 
   const events = parseBody(input.rawBody);
-  await storeRawPayloads(
-    input.source,
-    events.map((event) => ({
-      externalId: `${event.eventType ?? "event"}:${event.timestamp ?? Date.now()}:${event.deviceId ?? "unknown"}:${event.sessionId ?? "unknown"}`,
-      fetchedAt: new Date().toISOString(),
-      payload: event as JsonRecord,
-      cursor: { timestamp: event.timestamp ?? null },
-    })),
-  );
+  const rawPayloads = events.map((event) => ({
+    externalId: `${event.eventType ?? "event"}:${event.timestamp ?? Date.now()}:${event.deviceId ?? "unknown"}:${event.sessionId ?? "unknown"}`,
+    fetchedAt: new Date().toISOString(),
+    payload: event as JsonRecord,
+    cursor: { timestamp: event.timestamp ?? null },
+  }));
+  await storeRawPayloads(input.source, rawPayloads);
+  await recordChangeEventsForRawPayloads(input.source, rawPayloads);
 
   const stored = [];
   for (const event of events) {

@@ -20,6 +20,8 @@ for (const path of [
   "/dashboard/sources/new",
   "/dashboard/events",
   "/dashboard/sync",
+  "/dashboard/data",
+  "/dashboard/reports/daily",
   "/dashboard/sources/22222222-2222-4222-8222-222222222222",
 ]) {
   test(`${path} has no horizontal overflow on narrow mobile`, async ({ page }) => {
