@@ -23,7 +23,7 @@ type SavedCredential = {
   updated_at: string;
 };
 
-export function CredentialForm({ sourceId, title = "Credentials" }: { sourceId: string; title?: string }) {
+export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug }: { sourceId: string; title?: string; dataSpaceSlug?: string }) {
   const [fields, setFields] = useState<CredentialField[]>([]);
   const [saved, setSaved] = useState<SavedCredential[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -35,7 +35,8 @@ export function CredentialForm({ sourceId, title = "Credentials" }: { sourceId: 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/sources/${sourceId}/credentials`);
+      const query = dataSpaceSlug ? `?dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}` : "";
+      const response = await fetch(`/api/sources/${sourceId}/credentials${query}`);
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not load credentials.");
       setFields(body.fields ?? []);
@@ -45,7 +46,7 @@ export function CredentialForm({ sourceId, title = "Credentials" }: { sourceId: 
     } finally {
       setLoading(false);
     }
-  }, [sourceId]);
+  }, [sourceId, dataSpaceSlug]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -57,7 +58,8 @@ export function CredentialForm({ sourceId, title = "Credentials" }: { sourceId: 
   async function save() {
     setSaving(true);
     try {
-      const response = await fetch(`/api/sources/${sourceId}/credentials`, {
+      const query = dataSpaceSlug ? `?dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}` : "";
+      const response = await fetch(`/api/sources/${sourceId}/credentials${query}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ credentials: values }),
@@ -75,7 +77,8 @@ export function CredentialForm({ sourceId, title = "Credentials" }: { sourceId: 
   }
 
   async function remove(fieldKey: string) {
-    const response = await fetch(`/api/sources/${sourceId}/credentials/${encodeURIComponent(fieldKey)}`, { method: "DELETE" });
+    const query = dataSpaceSlug ? `?dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}` : "";
+    const response = await fetch(`/api/sources/${sourceId}/credentials/${encodeURIComponent(fieldKey)}${query}`, { method: "DELETE" });
     const body = await response.json();
     if (!response.ok) {
       toast.error("Could not remove credential", { description: body.error ?? "Unknown error" });

@@ -12,6 +12,7 @@ import type {
   WebEvent,
 } from "@/storage/db/schema";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
+import { DATA_SPACE_IDS, staticDataSpaces } from "@/storage/data-spaces";
 
 export function getDemoNow() {
   const override = process.env.DEMO_NOW;
@@ -77,6 +78,7 @@ function source(partial: Partial<Source> & Pick<Source, "id" | "source_type_key"
   const created = at(-60 * 24 * 28);
   return {
     id: partial.id,
+    data_space_id: partial.data_space_id ?? DATA_SPACE_IDS.moonarq,
     source_type_key: partial.source_type_key,
     display_name: partial.display_name,
     input_url: partial.input_url ?? null,
@@ -389,6 +391,7 @@ export function createDemoWorkspace(): DemoWorkspace {
   const sources = makeSources();
   const content = makeContent();
   return {
+    dataSpaces: staticDataSpaces(),
     sources,
     credentials: [],
     syncRuns: makeSyncRuns(sources),

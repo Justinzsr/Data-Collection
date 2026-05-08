@@ -1,4 +1,6 @@
+import { resolveDataSpaceFromRequest } from "@/app/api/data-space";
 import { enqueueSyncRun } from "@/collection/sync/engine";
+import { getSource } from "@/storage/repositories/sources-repository";
 import type { SyncRun } from "@/storage/db/schema";
 
 export const runtime = "nodejs";
@@ -22,9 +24,13 @@ function serializeSyncRun(run: SyncRun) {
   };
 }
 
-export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
+    const dataSpace = await resolveDataSpaceFromRequest(request);
+    if (!dataSpace) return Response.json({ ok: false, error: "Unknown data space." }, { status: 404 });
+    const source = await getSource(id, { dataSpaceId: dataSpace.id });
+    if (!source) return Response.json({ ok: false, error: "Source not found." }, { status: 404 });
     const run = await enqueueSyncRun({ sourceId: id, trigger: "manual" });
     const status = run.status === "error" ? 500 : run.status === "skipped" ? 409 : 200;
     return Response.json({

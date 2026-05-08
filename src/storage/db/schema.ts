@@ -21,10 +21,25 @@ export type SourceStatus =
   | "error"
   | "disabled";
 
+export type DataSpaceCategory = "business" | "personal" | "client" | "test" | "archive";
 export type SyncMode = "webhook" | "hourly" | "manual" | "hybrid";
 export type SyncTrigger = "webhook" | "cron" | "manual" | "initial" | "retry";
 export type SyncRunStatus = "queued" | "running" | "success" | "error" | "skipped";
 export type ConnectorEventSeverity = "info" | "warning" | "error";
+
+export interface DataSpace {
+  id: string;
+  slug: string;
+  display_name: string;
+  description: string | null;
+  category: DataSpaceCategory;
+  icon: string | null;
+  is_default: boolean;
+  status: "active" | string;
+  metadata: JsonRecord;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface CredentialField {
   key: string;
@@ -55,6 +70,7 @@ export interface SourceTypeDefinition {
 
 export interface Source {
   id: string;
+  data_space_id: string;
   source_type_key: SourceTypeKey;
   display_name: string;
   input_url: string | null;
@@ -244,6 +260,7 @@ export interface PlatformChangeEvent {
 
 export interface DailyReportRun {
   id: string;
+  data_space_id: string;
   report_date: string;
   report_date_pt: string;
   status: "generated" | "error";
@@ -280,6 +297,7 @@ export interface DailyReportMetric {
 }
 
 export interface DemoWorkspace {
+  dataSpaces: DataSpace[];
   sources: Source[];
   credentials: SourceCredential[];
   syncRuns: SyncRun[];

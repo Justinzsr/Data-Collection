@@ -1,4 +1,6 @@
+import { resolveDataSpaceFromRequest } from "@/app/api/data-space";
 import { generateDailyReport } from "@/aggregation/services/daily-report-service";
+import { dashboardPath } from "@/presentation/routes/data-space-routes";
 import { addDaysToDateKey, dateKeyInAppTimeZone, normalizeDateOnlyKey } from "@/storage/runtime/app-time";
 
 export const runtime = "nodejs";
@@ -16,9 +18,11 @@ export async function POST(request: Request) {
     reportDatePt = normalizeDateOnlyKey(typeof value === "string" ? value : null, fallbackReportDate);
   }
 
-  const report = await generateDailyReport(reportDatePt);
+  const dataSpace = await resolveDataSpaceFromRequest(request);
+  if (!dataSpace) return Response.json({ error: "Unknown data space." }, { status: 404 });
+  const report = await generateDailyReport(reportDatePt, dataSpace);
   if (contentType.includes("application/json")) {
     return Response.json({ reportDate: report.run.report_date, status: report.run.status });
   }
-  return Response.redirect(new URL(`/dashboard/reports/daily?date=${report.run.report_date}`, request.url), 303);
+  return Response.redirect(new URL(`${dashboardPath(dataSpace.slug, "/reports/daily")}?date=${report.run.report_date}`, request.url), 303);
 }

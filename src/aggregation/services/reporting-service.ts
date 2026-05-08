@@ -6,6 +6,9 @@ import { listSources } from "@/storage/repositories/sources-repository";
 import { endOfAppDateUtc, formatAppDateTime, startOfAppDateUtc } from "@/storage/runtime/app-time";
 
 export type WebsiteDailyReportRow = {
+  data_space_id?: string;
+  data_space_slug?: string;
+  data_space_name?: string;
   date_pt: string;
   source_id: string | null;
   source_name: string;
@@ -23,6 +26,9 @@ export type WebsiteDailyReportRow = {
 };
 
 export type SupabaseDailyReportRow = {
+  data_space_id?: string;
+  data_space_slug?: string;
+  data_space_name?: string;
   date_pt: string;
   source_id: string | null;
   source_name: string;
@@ -120,7 +126,9 @@ function normalizeSupabase(row: SupabaseDailyReportRow): SupabaseDailyReportRow 
   };
 }
 
-export async function listWebsiteDailyReportingRows(options: { startDate?: string; endDate?: string; limit?: number } = {}) {
+export async function listWebsiteDailyReportingRows(options: { startDate?: string; endDate?: string; limit?: number; dataSpaceId?: string; dataSpaceSlug?: string } = {}) {
+  const dataSpaceId = options.dataSpaceId;
+  const dataSpaceSlug = options.dataSpaceSlug;
   if (isRuntimeDatabaseConfigured()) {
     const values: unknown[] = [];
     const where: string[] = [];
@@ -132,10 +140,18 @@ export async function listWebsiteDailyReportingRows(options: { startDate?: strin
       values.push(options.endDate);
       where.push(`date_pt <= $${values.length}`);
     }
+    if (dataSpaceId) {
+      values.push(dataSpaceId);
+      where.push(`data_space_id = $${values.length}`);
+    } else if (dataSpaceSlug) {
+      values.push(dataSpaceSlug);
+      where.push(`data_space_slug = $${values.length}`);
+    }
     values.push(options.limit ?? 90);
     try {
+      const viewName = dataSpaceId || dataSpaceSlug ? "reporting.platform_website_daily" : "reporting.moonarq_website_daily";
       const rows = await queryRows<WebsiteDailyReportRow>(
-        `select * from reporting.moonarq_website_daily ${where.length ? `where ${where.join(" and ")}` : ""} order by date_pt desc limit $${values.length}`,
+        `select * from ${viewName} ${where.length ? `where ${where.join(" and ")}` : ""} order by date_pt desc limit $${values.length}`,
         values,
       );
       return rows.map(normalizeWebsite);
@@ -145,12 +161,12 @@ export async function listWebsiteDailyReportingRows(options: { startDate?: strin
     }
   }
 
-  const source = (await listSources()).find((item) => item.source_type_key === "website" || item.source_type_key === "vercel_web_analytics_drain") ?? null;
-  const metrics = await listMetrics({ sourceId: source?.id, sourceTypeKey: websiteSourceType(source), startDate: options.startDate, endDate: options.endDate });
+  const source = (await listSources({ dataSpaceId })).find((item) => item.source_type_key === "website" || item.source_type_key === "vercel_web_analytics_drain") ?? null;
+  const metrics = await listMetrics({ sourceId: source?.id, sourceTypeKey: websiteSourceType(source), startDate: options.startDate, endDate: options.endDate, dataSpaceId });
   const dates = [...new Set(metrics.map((metric) => metric.date))].sort().reverse().slice(0, options.limit ?? 90);
   return Promise.all(dates.map(async (date) => {
     const dayMetrics = metrics.filter((metric) => metric.date === date);
-    const events = source ? await findWebEvents({ sourceId: source.id, startOccurredAt: startOfAppDateUtc(date), endOccurredAt: endOfAppDateUtc(date), limit: 2000 }) : [];
+    const events = source ? await findWebEvents({ sourceId: source.id, startOccurredAt: startOfAppDateUtc(date), endOccurredAt: endOfAppDateUtc(date), limit: 2000, dataSpaceId }) : [];
     return normalizeWebsite({
       date_pt: date,
       source_id: source?.id ?? null,
@@ -170,7 +186,7 @@ export async function listWebsiteDailyReportingRows(options: { startDate?: strin
   }));
 }
 
-export async function listSupabaseDailyReportingRows(options: { startDate?: string; endDate?: string; limit?: number } = {}) {
+export async function listSupabaseDailyReportingRows(options: { startDate?: string; endDate?: string; limit?: number; dataSpaceId?: string; dataSpaceSlug?: string } = {}) {
   if (isRuntimeDatabaseConfigured()) {
     const values: unknown[] = [];
     const where: string[] = [];
@@ -182,10 +198,18 @@ export async function listSupabaseDailyReportingRows(options: { startDate?: stri
       values.push(options.endDate);
       where.push(`date_pt <= $${values.length}`);
     }
+    if (options.dataSpaceId) {
+      values.push(options.dataSpaceId);
+      where.push(`data_space_id = $${values.length}`);
+    } else if (options.dataSpaceSlug) {
+      values.push(options.dataSpaceSlug);
+      where.push(`data_space_slug = $${values.length}`);
+    }
     values.push(options.limit ?? 90);
     try {
+      const viewName = options.dataSpaceId || options.dataSpaceSlug ? "reporting.platform_supabase_daily" : "reporting.moonarq_supabase_daily";
       const rows = await queryRows<SupabaseDailyReportRow>(
-        `select * from reporting.moonarq_supabase_daily ${where.length ? `where ${where.join(" and ")}` : ""} order by date_pt desc limit $${values.length}`,
+        `select * from ${viewName} ${where.length ? `where ${where.join(" and ")}` : ""} order by date_pt desc limit $${values.length}`,
         values,
       );
       return rows.map(normalizeSupabase);
@@ -195,9 +219,9 @@ export async function listSupabaseDailyReportingRows(options: { startDate?: stri
     }
   }
 
-  const source = (await listSources()).find((item) => item.source_type_key === "supabase") ?? null;
-  const metrics = await listMetrics({ sourceId: source?.id, sourceTypeKey: "supabase", startDate: options.startDate, endDate: options.endDate });
-  const snapshots = await listMetrics({ sourceId: source?.id, sourceTypeKey: "supabase", metricKeys: ["users_total", "confirmed_users"] });
+  const source = (await listSources({ dataSpaceId: options.dataSpaceId })).find((item) => item.source_type_key === "supabase") ?? null;
+  const metrics = await listMetrics({ sourceId: source?.id, sourceTypeKey: "supabase", startDate: options.startDate, endDate: options.endDate, dataSpaceId: options.dataSpaceId });
+  const snapshots = await listMetrics({ sourceId: source?.id, sourceTypeKey: "supabase", metricKeys: ["users_total", "confirmed_users"], dataSpaceId: options.dataSpaceId });
   const dates = [...new Set(metrics.map((metric) => metric.date))].sort().reverse().slice(0, options.limit ?? 90);
   return dates.map((date) => {
     const dayMetrics = metrics.filter((metric) => metric.date === date);
@@ -217,13 +241,13 @@ export async function listSupabaseDailyReportingRows(options: { startDate?: stri
   });
 }
 
-export async function getWebsiteDailyReportingRow(datePt: string) {
-  return (await listWebsiteDailyReportingRows({ startDate: datePt, endDate: datePt, limit: 1 }))[0] ?? null;
+export async function getWebsiteDailyReportingRow(datePt: string, options: { dataSpaceId?: string; dataSpaceSlug?: string } = {}) {
+  return (await listWebsiteDailyReportingRows({ startDate: datePt, endDate: datePt, limit: 1, ...options }))[0] ?? null;
 }
 
-export async function getSupabaseDailyReportingRow(datePt: string) {
-  const row = (await listSupabaseDailyReportingRows({ startDate: datePt, endDate: datePt, limit: 1 }))[0];
+export async function getSupabaseDailyReportingRow(datePt: string, options: { dataSpaceId?: string; dataSpaceSlug?: string } = {}) {
+  const row = (await listSupabaseDailyReportingRows({ startDate: datePt, endDate: datePt, limit: 1, ...options }))[0];
   if (row) return row;
-  const latest = (await listSupabaseDailyReportingRows({ limit: 1 }))[0];
+  const latest = (await listSupabaseDailyReportingRows({ limit: 1, ...options }))[0];
   return latest ? { ...latest, date_pt: datePt, new_signups: 0, provider_email: 0, provider_google: 0, provider_other: 0 } : null;
 }

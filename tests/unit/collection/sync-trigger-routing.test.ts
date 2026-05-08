@@ -47,15 +47,10 @@ describe("sync engine", () => {
       { params: Promise.resolve({ id: "00000000-0000-0000-0000-000000000000" }) },
     );
     const body = await response.json();
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(404);
     expect(body).toMatchObject({
       ok: false,
       error: "Source not found.",
-      run: {
-        source_id: "00000000-0000-0000-0000-000000000000",
-        status: "error",
-        error_message: "Source not found.",
-      },
     });
     expect(JSON.stringify(body)).not.toContain("service_role");
     expect(JSON.stringify(body)).not.toContain("error_stack");

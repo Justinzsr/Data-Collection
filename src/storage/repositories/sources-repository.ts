@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { listSourceTypes } from "@/collection/connectors/registry";
 import { isRuntimeDatabaseConfigured, query, queryRows } from "@/storage/db/client";
 import { buildUpdateClause } from "@/storage/db/sql";
+import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import type { JsonRecord, Source, SourceStatus, SourceTypeKey, SyncMode } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
 
 export interface CreateSourceInput {
+  data_space_id?: string;
   source_type_key: SourceTypeKey;
   display_name: string;
   input_url?: string | null;
@@ -17,6 +19,14 @@ export interface CreateSourceInput {
   sync_frequency_minutes?: number;
   supports_webhook?: boolean;
   metadata?: JsonRecord;
+}
+
+export interface SourceScope {
+  dataSpaceId?: string;
+}
+
+function sourceMatchesScope(source: Source, scope: SourceScope = {}) {
+  return !scope.dataSpaceId || source.data_space_id === scope.dataSpaceId;
 }
 
 async function ensureSourceTypeRow(sourceTypeKey: SourceTypeKey) {
@@ -79,18 +89,25 @@ async function ensureSourceTypeRow(sourceTypeKey: SourceTypeKey) {
   );
 }
 
-export async function listSources(): Promise<Source[]> {
+export async function listSources(scope: SourceScope = {}): Promise<Source[]> {
   if (!isRuntimeDatabaseConfigured()) {
-    return [...getDemoStore().sources].sort((a, b) => a.display_name.localeCompare(b.display_name));
+    return [...getDemoStore().sources]
+      .filter((source) => sourceMatchesScope(source, scope))
+      .sort((a, b) => a.display_name.localeCompare(b.display_name));
+  }
+  if (scope.dataSpaceId) {
+    return queryRows<Source>("select * from sources where data_space_id = $1 order by display_name asc", [scope.dataSpaceId]);
   }
   return queryRows<Source>("select * from sources order by display_name asc");
 }
 
-export async function getSource(sourceId: string): Promise<Source | null> {
+export async function getSource(sourceId: string, scope: SourceScope = {}): Promise<Source | null> {
   if (!isRuntimeDatabaseConfigured()) {
-    return getDemoStore().sources.find((source) => source.id === sourceId) ?? null;
+    return getDemoStore().sources.find((source) => source.id === sourceId && sourceMatchesScope(source, scope)) ?? null;
   }
-  const rows = await queryRows<Source>("select * from sources where id = $1 limit 1", [sourceId]);
+  const rows = scope.dataSpaceId
+    ? await queryRows<Source>("select * from sources where id = $1 and data_space_id = $2 limit 1", [sourceId, scope.dataSpaceId])
+    : await queryRows<Source>("select * from sources where id = $1 limit 1", [sourceId]);
   return rows[0] ?? null;
 }
 
@@ -103,6 +120,7 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
   const supportsWebhook = input.supports_webhook ?? false;
   const source: Source = {
     id: randomUUID(),
+    data_space_id: input.data_space_id ?? DATA_SPACE_IDS.moonarq,
     source_type_key: input.source_type_key,
     display_name: input.display_name,
     input_url: input.input_url ?? null,
@@ -153,6 +171,7 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
     `
       insert into sources (
         id,
+        data_space_id,
         source_type_key,
         display_name,
         input_url,
@@ -177,12 +196,13 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
         updated_at
       ) values (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-        $14, $15, $16, $17, $18, $19, $20, $21::jsonb, $22, $23
+        $14, $15, $16, $17, $18, $19, $20, $21, $22::jsonb, $23, $24
       )
       returning *
     `,
     [
       source.id,
+      source.data_space_id,
       source.source_type_key,
       source.display_name,
       source.input_url,
@@ -241,9 +261,9 @@ export async function deleteSource(sourceId: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function listDueSources(now = new Date()): Promise<Source[]> {
+export async function listDueSources(now = new Date(), scope: SourceScope = {}): Promise<Source[]> {
   if (!isRuntimeDatabaseConfigured()) {
-    return (await listSources()).filter((source) => {
+    return (await listSources(scope)).filter((source) => {
       if (source.status === "disabled") return false;
       if (source.sync_mode === "manual" || source.sync_mode === "webhook") return false;
       if (!source.next_sync_at) return true;
@@ -255,11 +275,12 @@ export async function listDueSources(now = new Date()): Promise<Source[]> {
       select *
       from sources
       where status <> 'disabled'
+        ${scope.dataSpaceId ? "and data_space_id = $2" : ""}
         and sync_mode not in ('manual', 'webhook')
         and (next_sync_at is null or next_sync_at <= $1)
       order by coalesce(next_sync_at, created_at) asc
     `,
-    [now.toISOString()],
+    scope.dataSpaceId ? [now.toISOString(), scope.dataSpaceId] : [now.toISOString()],
   );
 }
 

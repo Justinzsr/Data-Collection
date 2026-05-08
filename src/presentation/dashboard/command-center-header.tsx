@@ -10,22 +10,34 @@ const ranges: Array<{ key: DateRangeKey; label: string }> = [
   { key: "30d", label: "30 days" },
 ];
 
-export function CommandCenterHeader({ modules, range }: { modules: PlatformModule[]; range: DateRangeKey }) {
+export function CommandCenterHeader({
+  modules,
+  range,
+  dataSpaceName = "MoonArq",
+  dataSpaceSlug,
+  basePath = "/w/moonarq/dashboard",
+}: {
+  modules: PlatformModule[];
+  range: DateRangeKey;
+  dataSpaceName?: string;
+  dataSpaceSlug?: string;
+  basePath?: string;
+}) {
   const active = modules.filter((module) => module.sourceId && module.status !== "disabled").length;
   const warnings = modules.filter((module) => ["needs_credentials", "warning", "error"].includes(module.status)).length;
   return (
     <header className="grid gap-5 rounded-lg border border-cyan-200/15 bg-[linear-gradient(135deg,rgba(8,47,73,0.65),rgba(15,23,42,0.7)_48%,rgba(20,83,45,0.24))] p-4 shadow-[0_24px_90px_rgba(8,145,178,0.16)] sm:p-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100/75">MoonArq monitored sources</p>
-          <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">MoonArq Data Command Center</h1>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100/75">{dataSpaceName} monitored sources</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{dataSpaceName} Data Command Center</h1>
           <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-300">
-            This dashboard monitors MoonArq&apos;s existing website/Vercel and Supabase sources. The Data Hub app has its own runtime and storage behind the scenes, but the modules here are the MoonArq systems being observed.
+            This dashboard monitors sources assigned to {dataSpaceName}. The Data Hub app has its own runtime and storage behind the scenes, while each module shown here is server-scoped to the selected data space.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <RunAllDueButton />
-          <LinkButton href="/dashboard/sources/new" variant="primary">
+          <RunAllDueButton dataSpaceSlug={dataSpaceSlug} />
+          <LinkButton href={`${basePath}/sources/new`} variant="primary">
             <Plus className="h-4 w-4" />
             Add Source
           </LinkButton>
@@ -35,7 +47,7 @@ export function CommandCenterHeader({ modules, range }: { modules: PlatformModul
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap gap-2">
           {ranges.map((item) => (
-            <LinkButton key={item.key} href={`/dashboard?range=${item.key}`} variant={range === item.key ? "primary" : "secondary"} className="px-3">
+            <LinkButton key={item.key} href={`${basePath}?range=${item.key}`} variant={range === item.key ? "primary" : "secondary"} className="px-3">
               {item.label}
             </LinkButton>
           ))}

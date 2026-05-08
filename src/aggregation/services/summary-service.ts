@@ -19,13 +19,13 @@ function latestMetricValue(metrics: Awaited<ReturnType<typeof listMetrics>>, met
   );
 }
 
-export async function getDashboardSummary(range: DateRangeKey = "30d") {
+export async function getDashboardSummary(range: DateRangeKey = "30d", options: { dataSpaceId?: string } = {}) {
   const dateRange = getDateRange(range);
   const [metrics, snapshotMetrics, sources, syncRuns] = await Promise.all([
-    listMetrics({ startDate: dateRange.startDate, endDate: dateRange.endDate }),
-    listMetrics({ metricKeys: ["users_total", "confirmed_users"] }),
-    listSources(),
-    listSyncRuns(40),
+    listMetrics({ startDate: dateRange.startDate, endDate: dateRange.endDate, dataSpaceId: options.dataSpaceId }),
+    listMetrics({ metricKeys: ["users_total", "confirmed_users"], dataSpaceId: options.dataSpaceId }),
+    listSources({ dataSpaceId: options.dataSpaceId }),
+    listSyncRuns(40, undefined, { dataSpaceId: options.dataSpaceId }),
   ]);
   const activeSources = sources.filter((source) => source.status !== "disabled").length;
   const syncErrors = syncRuns.filter((run) => run.status === "error").length;

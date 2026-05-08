@@ -13,7 +13,7 @@ test("dashboard login loads demo data", async ({ page }) => {
 
 test("add source wizard detects Supabase and website", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard/sources/new");
+  await page.goto("/w/moonarq/dashboard/sources/new");
   await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
   await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://xxxxx.supabase.co");
   await page.getByRole("button", { name: /Detect/ }).click();
@@ -29,7 +29,7 @@ test("add source wizard detects Supabase and website", async ({ page }) => {
 
 test("events page shows snippets", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard/events");
+  await page.goto("/w/moonarq/dashboard/events");
   await expect(page.getByText("Lightweight JavaScript snippet")).toBeVisible();
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
   await expect(page.getByText("React / Next.js helper")).toBeVisible();
@@ -37,14 +37,26 @@ test("events page shows snippets", async ({ page }) => {
 
 test("data explorer and daily report are reachable from the dashboard", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard");
+  await page.goto("/w/moonarq/dashboard");
   await expect(page.getByRole("link", { name: /Open Report/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Explore Data/ })).toBeVisible();
-  await page.goto("/dashboard/data");
-  await expect(page.getByRole("heading", { name: "Source Data Explorer" })).toBeVisible();
+  await page.goto("/w/moonarq/dashboard/data");
+  await expect(page.getByRole("heading", { name: "MoonArq Source Data Explorer" })).toBeVisible();
   await expect(page.getByText("Website / Vercel").first()).toBeVisible();
   await expect(page.getByRole("button", { name: /Copy JSON/ }).last()).toBeVisible();
-  await page.goto("/dashboard/reports/daily");
+  await page.goto("/w/moonarq/dashboard/reports/daily");
   await expect(page.getByRole("heading", { name: "MoonArq Daily Report" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Generate/ })).toBeVisible();
+});
+
+test("Auto Lab workspace is empty and isolated", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/auto-lab/dashboard");
+  await expect(page.getByRole("heading", { name: "Auto Lab Data Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Auto Lab has no sources yet" })).toBeVisible();
+  await expect(page.getByText("Use this space to test personal car/content TikTok and Instagram accounts.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Add Auto Lab TikTok" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Add Auto Lab Instagram" })).toBeVisible();
+  await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" })).toHaveCount(0);
+  await expect(page.locator("article").filter({ hasText: "MoonArq Supabase" })).toHaveCount(0);
 });

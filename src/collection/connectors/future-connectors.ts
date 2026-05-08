@@ -208,6 +208,26 @@ export const tiktokConnector = createFutureConnector({
   icon: "Video",
   urlPatterns: [/^https:\/\/(www\.)?tiktok\.com\/@/i],
   authType: "tiktok_oauth",
+  requiredFields: [
+    {
+      key: "oauth_access_token",
+      label: "TikTok OAuth access token",
+      description: "Future encrypted server-only OAuth token for the official TikTok API.",
+      required: true,
+      secret: true,
+      type: "password",
+    },
+  ],
+  optionalFields: [
+    {
+      key: "creator_account_id",
+      label: "Creator account ID",
+      description: "Optional TikTok account identifier after OAuth setup.",
+      required: false,
+      secret: false,
+      type: "text",
+    },
+  ],
   supportedMetrics: ["video_views", "likes", "comments", "shares", "engagement_rate"],
   detect(inputUrl) {
     const url = validUrl(inputUrl);
@@ -215,7 +235,8 @@ export const tiktokConnector = createFutureConnector({
     return { confidence: 0.96, normalizedUrl: `${url.origin}${url.pathname.split("/").slice(0, 2).join("/")}`, reasons: ["TikTok profile URL detected."], accountName: url.pathname.split("/")[1] };
   },
   setup: [
-    "TikTok connector is scaffolded with official API/OAuth structure and demo fallback.",
+    "Needs TikTok API/OAuth setup before real collection.",
+    "Use the official TikTok API/OAuth path. Do not scrape dashboards.",
     "Future metrics: video_views, likes, comments, shares, and engagement_rate.",
   ],
 });
@@ -228,6 +249,26 @@ export const instagramConnector = createFutureConnector({
   icon: "Instagram",
   urlPatterns: [/^https:\/\/(www\.)?instagram\.com\/[^/?#]+/i],
   authType: "meta_graph_api",
+  requiredFields: [
+    {
+      key: "graph_api_access_token",
+      label: "Instagram Graph API access token",
+      description: "Future encrypted server-only token for the Meta/Instagram Graph API.",
+      required: true,
+      secret: true,
+      type: "password",
+    },
+  ],
+  optionalFields: [
+    {
+      key: "instagram_business_account_id",
+      label: "Business account ID",
+      description: "Optional Instagram Business or Creator account id for insights.",
+      required: false,
+      secret: false,
+      type: "text",
+    },
+  ],
   supportedMetrics: ["reach", "impressions", "followers", "profile_views", "media_likes", "media_comments", "engagement_rate"],
   detect(inputUrl) {
     const url = validUrl(inputUrl);
@@ -237,7 +278,9 @@ export const instagramConnector = createFutureConnector({
     return { confidence: 0.94, normalizedUrl: `https://www.instagram.com/${account}`, reasons: ["Instagram profile URL detected."], accountName: account };
   },
   setup: [
-    "Instagram connector is scaffolded for the Meta/Instagram Graph API.",
+    "Needs Instagram Graph API setup before real collection.",
+    "Insights may require an Instagram Business or Creator account connected through Meta.",
+    "Use the official Meta/Instagram Graph API path. Do not scrape dashboards.",
     "Future metrics: reach, impressions, followers, profile_views, media_likes, media_comments, and engagement_rate.",
   ],
 });

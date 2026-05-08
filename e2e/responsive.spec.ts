@@ -14,20 +14,21 @@ for (const viewport of [
 ]) {
   test(`dashboard has no horizontal overflow at ${viewport.width}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    await page.goto("/dashboard");
+    await page.goto("/w/moonarq/dashboard");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(overflow).toBe(false);
   });
 }
 
 for (const path of [
-  "/dashboard/sources",
-  "/dashboard/sources/new",
-  "/dashboard/events",
-  "/dashboard/sync",
-  "/dashboard/data",
-  "/dashboard/reports/daily",
-  "/dashboard/sources/22222222-2222-4222-8222-222222222222",
+  "/w/moonarq/dashboard/sources",
+  "/w/moonarq/dashboard/sources/new",
+  "/w/moonarq/dashboard/events",
+  "/w/moonarq/dashboard/sync",
+  "/w/moonarq/dashboard/data",
+  "/w/moonarq/dashboard/reports/daily",
+  "/w/moonarq/dashboard/sources/22222222-2222-4222-8222-222222222222",
+  "/w/auto-lab/dashboard",
 ]) {
   test(`${path} has no horizontal overflow on narrow mobile`, async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 780 });
@@ -39,7 +40,7 @@ for (const path of [
 
 test("mobile navigation opens", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/dashboard");
+  await page.goto("/w/moonarq/dashboard");
   await page.getByLabel("Open navigation").click();
   await expect(page.getByRole("link", { name: "Sync Center" }).last()).toBeVisible();
 });

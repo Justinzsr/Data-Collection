@@ -2,8 +2,12 @@ import { listConnectorEvents } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { listSyncRuns } from "@/storage/repositories/sync-runs-repository";
 
-export async function getSystemHealth() {
-  const [sources, runs, events] = await Promise.all([listSources(), listSyncRuns(50), listConnectorEvents(50)]);
+export async function getSystemHealth(options: { dataSpaceId?: string } = {}) {
+  const [sources, runs, events] = await Promise.all([
+    listSources({ dataSpaceId: options.dataSpaceId }),
+    listSyncRuns(50, undefined, { dataSpaceId: options.dataSpaceId }),
+    listConnectorEvents(50, { dataSpaceId: options.dataSpaceId }),
+  ]);
   return {
     sourcesTotal: sources.length,
     healthySources: sources.filter((source) => ["demo", "healthy"].includes(source.status)).length,

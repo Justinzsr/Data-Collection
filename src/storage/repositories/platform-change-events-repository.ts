@@ -3,6 +3,7 @@ import type { RawPayload } from "@/collection/connectors/types";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { JsonRecord, JsonValue, PlatformChangeEvent, PlatformChangeType, Source } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
+import { listSources } from "@/storage/repositories/sources-repository";
 import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -121,4 +122,44 @@ export async function recordChangeEventsForRawPayloads(source: Source, rawPayloa
     }
   }
   return { inserted };
+}
+
+export async function listPlatformChangeEvents(options: {
+  dataSpaceId?: string;
+  limit?: number;
+  sourceId?: string;
+} = {}) {
+  const limit = options.limit ?? 100;
+  if (!isRuntimeDatabaseConfigured()) {
+    const sourceIds = options.dataSpaceId
+      ? new Set((await listSources({ dataSpaceId: options.dataSpaceId })).map((source) => source.id))
+      : null;
+    return getDemoStore().platformChangeEvents
+      .filter((event) => (sourceIds ? Boolean(event.source_id && sourceIds.has(event.source_id)) : true))
+      .filter((event) => (options.sourceId ? event.source_id === options.sourceId : true))
+      .slice(0, limit);
+  }
+  const where: string[] = [];
+  const values: unknown[] = [];
+  const join = options.dataSpaceId ? "join sources s on s.id = e.source_id" : "";
+  if (options.dataSpaceId) {
+    values.push(options.dataSpaceId);
+    where.push(`s.data_space_id = $${values.length}`);
+  }
+  if (options.sourceId) {
+    values.push(options.sourceId);
+    where.push(`e.source_id = $${values.length}`);
+  }
+  values.push(limit);
+  return queryRows<PlatformChangeEvent>(
+    `
+      select e.*
+      from platform_change_events e
+      ${join}
+      ${where.length ? `where ${where.join(" and ")}` : ""}
+      order by e.changed_at desc, e.created_at desc
+      limit $${values.length}
+    `,
+    values,
+  );
 }

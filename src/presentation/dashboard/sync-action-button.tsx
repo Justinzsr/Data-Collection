@@ -20,7 +20,7 @@ function errorMessage(body: Record<string, unknown>, fallback: string) {
   return typeof body.error === "string" && body.error ? body.error : fallback;
 }
 
-export function SyncActionButton({ sourceId, compact = false }: { sourceId: string; compact?: boolean }) {
+export function SyncActionButton({ sourceId, compact = false, dataSpaceSlug }: { sourceId: string; compact?: boolean; dataSpaceSlug?: string }) {
   const [loading, setLoading] = useState(false);
   const [resultLabel, setResultLabel] = useState<string | null>(null);
   const router = useRouter();
@@ -28,7 +28,8 @@ export function SyncActionButton({ sourceId, compact = false }: { sourceId: stri
     setLoading(true);
     setResultLabel(null);
     try {
-      const response = await fetch(`/api/sources/${sourceId}/sync`, { method: "POST" });
+      const query = dataSpaceSlug ? `?dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}` : "";
+      const response = await fetch(`/api/sources/${sourceId}/sync${query}`, { method: "POST" });
       const body = await readJson(response);
       const run = body.run && typeof body.run === "object" ? body.run as { id?: unknown; status?: unknown; records_fetched?: unknown } : null;
       if (!response.ok || !run || run.status !== "success") {
@@ -57,13 +58,14 @@ export function SyncActionButton({ sourceId, compact = false }: { sourceId: stri
   );
 }
 
-export function RunAllDueButton() {
+export function RunAllDueButton({ dataSpaceSlug }: { dataSpaceSlug?: string }) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   async function run() {
     setLoading(true);
     try {
-      const response = await fetch("/api/sync/all", { method: "POST" });
+      const query = dataSpaceSlug ? `?dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}` : "";
+      const response = await fetch(`/api/sync/all${query}`, { method: "POST" });
       const body = await readJson(response);
       if (!response.ok) throw new Error(errorMessage(body, "Run all failed"));
       const runs = Array.isArray(body.runs) ? body.runs : [];

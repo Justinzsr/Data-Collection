@@ -9,6 +9,11 @@ import {
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = `/w/moonarq${pathname}`;
+    return NextResponse.redirect(redirectUrl);
+  }
   const protectedUi = isProtectedUiPath(pathname);
   const privateApi = isPrivateApiPath(pathname);
   if (!protectedUi && !privateApi) return NextResponse.next();
@@ -47,6 +52,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/settings/:path*", "/settings", "/api/:path*"],
+  matcher: ["/dashboard/:path*", "/w/:path*", "/settings/:path*", "/settings", "/api/:path*"],
 };
-

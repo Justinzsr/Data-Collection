@@ -117,8 +117,8 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
   }
 }
 
-export async function runDueSources(trigger: SyncTrigger = "cron") {
-  const dueSources = await listDueSources();
+export async function runDueSources(trigger: SyncTrigger = "cron", options: { dataSpaceId?: string } = {}) {
+  const dueSources = await listDueSources(new Date(), { dataSpaceId: options.dataSpaceId });
   const runs: SyncRun[] = [];
   for (const source of dueSources) {
     runs.push(await enqueueSyncRun({ sourceId: source.id, trigger }));

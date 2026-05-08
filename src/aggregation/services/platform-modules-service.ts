@@ -73,6 +73,17 @@ const platformLabels: Record<ModuleKey, string> = {
   custom_csv: "MoonArq Custom CSV",
 };
 
+function platformLabelFor(moduleKey: ModuleKey, dataSpaceName = "MoonArq") {
+  if (dataSpaceName === "MoonArq") return platformLabels[moduleKey];
+  if (moduleKey === "website") return `${dataSpaceName} Website / Vercel`;
+  if (moduleKey === "supabase") return `${dataSpaceName} Supabase`;
+  if (moduleKey === "vercel_project") return `${dataSpaceName} Vercel Project`;
+  if (moduleKey === "shopify") return `${dataSpaceName} Commerce`;
+  if (moduleKey === "custom_api") return `${dataSpaceName} Custom API`;
+  if (moduleKey === "custom_csv") return `${dataSpaceName} Custom CSV`;
+  return `${dataSpaceName} ${moduleKey === "tiktok" ? "TikTok" : "Instagram"}`;
+}
+
 const metricConfig: Record<ModuleKey, MetricConfig> = {
   website: {
     primaryKey: "unique_visitors",
@@ -265,26 +276,26 @@ function topEntry(events: WebEvent[], selector: (event: WebEvent) => string | nu
   return label ? `${label} (${value})` : "Waiting for live traffic";
 }
 
-function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsiteSources: Source[] = []): PlatformModule["setupState"] {
+function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsiteSources: Source[] = [], dataSpaceName = "MoonArq"): PlatformModule["setupState"] {
   if (!source) {
     if (moduleKey === "website") {
       return {
         label: "Needs setup",
         severity: "warning",
-        message: "Add MoonArq website source and choose either Vercel Drain or Website Tracker as the primary ingestion mode.",
+        message: `Add a ${dataSpaceName} website source and choose either Vercel Drain or Website Tracker as the primary ingestion mode.`,
       };
     }
     if (moduleKey === "supabase") {
       return {
         label: "Needs setup",
         severity: "warning",
-        message: "Add the existing MoonArq Supabase project and save its service role key server-side for real signup and user metrics.",
+        message: `Add a ${dataSpaceName} Supabase project and save its service role key server-side for real signup and user metrics.`,
       };
     }
     return {
       label: "Future",
       severity: "demo",
-      message: `${platformLabels[moduleKey]} is scaffolded for a future MoonArq source.`,
+      message: `${platformLabelFor(moduleKey, dataSpaceName)} is scaffolded for a future source in this data space.`,
     };
   }
   if (source.status === "healthy") {
@@ -341,6 +352,7 @@ function createModule(input: {
   secondaryWebsiteSources?: Source[];
   displayName?: string;
   sourceModeLabel?: string;
+  dataSpaceName?: string;
 }): PlatformModule {
   const { moduleKey, source, metricSourceTypeKey, currentRows, previousRows, range } = input;
   const config = metricConfig[moduleKey];
@@ -352,11 +364,12 @@ function createModule(input: {
   const isHealthySupabaseNoSignupWindow = moduleKey === "supabase" && currentValue === 0 && latestUsersTotal > 0;
   const deltaPercent = isHealthySupabaseNoSignupWindow ? null : calculateDelta(currentValue, previousValue);
 
+  const platformLabel = platformLabelFor(moduleKey, input.dataSpaceName);
   return {
     sourceId: source?.id ?? null,
     sourceTypeKey: moduleKey,
-    displayName: input.displayName ?? source?.display_name ?? platformLabels[moduleKey],
-    platformLabel: platformLabels[moduleKey],
+    displayName: input.displayName ?? source?.display_name ?? platformLabel,
+    platformLabel,
     status,
     syncMode: source?.sync_mode ?? "manual",
     sourceModeLabel: input.sourceModeLabel ?? (moduleKey === "website" ? getWebsiteModeLabel(source) : source?.status === "demo" ? "Demo" : "Monitored Source"),
@@ -379,7 +392,7 @@ function createModule(input: {
     lastSyncAt: latestSync(source),
     nextSyncAt: source?.next_sync_at ?? null,
     lastError: source?.last_error ?? null,
-    setupState: setupState(source, moduleKey, input.secondaryWebsiteSources),
+    setupState: setupState(source, moduleKey, input.secondaryWebsiteSources, input.dataSpaceName),
     actions: {
       canRunSync: Boolean(source && status !== "disabled"),
       canConfigure: Boolean(source),
@@ -388,14 +401,17 @@ function createModule(input: {
   };
 }
 
-export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promise<PlatformModule[]> {
+export async function getPlatformModules(
+  rangeKey: DateRangeKey = "30d",
+  options: { dataSpaceId?: string; dataSpaceName?: string } = {},
+): Promise<PlatformModule[]> {
   const range = getDateRange(rangeKey);
   const previousRange = getPreviousRange(range);
   const [sources, currentRows, previousRows, latestRows] = await Promise.all([
-    listSources(),
-    listMetrics({ startDate: range.startDate, endDate: range.endDate }),
-    listMetrics({ startDate: previousRange.startDate, endDate: previousRange.endDate }),
-    listMetrics({ metricKeys: ["users_total", "confirmed_users", "followers", "engagement_rate", "latest_deployment_status"] }),
+    listSources({ dataSpaceId: options.dataSpaceId }),
+    listMetrics({ startDate: range.startDate, endDate: range.endDate, dataSpaceId: options.dataSpaceId }),
+    listMetrics({ startDate: previousRange.startDate, endDate: previousRange.endDate, dataSpaceId: options.dataSpaceId }),
+    listMetrics({ metricKeys: ["users_total", "confirmed_users", "followers", "engagement_rate", "latest_deployment_status"], dataSpaceId: options.dataSpaceId }),
   ]);
 
   const websiteSource = resolvePrimaryWebsiteSource(sources);
@@ -406,6 +422,7 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
         startOccurredAt: startOfAppDateUtc(range.startDate),
         endOccurredAt: endOfAppDateUtc(range.endDate),
         limit: 2000,
+        dataSpaceId: options.dataSpaceId,
       })
     : [];
 
@@ -419,7 +436,8 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
     range,
     secondaryWebsiteSources,
     sourceModeLabel: getWebsiteModeLabel(websiteSource),
-    displayName: websiteSource?.display_name ?? "MoonArq Website / Vercel",
+    displayName: websiteSource?.display_name ?? platformLabelFor("website", options.dataSpaceName),
+    dataSpaceName: options.dataSpaceName,
     insights: [
       { label: "Top page", value: topEntry(websiteEvents, (event) => event.path, "/") },
       { label: "Top referrer", value: topEntry(websiteEvents, (event) => event.referrer, "direct") },
@@ -440,6 +458,7 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
       latestRows,
       range,
       sourceModeLabel: supabaseSource?.metadata.mode === "public_profiles_or_service_role" ? "Profiles or Service Role" : supabaseSource ? "Supabase Source" : "Needs setup",
+      dataSpaceName: options.dataSpaceName,
       insights: [
         { label: "Provider mix", value: providerBreakdownText(currentRows, supabaseSource, "supabase") },
         {
@@ -462,6 +481,7 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
         latestRows,
         range,
         sourceModeLabel: source?.metadata.scaffoldOnly === true ? "Scaffold" : source ? "Monitored Source" : "Future",
+        dataSpaceName: options.dataSpaceName,
       }),
     );
   }
@@ -469,8 +489,8 @@ export async function getPlatformModules(rangeKey: DateRangeKey = "30d"): Promis
   return modules;
 }
 
-export async function getGlobalPlatformHealth(rangeKey: DateRangeKey = "30d") {
-  const modules = await getPlatformModules(rangeKey);
+export async function getGlobalPlatformHealth(rangeKey: DateRangeKey = "30d", options: { dataSpaceId?: string; dataSpaceName?: string } = {}) {
+  const modules = await getPlatformModules(rangeKey, options);
   const connected = modules.filter((item) => item.sourceId && item.status !== "disabled");
   const errors = modules.filter((item) => item.status === "error" || item.lastError).length;
   const lastSuccessfulSync = connected
@@ -478,7 +498,7 @@ export async function getGlobalPlatformHealth(rangeKey: DateRangeKey = "30d") {
     .filter((value): value is string => Boolean(value))
     .sort()
     .at(-1) ?? null;
-  const sourceTotals = await listMetrics({ startDate: getDateRange(rangeKey).startDate, endDate: getDateRange(rangeKey).endDate });
+  const sourceTotals = await listMetrics({ startDate: getDateRange(rangeKey).startDate, endDate: getDateRange(rangeKey).endDate, dataSpaceId: options.dataSpaceId });
   return {
     activeSources: connected.length,
     syncErrors: errors,

@@ -18,6 +18,7 @@ export async function getMetricTimeseries(options: {
   range?: DateRangeKey;
   sourceId?: string;
   sourceTypeKey?: SourceTypeKey;
+  dataSpaceId?: string;
 } = {}) {
   const metricKey = options.metricKey ?? "page_views";
   const range = getDateRange(options.range ?? "30d");
@@ -27,6 +28,7 @@ export async function getMetricTimeseries(options: {
     endDate: range.endDate,
     sourceId: options.sourceId,
     sourceTypeKey: options.sourceTypeKey,
+    dataSpaceId: options.dataSpaceId,
   });
   return enumerateDays(range.startDate, range.endDate).map((date) => ({
     date,
@@ -34,8 +36,8 @@ export async function getMetricTimeseries(options: {
   }));
 }
 
-export async function getSourceComparison() {
-  const rows = await listMetrics({ startDate: getDateRange("30d").startDate, endDate: getDateRange("30d").endDate });
+export async function getSourceComparison(options: { dataSpaceId?: string } = {}) {
+  const rows = await listMetrics({ startDate: getDateRange("30d").startDate, endDate: getDateRange("30d").endDate, dataSpaceId: options.dataSpaceId });
   const grouped = new Map<string, { sourceType: SourceTypeKey; page_views: number; signups: number; custom_events: number }>();
   for (const row of rows) {
     const key = row.source_id ?? row.source_type_key;

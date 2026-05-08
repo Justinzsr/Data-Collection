@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { ConnectorEvent, JsonRecord, WebEvent } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
+import { listSources } from "@/storage/repositories/sources-repository";
 
 export async function recordConnectorEvent(input: {
   source_id: string | null;
@@ -36,9 +37,24 @@ export async function recordConnectorEvent(input: {
   return rows[0];
 }
 
-export async function listConnectorEvents(limit = 50): Promise<ConnectorEvent[]> {
+export async function listConnectorEvents(limit = 50, options: { dataSpaceId?: string } = {}): Promise<ConnectorEvent[]> {
   if (!isRuntimeDatabaseConfigured()) {
-    return getDemoStore().connectorEvents.slice(0, limit);
+    if (!options.dataSpaceId) return getDemoStore().connectorEvents.slice(0, limit);
+    const sourceIds = new Set((await listSources({ dataSpaceId: options.dataSpaceId })).map((source) => source.id));
+    return getDemoStore().connectorEvents.filter((event) => event.source_id && sourceIds.has(event.source_id)).slice(0, limit);
+  }
+  if (options.dataSpaceId) {
+    return queryRows<ConnectorEvent>(
+      `
+        select e.*
+        from connector_events e
+        join sources s on s.id = e.source_id
+        where s.data_space_id = $1
+        order by e.created_at desc
+        limit $2
+      `,
+      [options.dataSpaceId, limit],
+    );
   }
   return queryRows<ConnectorEvent>(
     `
@@ -111,9 +127,24 @@ export async function storeWebEvent(input: Omit<WebEvent, "id" | "created_at">):
   return rows[0];
 }
 
-export async function listWebEvents(limit = 100): Promise<WebEvent[]> {
+export async function listWebEvents(limit = 100, options: { dataSpaceId?: string } = {}): Promise<WebEvent[]> {
   if (!isRuntimeDatabaseConfigured()) {
-    return getDemoStore().webEvents.slice(0, limit);
+    if (!options.dataSpaceId) return getDemoStore().webEvents.slice(0, limit);
+    const sourceIds = new Set((await listSources({ dataSpaceId: options.dataSpaceId })).map((source) => source.id));
+    return getDemoStore().webEvents.filter((event) => event.source_id && sourceIds.has(event.source_id)).slice(0, limit);
+  }
+  if (options.dataSpaceId) {
+    return queryRows<WebEvent>(
+      `
+        select e.*
+        from web_events e
+        join sources s on s.id = e.source_id
+        where s.data_space_id = $1
+        order by e.occurred_at desc
+        limit $2
+      `,
+      [options.dataSpaceId, limit],
+    );
   }
   return queryRows<WebEvent>(
     `
@@ -132,10 +163,15 @@ export async function findWebEvents(options: {
   sourceIds?: string[];
   startOccurredAt?: string;
   endOccurredAt?: string;
+  dataSpaceId?: string;
 } = {}): Promise<WebEvent[]> {
   if (!isRuntimeDatabaseConfigured()) {
+    const sourceIdsForSpace = options.dataSpaceId
+      ? new Set((await listSources({ dataSpaceId: options.dataSpaceId })).map((source) => source.id))
+      : null;
     return getDemoStore().webEvents
       .filter((event) => {
+        if (sourceIdsForSpace && (!event.source_id || !sourceIdsForSpace.has(event.source_id))) return false;
         if (options.sourceId && event.source_id !== options.sourceId) return false;
         if (options.sourceIds?.length && (!event.source_id || !options.sourceIds.includes(event.source_id))) return false;
         if (options.startOccurredAt && event.occurred_at < options.startOccurredAt) return false;
@@ -149,27 +185,32 @@ export async function findWebEvents(options: {
   const values: unknown[] = [];
   if (options.sourceId) {
     values.push(options.sourceId);
-    where.push(`source_id = $${values.length}`);
+    where.push(`e.source_id = $${values.length}`);
   }
   if (options.sourceIds?.length) {
     values.push(options.sourceIds);
-    where.push(`source_id = any($${values.length}::uuid[])`);
+    where.push(`e.source_id = any($${values.length}::uuid[])`);
   }
   if (options.startOccurredAt) {
     values.push(options.startOccurredAt);
-    where.push(`occurred_at >= $${values.length}`);
+    where.push(`e.occurred_at >= $${values.length}`);
   }
   if (options.endOccurredAt) {
     values.push(options.endOccurredAt);
-    where.push(`occurred_at <= $${values.length}`);
+    where.push(`e.occurred_at <= $${values.length}`);
+  }
+  if (options.dataSpaceId) {
+    values.push(options.dataSpaceId);
+    where.push(`s.data_space_id = $${values.length}`);
   }
   values.push(options.limit ?? 500);
   return queryRows<WebEvent>(
     `
-      select *
-      from web_events
+      select e.*
+      from web_events e
+      ${options.dataSpaceId ? "join sources s on s.id = e.source_id" : ""}
       ${where.length ? `where ${where.join(" and ")}` : ""}
-      order by occurred_at desc
+      order by e.occurred_at desc
       limit $${values.length}
     `,
     values,

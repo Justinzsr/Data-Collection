@@ -52,7 +52,7 @@ function formatTime(value: string | null) {
   return formatAppDateTime(value, "not scheduled");
 }
 
-export function PlatformModuleCard({ module }: { module: PlatformModule }) {
+export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", dataSpaceSlug }: { module: PlatformModule; basePath?: string; dataSpaceSlug?: string }) {
   const Icon = icons[module.sourceTypeKey];
   const tone = tones[module.sourceTypeKey];
   return (
@@ -123,19 +123,19 @@ export function PlatformModuleCard({ module }: { module: PlatformModule }) {
       </div>
 
       <div className="mt-auto flex flex-wrap gap-2">
-        {module.sourceId && module.actions.canRunSync ? <SyncActionButton sourceId={module.sourceId} compact /> : (
+        {module.sourceId && module.actions.canRunSync ? <SyncActionButton sourceId={module.sourceId} dataSpaceSlug={dataSpaceSlug} compact /> : (
           <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300/15 bg-slate-900/50 px-3 py-2 text-sm text-slate-500" disabled>
             <Play className="h-4 w-4" />
             Sync
           </button>
         )}
         {module.sourceId && module.actions.canViewDetails ? (
-          <LinkButton href={`/dashboard/sources/${module.sourceId}`} variant="secondary" className="px-3">
+          <LinkButton href={`${basePath}/sources/${module.sourceId}`} variant="secondary" className="px-3">
             <ExternalLink className="h-4 w-4" />
             Details
           </LinkButton>
         ) : (
-          <LinkButton href="/dashboard/sources/new" variant="ghost" className="px-3">
+          <LinkButton href={`${basePath}/sources/new`} variant="ghost" className="px-3">
             Configure
           </LinkButton>
         )}

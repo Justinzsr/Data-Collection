@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, Clipboard, DatabaseZap, KeyRound, LinkIcon, Play, Radar, ShieldAlert, Webhook } from "lucide-react";
 import { toast } from "sonner";
@@ -20,12 +21,15 @@ interface Detection {
   reasons: string[];
 }
 
-const examples = [
-  "https://moonarqstudio.com",
-  "https://xxxxx.supabase.co",
-  "https://vercel.com/team/project",
-  "https://your-store.myshopify.com",
-];
+function examplesFor(dataSpaceSlug: string) {
+  if (dataSpaceSlug === "auto-lab") return ["https://www.tiktok.com/@auto_lab_cars", "https://www.instagram.com/auto_lab_cars"];
+  return [
+    "https://moonarqstudio.com",
+    "https://xxxxx.supabase.co",
+    "https://vercel.com/team/project",
+    "https://your-store.myshopify.com",
+  ];
+}
 
 function subscribeToHydration() {
   return () => {};
@@ -46,7 +50,7 @@ type SavedSource = {
   webhook_url?: string | null;
 };
 
-function WebsiteSourceSetup({ source }: { source: SavedSource }) {
+function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePath: string }) {
   const origin = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:3100";
   const drainEndpoint = `${origin}${source.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${source.id}`}`;
 
@@ -70,11 +74,11 @@ function WebsiteSourceSetup({ source }: { source: SavedSource }) {
           <p>4. Keep the Website Tracker fallback disabled if the drain is the live primary mode.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <LinkButton href={`/dashboard/sources/${source.id}`} variant="primary">
+          <LinkButton href={`${basePath}/sources/${source.id}`} variant="primary">
             <Webhook className="h-4 w-4" />
             Open Source Detail
           </LinkButton>
-          <LinkButton href="/dashboard/events" variant="secondary">
+          <LinkButton href={`${basePath}/events`} variant="secondary">
             Tracker fallback page
           </LinkButton>
         </div>
@@ -96,11 +100,11 @@ function WebsiteSourceSetup({ source }: { source: SavedSource }) {
         <p>3. Use window.moonarqTrack(...) for custom events if you need product or marketing signals beyond page views.</p>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <LinkButton href={`/dashboard/sources/${source.id}`} variant="primary">
+        <LinkButton href={`${basePath}/sources/${source.id}`} variant="primary">
           <Clipboard className="h-4 w-4" />
           Open Source Snippet
         </LinkButton>
-        <LinkButton href="/dashboard/events" variant="secondary">
+        <LinkButton href={`${basePath}/events`} variant="secondary">
           Event Dashboard
         </LinkButton>
       </div>
@@ -108,16 +112,55 @@ function WebsiteSourceSetup({ source }: { source: SavedSource }) {
   );
 }
 
-export function AddSourceWizard() {
-  const [inputUrl, setInputUrl] = useState("");
-  const [detections, setDetections] = useState<Detection[]>([]);
-  const [selected, setSelected] = useState<Detection | null>(null);
+function templateDetection(template: string | null, dataSpaceName: string): Detection | null {
+  if (template === "tiktok") {
+    return {
+      sourceTypeKey: "tiktok",
+      displayName: "TikTok",
+      confidence: 1,
+      normalizedUrl: "https://www.tiktok.com/@auto_lab_cars",
+      accountName: "@auto_lab_cars",
+      requiredSetup: ["Needs TikTok API/OAuth setup. Save credentials server-side later; do not paste tokens into chat."],
+      possibleMetrics: ["video_views", "likes", "comments", "shares", "engagement_rate"],
+      reasons: [`${dataSpaceName} TikTok scaffold selected.`],
+    };
+  }
+  if (template === "instagram") {
+    return {
+      sourceTypeKey: "instagram",
+      displayName: "Instagram",
+      confidence: 1,
+      normalizedUrl: "https://www.instagram.com/auto_lab_cars",
+      accountName: "auto_lab_cars",
+      requiredSetup: ["Needs Instagram Graph API setup. Insights may require a Business or Creator account; save credentials server-side later."],
+      possibleMetrics: ["reach", "impressions", "followers", "profile_views", "engagement_rate"],
+      reasons: [`${dataSpaceName} Instagram scaffold selected.`],
+    };
+  }
+  return null;
+}
+
+export function AddSourceWizard({
+  dataSpaceSlug = "moonarq",
+  dataSpaceName = "MoonArq",
+  basePath = "/w/moonarq/dashboard",
+}: {
+  dataSpaceSlug?: string;
+  dataSpaceName?: string;
+  basePath?: string;
+}) {
+  const searchParams = useSearchParams();
+  const initialDetection = templateDetection(searchParams.get("template"), dataSpaceName);
+  const [inputUrl, setInputUrl] = useState(() => initialDetection?.normalizedUrl ?? "");
+  const [detections, setDetections] = useState<Detection[]>(() => initialDetection ? [initialDetection] : []);
+  const [selected, setSelected] = useState<Detection | null>(() => initialDetection);
   const [syncMode, setSyncMode] = useState("hybrid");
   const [websiteMode, setWebsiteMode] = useState<"vercel_web_analytics_drain" | "website">("vercel_web_analytics_drain");
   const [saving, setSaving] = useState(false);
   const [savedSource, setSavedSource] = useState<SavedSource | null>(null);
   const [syncRunId, setSyncRunId] = useState<string | null>(null);
   const hydrated = useSyncExternalStore(subscribeToHydration, getClientHydrationSnapshot, getServerHydrationSnapshot);
+  const examples = examplesFor(dataSpaceSlug);
 
   const step = savedSource ? 4 : selected ? 3 : detections.length > 0 ? 2 : 1;
   const effectiveSourceTypeKey = selected?.sourceTypeKey === "website" ? websiteMode : selected?.sourceTypeKey ?? null;
@@ -138,12 +181,18 @@ export function AddSourceWizard() {
     setSaving(true);
     try {
       const isMoonArqWebsite = selected.sourceTypeKey === "website";
+      const isAutoLab = dataSpaceSlug === "auto-lab";
       const response = await fetch("/api/sources", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           source_type_key: effectiveSourceTypeKey,
-          display_name: isMoonArqWebsite
+          data_space_slug: dataSpaceSlug,
+          display_name: isAutoLab && effectiveSourceTypeKey === "tiktok"
+            ? "Auto Lab TikTok"
+            : isAutoLab && effectiveSourceTypeKey === "instagram"
+              ? "Auto Lab Instagram"
+              : isMoonArqWebsite
             ? "MoonArq Website / Vercel"
             : selected.accountName
               ? `${selected.displayName}: ${selected.accountName}`
@@ -152,7 +201,11 @@ export function AddSourceWizard() {
           normalized_url: selected.normalizedUrl,
           account_name: selected.accountName,
           sync_mode: syncMode,
-          metadata: isMoonArqWebsite ? { monitored_source: "moonarq_website", website_mode: effectiveSourceTypeKey } : undefined,
+          metadata: isMoonArqWebsite
+            ? { monitored_source: "moonarq_website", website_mode: effectiveSourceTypeKey }
+            : isAutoLab
+              ? { intended_use: "personal_car_content_testing", scaffoldOnly: true }
+              : undefined,
         }),
       });
       const body = await response.json();
@@ -197,14 +250,14 @@ export function AddSourceWizard() {
           <motion.div key={step} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
             <div className="space-y-5">
               <div>
-                <label htmlFor="source-input" className="text-sm font-medium text-slate-200">Paste a MoonArq source link or identifier</label>
+                <label htmlFor="source-input" className="text-sm font-medium text-slate-200">Paste a {dataSpaceName} source link or identifier</label>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                   <input
                     id="source-input"
                     value={inputUrl}
                     onChange={(event) => setInputUrl(event.target.value)}
                     disabled={!hydrated}
-                    placeholder="https://moonarqstudio.com"
+                    placeholder={dataSpaceSlug === "auto-lab" ? "https://www.tiktok.com/@auto_lab_cars" : "https://moonarqstudio.com"}
                     className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-slate-600 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-55"
                   />
                   <Button type="button" onClick={detect} disabled={!hydrated || !inputUrl.trim()} variant="primary">
@@ -253,7 +306,7 @@ export function AddSourceWizard() {
                 </div>
               ) : inputUrl ? (
                 <div className="rounded-lg border border-amber-300/20 bg-amber-400/10 p-4 text-sm text-amber-100">
-                  Unknown platform? Save it later as a future custom MoonArq source when that connector is ready.
+                  Unknown platform? Save it later as a future custom source when that connector is ready.
                 </div>
               ) : null}
 
@@ -347,9 +400,9 @@ export function AddSourceWizard() {
           <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
             {savedSource ? (
               savedSource.source_type_key === "website" || savedSource.source_type_key === "vercel_web_analytics_drain" ? (
-                <WebsiteSourceSetup source={savedSource} />
+                <WebsiteSourceSetup source={savedSource} basePath={basePath} />
               ) : (
-                <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" />
+                <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" dataSpaceSlug={dataSpaceSlug} />
               )
             ) : (
               (selected?.requiredSetup ?? [
@@ -374,7 +427,7 @@ export function AddSourceWizard() {
           {selected?.sourceTypeKey === "website" ? (
             <div className="mt-4 flex flex-col gap-2">
               <Badge tone="cyan">{websiteMode === "vercel_web_analytics_drain" ? "Official Vercel Drain mode" : "Tracker fallback mode"}</Badge>
-              <LinkButton href="/dashboard/events" variant="primary">
+              <LinkButton href={`${basePath}/events`} variant="primary">
                 <Clipboard className="h-4 w-4" />
                 Open website setup
               </LinkButton>

@@ -1,7 +1,7 @@
 import type { PlatformModule } from "@/aggregation/services/platform-modules-service";
 import { PlatformModuleCard } from "@/presentation/dashboard/platform-module-card";
 
-export function PlatformModuleGrid({ modules }: { modules: PlatformModule[] }) {
+export function PlatformModuleGrid({ modules, basePath, dataSpaceSlug }: { modules: PlatformModule[]; basePath?: string; dataSpaceSlug?: string }) {
   return (
     <section className="grid gap-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -15,7 +15,7 @@ export function PlatformModuleGrid({ modules }: { modules: PlatformModule[] }) {
       </div>
       <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {modules.map((module) => (
-          <PlatformModuleCard key={`${module.sourceTypeKey}-${module.sourceId ?? "placeholder"}`} module={module} />
+          <PlatformModuleCard key={`${module.sourceTypeKey}-${module.sourceId ?? "placeholder"}`} module={module} basePath={basePath} dataSpaceSlug={dataSpaceSlug} />
         ))}
       </div>
     </section>

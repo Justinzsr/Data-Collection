@@ -3,7 +3,7 @@ import { dashboardAuthCookie, loginDashboard } from "./auth";
 
 test("dashboard shows platform modules and sparklines", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard");
+  await page.goto("/w/moonarq/dashboard");
   await expect(page.getByRole("heading", { name: "MoonArq Data Command Center" })).toBeVisible();
   await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" }).first()).toBeVisible();
   await expect(page.locator("article").filter({ hasText: "MoonArq Supabase" }).first()).toBeVisible();
@@ -15,7 +15,7 @@ test("dashboard shows platform modules and sparklines", async ({ page }) => {
 
 test("add source wizard detects Supabase and Website and shows credentials after save", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard/sources/new");
+  await page.goto("/w/moonarq/dashboard/sources/new");
   await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
   await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://xxxxx.supabase.co");
   await page.getByRole("button", { name: "Detect" }).click();
@@ -27,7 +27,7 @@ test("add source wizard detects Supabase and Website and shows credentials after
   await page.getByRole("button", { name: "Save Credentials" }).click();
   await expect(page.getByText("fake••••alue")).toBeVisible();
 
-  await page.goto("/dashboard/sources/new");
+  await page.goto("/w/moonarq/dashboard/sources/new");
   await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
   await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://moonarqstudio.com");
   await page.getByRole("button", { name: "Detect" }).click();
@@ -40,7 +40,7 @@ test("add source wizard detects Supabase and Website and shows credentials after
 
 test("events page shows non-empty JavaScript tracking snippet", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard/events");
+  await page.goto("/w/moonarq/dashboard/events");
   await expect(page.getByText("Lightweight JavaScript snippet")).toBeVisible();
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
   await expect(page.getByText("moonarq_anonymous_id").first()).toBeVisible();
@@ -86,7 +86,7 @@ test("credential API routes save masked hints and delete credentials", async ({ 
 
 test("source detail pages show setup, credentials, actions, and website snippets", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard/sources/22222222-2222-4222-8222-222222222222");
+  await page.goto("/w/moonarq/dashboard/sources/22222222-2222-4222-8222-222222222222");
   await expect(page.getByRole("heading", { name: "MoonArq Supabase" })).toBeVisible();
   await expect(page.getByText("Connection state")).toBeVisible();
   await expect(page.getByLabel("Service role key")).toBeVisible();
@@ -94,7 +94,7 @@ test("source detail pages show setup, credentials, actions, and website snippets
   await expect(page.getByRole("button", { name: "Run Sync Now" })).toBeVisible();
   await expect(page.getByText("MoonArq public.profiles setup")).toBeVisible();
 
-  await page.goto("/dashboard/sources/11111111-1111-4111-8111-111111111111");
+  await page.goto("/w/moonarq/dashboard/sources/11111111-1111-4111-8111-111111111111");
   await expect(page.getByRole("heading", { name: "MoonArq Website" })).toBeVisible();
   await expect(page.getByText("Lightweight JavaScript snippet")).toBeVisible();
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
@@ -102,10 +102,10 @@ test("source detail pages show setup, credentials, actions, and website snippets
 
 test("sources page supports sync controls", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/dashboard/sources");
-  await expect(page.getByRole("heading", { name: "Source management" })).toBeVisible();
+  await page.goto("/w/moonarq/dashboard/sources");
+  await expect(page.getByRole("heading", { name: "MoonArq Source management" })).toBeVisible();
   const supabaseCard = page.locator("article").filter({ hasText: "MoonArq Supabase" }).first();
-  const responsePromise = page.waitForResponse((response) => response.url().includes("/api/sources/") && response.url().endsWith("/sync"));
+  const responsePromise = page.waitForResponse((response) => response.url().includes("/api/sources/") && response.url().includes("/sync"));
   await supabaseCard.getByRole("button", { name: /^Sync$/ }).click();
   const response = await responsePromise;
   expect(response.status()).toBeLessThan(500);
@@ -115,7 +115,7 @@ test("sources page supports sync controls", async ({ page }) => {
 test("mobile dashboard has no horizontal overflow", async ({ page }) => {
   await loginDashboard(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/dashboard");
+  await page.goto("/w/moonarq/dashboard");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
   await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" }).first()).toBeVisible();

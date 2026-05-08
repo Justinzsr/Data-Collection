@@ -3,6 +3,7 @@ import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import { buildUpdateClause } from "@/storage/db/sql";
 import type { JsonRecord, SourceTypeKey, SyncRun, SyncRunStatus, SyncTrigger } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
+import { listSources } from "@/storage/repositories/sources-repository";
 
 export async function createSyncRun(input: {
   source_id: string | null;
@@ -116,31 +117,37 @@ export async function updateSyncRun(syncRunId: string, patch: Partial<SyncRun>):
   return rows[0] ?? null;
 }
 
-export async function listSyncRuns(limit = 50, status?: SyncRunStatus): Promise<SyncRun[]> {
+export async function listSyncRuns(limit = 50, status?: SyncRunStatus, options: { dataSpaceId?: string } = {}): Promise<SyncRun[]> {
   if (!isRuntimeDatabaseConfigured()) {
+    const sourceIds = options.dataSpaceId
+      ? new Set((await listSources({ dataSpaceId: options.dataSpaceId })).map((source) => source.id))
+      : null;
     return getDemoStore().syncRuns
+      .filter((run) => (sourceIds ? Boolean(run.source_id && sourceIds.has(run.source_id)) : true))
       .filter((run) => (status ? run.status === status : true))
       .slice(0, limit);
   }
+  const join = options.dataSpaceId ? "join sources s on s.id = r.source_id" : "";
+  const where: string[] = [];
+  const values: unknown[] = [];
   if (status) {
-    return queryRows<SyncRun>(
-      `
-        select *
-        from sync_runs
-        where status = $1
-        order by created_at desc
-        limit $2
-      `,
-      [status, limit],
-    );
+    values.push(status);
+    where.push(`r.status = $${values.length}`);
   }
+  if (options.dataSpaceId) {
+    values.push(options.dataSpaceId);
+    where.push(`s.data_space_id = $${values.length}`);
+  }
+  values.push(limit);
   return queryRows<SyncRun>(
     `
-      select *
-      from sync_runs
-      order by created_at desc
-      limit $1
+      select r.*
+      from sync_runs r
+      ${join}
+      ${where.length ? `where ${where.join(" and ")}` : ""}
+      order by r.created_at desc
+      limit $${values.length}
     `,
-    [limit],
+    values,
   );
 }

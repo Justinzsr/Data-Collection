@@ -5,12 +5,13 @@ import { FlaskConical, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/presentation/components/ui/button";
 
-export function TestConnectionButton({ sourceId, compact = false }: { sourceId: string; compact?: boolean }) {
+export function TestConnectionButton({ sourceId, compact = false, dataSpaceSlug }: { sourceId: string; compact?: boolean; dataSpaceSlug?: string }) {
   const [loading, setLoading] = useState(false);
   async function run() {
     setLoading(true);
     try {
-      const response = await fetch(`/api/sources/${sourceId}/test`, { method: "POST" });
+      const query = dataSpaceSlug ? `?dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}` : "";
+      const response = await fetch(`/api/sources/${sourceId}/test${query}`, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Connection test failed.");
       const result = body.result;

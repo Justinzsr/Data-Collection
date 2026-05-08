@@ -1,3 +1,4 @@
+import { resolveDataSpaceFromRequest } from "@/app/api/data-space";
 import { getConnector } from "@/collection/connectors/registry";
 import { listCredentialHints, saveCredential } from "@/storage/repositories/credentials-repository";
 import { getSource, updateSource } from "@/storage/repositories/sources-repository";
@@ -25,9 +26,11 @@ function normalizeCredentials(body: unknown): Record<string, string> {
   );
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const source = await getSource(id);
+  const dataSpace = await resolveDataSpaceFromRequest(request);
+  if (!dataSpace) return Response.json({ error: "Unknown data space." }, { status: 404 });
+  const source = await getSource(id, { dataSpaceId: dataSpace.id });
   if (!source) return Response.json({ error: "Source not found." }, { status: 404 });
   const fields = credentialFields(source.source_type_key);
   const saved = filterSavedCredentials(await listCredentialHints(source.id), fields);
@@ -37,7 +40,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
-    const source = await getSource(id);
+    const dataSpace = await resolveDataSpaceFromRequest(request);
+    if (!dataSpace) return Response.json({ error: "Unknown data space." }, { status: 404 });
+    const source = await getSource(id, { dataSpaceId: dataSpace.id });
     if (!source) return Response.json({ error: "Source not found." }, { status: 404 });
     const fields = credentialFields(source.source_type_key);
     const fieldKeys = new Set(fields.map((field) => field.key));

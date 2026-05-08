@@ -4,6 +4,7 @@ import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { JsonRecord, MetricDaily, SourceTypeKey } from "@/storage/db/schema";
 import { dimensionsHash } from "@/storage/seed/demo-data";
 import { getDemoStore } from "@/storage/repositories/demo-store";
+import { listSources } from "@/storage/repositories/sources-repository";
 
 function toMetricRow(metric: NormalizedMetric, now: string): MetricDaily {
   const dimensions = metric.dimensions ?? {};
@@ -212,9 +213,14 @@ export async function listMetrics(options: {
   sourceTypeKey?: SourceTypeKey;
   startDate?: string;
   endDate?: string;
+  dataSpaceId?: string;
 } = {}): Promise<MetricDaily[]> {
   if (!isRuntimeDatabaseConfigured()) {
+    const scopedSourceIds = options.dataSpaceId
+      ? new Set((await listSources({ dataSpaceId: options.dataSpaceId })).map((source) => source.id))
+      : null;
     return getDemoStore().metricsDaily.filter((metric) => {
+      if (scopedSourceIds && (!metric.source_id || !scopedSourceIds.has(metric.source_id))) return false;
       if (options.metricKeys && !options.metricKeys.includes(metric.metric_key)) return false;
       if (options.sourceId && metric.source_id !== options.sourceId) return false;
       if (options.sourceTypeKey && metric.source_type_key !== options.sourceTypeKey) return false;
@@ -228,30 +234,35 @@ export async function listMetrics(options: {
   const values: unknown[] = [];
   if (options.metricKeys?.length) {
     values.push(options.metricKeys);
-    where.push(`metric_key = any($${values.length}::text[])`);
+    where.push(`m.metric_key = any($${values.length}::text[])`);
   }
   if (options.sourceId) {
     values.push(options.sourceId);
-    where.push(`source_id = $${values.length}`);
+    where.push(`m.source_id = $${values.length}`);
   }
   if (options.sourceTypeKey) {
     values.push(options.sourceTypeKey);
-    where.push(`source_type_key = $${values.length}`);
+    where.push(`m.source_type_key = $${values.length}`);
   }
   if (options.startDate) {
     values.push(options.startDate);
-    where.push(`date >= $${values.length}`);
+    where.push(`m.date >= $${values.length}`);
   }
   if (options.endDate) {
     values.push(options.endDate);
-    where.push(`date <= $${values.length}`);
+    where.push(`m.date <= $${values.length}`);
+  }
+  if (options.dataSpaceId) {
+    values.push(options.dataSpaceId);
+    where.push(`s.data_space_id = $${values.length}`);
   }
   const rows = await queryRows<MetricDaily>(
     `
-      select *
-      from metrics_daily
+      select m.*
+      from metrics_daily m
+      ${options.dataSpaceId ? "join sources s on s.id = m.source_id" : ""}
       ${where.length ? `where ${where.join(" and ")}` : ""}
-      order by date asc, metric_key asc
+      order by m.date asc, m.metric_key asc
     `,
     values,
   );

@@ -1,4 +1,5 @@
 import type { DemoWorkspace } from "@/storage/db/schema";
+import { staticDataSpaces } from "@/storage/data-spaces";
 import { createDemoWorkspace } from "@/storage/seed/demo-data";
 
 declare global {
@@ -9,6 +10,7 @@ export function getDemoStore(): DemoWorkspace {
   if (!globalThis.__MOONARQ_DEMO_STORE__) {
     globalThis.__MOONARQ_DEMO_STORE__ = createDemoWorkspace();
   }
+  globalThis.__MOONARQ_DEMO_STORE__.dataSpaces ??= staticDataSpaces();
   globalThis.__MOONARQ_DEMO_STORE__.platformChangeEvents ??= [];
   globalThis.__MOONARQ_DEMO_STORE__.dailyReportRuns ??= [];
   globalThis.__MOONARQ_DEMO_STORE__.dailyReportSections ??= [];

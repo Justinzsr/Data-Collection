@@ -81,7 +81,13 @@ export async function verifyDashboardSession(cookieValue: string | undefined | n
 }
 
 export function isProtectedUiPath(pathname: string) {
-  return pathname === "/dashboard" || pathname.startsWith("/dashboard/") || pathname === "/settings" || pathname.startsWith("/settings/");
+  return (
+    pathname === "/dashboard" ||
+    pathname.startsWith("/dashboard/") ||
+    /^\/w\/[^/]+\/dashboard(?:\/|$)/u.test(pathname) ||
+    pathname === "/settings" ||
+    pathname.startsWith("/settings/")
+  );
 }
 
 export function isPublicIngestionOrAuthPath(pathname: string) {
