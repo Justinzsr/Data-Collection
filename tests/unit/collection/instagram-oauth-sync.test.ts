@@ -11,6 +11,7 @@ import {
 import {
   createInstagramOAuthState,
   INSTAGRAM_OAUTH_STATE_COOKIE,
+  validateInstagramOAuthState,
 } from "@/collection/connectors/instagram/oauth-state";
 import { GET as instagramOAuthStartRoute } from "@/app/api/oauth/instagram/start/route";
 import { GET as instagramOAuthCallbackRoute } from "@/app/api/oauth/instagram/callback/route";
@@ -28,6 +29,10 @@ const META_APP_ID = "1287137936945850";
 const META_SECRET = "meta-secret-for-tests";
 const REDIRECT_URI = "https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback";
 const MEDIA_ID = "18112617760837714";
+const MOONARQ_INSTAGRAM_SOURCE_ID = "77777777-7777-4777-8777-777777777777";
+const MOONARQ_INSTAGRAM_ACCOUNT_ID = "17841470000000001";
+const MOONARQ_INSTAGRAM_USERNAME = "moonarqstudio";
+const MOONARQ_FACEBOOK_PAGE_ID = "1020267000000001";
 const LONG_CREDENTIAL_VALUE = "test-long-credential-value";
 const SHORT_CREDENTIAL_VALUE = "test-short-credential-value";
 
@@ -74,6 +79,41 @@ function addAutoLabInstagramSource(patch: Partial<Source> = {}) {
   return source;
 }
 
+function addMoonArqInstagramSource(patch: Partial<Source> = {}) {
+  const now = "2026-04-22T16:00:00.000Z";
+  const source: Source = {
+    id: MOONARQ_INSTAGRAM_SOURCE_ID,
+    data_space_id: DATA_SPACE_IDS.moonarq,
+    source_type_key: "instagram",
+    display_name: "MoonArq Instagram",
+    input_url: "https://www.instagram.com/moonarqstudio",
+    normalized_url: "https://www.instagram.com/moonarqstudio",
+    external_account_id: null,
+    account_name: null,
+    status: "needs_credentials",
+    sync_mode: "manual",
+    sync_frequency_minutes: 60,
+    supports_webhook: false,
+    webhook_url: null,
+    webhook_secret_hint: null,
+    last_manual_sync_at: null,
+    last_cron_sync_at: null,
+    last_webhook_sync_at: null,
+    last_success_at: null,
+    last_error_at: null,
+    last_error: null,
+    next_sync_at: null,
+    metadata: {
+      scaffoldOnly: true,
+    },
+    created_at: now,
+    updated_at: now,
+    ...patch,
+  };
+  getDemoStore().sources.push(source);
+  return source;
+}
+
 async function dashboardCookie() {
   const session = await signDashboardSession(process.env.DASHBOARD_SESSION_SECRET!);
   return `${DASHBOARD_SESSION_COOKIE}=${encodeURIComponent(session)}`;
@@ -83,10 +123,14 @@ function oauthStateCookie(state: string) {
   return `${INSTAGRAM_OAUTH_STATE_COOKIE}=${encodeURIComponent(state)}`;
 }
 
-function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; username?: string; accountId?: string } = {}) {
+function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; username?: string; accountId?: string; pageId?: string; followers?: number; mediaCount?: number; mediaId?: string } = {}) {
   const insights = options.insights ?? "success";
   const username = options.username ?? AUTO_LAB_INSTAGRAM_USERNAME;
   const accountId = options.accountId ?? AUTO_LAB_INSTAGRAM_ACCOUNT_ID;
+  const pageId = options.pageId ?? AUTO_LAB_FACEBOOK_PAGE_ID;
+  const followers = options.followers ?? 428;
+  const mediaCount = options.mediaCount ?? 17;
+  const mediaId = options.mediaId ?? MEDIA_ID;
   const calls: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const href = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
@@ -105,33 +149,33 @@ function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; use
       return jsonResponse({
         data: [
           {
-            id: AUTO_LAB_FACEBOOK_PAGE_ID,
+            id: pageId,
             name: "Auto Lab IS350",
             instagram_business_account: {
               id: accountId,
               username,
-              followers_count: 428,
-              media_count: 17,
+              followers_count: followers,
+              media_count: mediaCount,
             },
           },
         ],
       });
     }
 
-    if (url.pathname.endsWith(`/${AUTO_LAB_INSTAGRAM_ACCOUNT_ID}`)) {
+    if (url.pathname.endsWith(`/${accountId}`)) {
       return jsonResponse({
         id: accountId,
         username,
-        followers_count: 428,
-        media_count: 17,
+        followers_count: followers,
+        media_count: mediaCount,
       });
     }
 
-    if (url.pathname.endsWith(`/${AUTO_LAB_INSTAGRAM_ACCOUNT_ID}/media`)) {
+    if (url.pathname.endsWith(`/${accountId}/media`)) {
       return jsonResponse({
         data: [
           {
-            id: MEDIA_ID,
+            id: mediaId,
             caption: "First shakedown clip for the Auto Lab IS350.",
             media_type: "VIDEO",
             media_url: "https://example.com/media.mp4",
@@ -144,7 +188,7 @@ function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; use
       });
     }
 
-    if (url.pathname.endsWith(`/${MEDIA_ID}/insights`)) {
+    if (url.pathname.endsWith(`/${mediaId}/insights`)) {
       const metric = url.searchParams.get("metric");
       if (insights === "fallback" && metric === "reach,saved,total_interactions") {
         return jsonResponse({ error: { message: "Unsupported metric for this media type.", code: 100 } }, 400);
@@ -173,10 +217,14 @@ function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; use
 }
 
 async function saveInstagramCredentials() {
-  await saveCredential(AUTO_LAB_INSTAGRAM_SOURCE_ID, "instagram_long_lived_access_token", LONG_CREDENTIAL_VALUE);
-  await saveCredential(AUTO_LAB_INSTAGRAM_SOURCE_ID, "instagram_account_id", AUTO_LAB_INSTAGRAM_ACCOUNT_ID);
-  await saveCredential(AUTO_LAB_INSTAGRAM_SOURCE_ID, "instagram_username", AUTO_LAB_INSTAGRAM_USERNAME);
-  await saveCredential(AUTO_LAB_INSTAGRAM_SOURCE_ID, "expires_at", "2026-12-31T00:00:00.000Z");
+  await saveInstagramCredentialsForSource(AUTO_LAB_INSTAGRAM_SOURCE_ID, AUTO_LAB_INSTAGRAM_ACCOUNT_ID, AUTO_LAB_INSTAGRAM_USERNAME);
+}
+
+async function saveInstagramCredentialsForSource(sourceId: string, accountId: string, username: string) {
+  await saveCredential(sourceId, "instagram_long_lived_access_token", LONG_CREDENTIAL_VALUE);
+  await saveCredential(sourceId, "instagram_account_id", accountId);
+  await saveCredential(sourceId, "instagram_username", username);
+  await saveCredential(sourceId, "expires_at", "2026-12-31T00:00:00.000Z");
 }
 
 describe("Auto Lab Instagram OAuth and sync", () => {
@@ -201,7 +249,7 @@ describe("Auto Lab Instagram OAuth and sync", () => {
   it("builds the Meta authorization URL without exposing secrets", async () => {
     addAutoLabInstagramSource();
     const response = await instagramOAuthStartRoute(
-      new Request(`https://app.example.com/api/oauth/instagram/start?sourceId=${AUTO_LAB_INSTAGRAM_SOURCE_ID}`, {
+      new Request(`https://app.example.com/api/oauth/instagram/start?sourceId=${AUTO_LAB_INSTAGRAM_SOURCE_ID}&dataSpaceSlug=auto-lab&returnPath=${encodeURIComponent(`/w/auto-lab/dashboard/sources/${AUTO_LAB_INSTAGRAM_SOURCE_ID}`)}`, {
         headers: { cookie: await dashboardCookie() },
       }),
     );
@@ -214,7 +262,15 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     expect(decodeURIComponent(location)).toContain("instagram_manage_insights");
     expect(location).not.toContain(META_SECRET);
     expect(location).not.toContain("client_secret");
-    expect(response.headers.get("set-cookie")).toContain(INSTAGRAM_OAUTH_STATE_COOKIE);
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain(INSTAGRAM_OAUTH_STATE_COOKIE);
+    const cookieValue = decodeURIComponent(setCookie.match(new RegExp(`${INSTAGRAM_OAUTH_STATE_COOKIE}=([^;]+)`))?.[1] ?? "");
+    const state = new URL(location).searchParams.get("state");
+    expect(validateInstagramOAuthState(state, cookieValue)).toMatchObject({
+      sourceId: AUTO_LAB_INSTAGRAM_SOURCE_ID,
+      dataSpaceSlug: "auto-lab",
+      returnPath: `/w/auto-lab/dashboard/sources/${AUTO_LAB_INSTAGRAM_SOURCE_ID}`,
+    });
   });
 
   it("returns a sanitized setup error when Meta environment variables are missing", async () => {
@@ -232,12 +288,13 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     expect(JSON.stringify(body)).not.toContain(META_SECRET);
   });
 
-  it("validates callback state and rejects non-approved Instagram sources", async () => {
-    addAutoLabInstagramSource({
-      id: "66666666-6666-4666-8666-666666666666",
-      display_name: "Other Auto Lab Instagram",
+  it("validates callback state and rejects cross-space Instagram sources", async () => {
+    addMoonArqInstagramSource();
+    const state = createInstagramOAuthState({
+      sourceId: MOONARQ_INSTAGRAM_SOURCE_ID,
+      dataSpaceSlug: "auto-lab",
+      returnPath: `/w/auto-lab/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`,
     });
-    const state = createInstagramOAuthState("66666666-6666-4666-8666-666666666666");
     const response = await instagramOAuthCallbackRoute(
       new Request(`https://app.example.com/api/oauth/instagram/callback?code=code-from-meta&state=${encodeURIComponent(state)}`, {
         headers: { cookie: oauthStateCookie(state) },
@@ -246,7 +303,7 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     const body = await response.json();
 
     expect(response.status).toBe(403);
-    expect(body.error).toContain("rejected");
+    expect(body.error).toContain("requested data space");
   });
 
   it("stores OAuth credentials encrypted and redirects back to the Auto Lab source", async () => {
@@ -292,6 +349,66 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     const credentialStore = JSON.stringify(getDemoStore().credentials);
     expect(credentialStore).not.toContain(LONG_CREDENTIAL_VALUE);
     expect(credentialStore).not.toContain(SHORT_CREDENTIAL_VALUE);
+  });
+
+  it("discovers and stores MoonArq Instagram account metadata for a MoonArq source", async () => {
+    addMoonArqInstagramSource();
+    const { calls } = mockInstagramGraphApi({
+      username: MOONARQ_INSTAGRAM_USERNAME,
+      accountId: MOONARQ_INSTAGRAM_ACCOUNT_ID,
+      pageId: MOONARQ_FACEBOOK_PAGE_ID,
+      followers: 1200,
+      mediaCount: 44,
+    });
+    const state = createInstagramOAuthState({
+      sourceId: MOONARQ_INSTAGRAM_SOURCE_ID,
+      dataSpaceSlug: "moonarq",
+      returnPath: `/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`,
+    });
+    const response = await instagramOAuthCallbackRoute(
+      new Request(`https://app.example.com/api/oauth/instagram/callback?code=code-from-meta&state=${encodeURIComponent(state)}`, {
+        headers: { cookie: oauthStateCookie(state) },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toContain(`/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`);
+    expect(calls.some((call) => call.includes("/me/accounts"))).toBe(true);
+
+    const source = getDemoStore().sources.find((item) => item.id === MOONARQ_INSTAGRAM_SOURCE_ID);
+    expect(source).toMatchObject({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "instagram",
+      status: "healthy",
+      external_account_id: MOONARQ_INSTAGRAM_ACCOUNT_ID,
+      account_name: MOONARQ_INSTAGRAM_USERNAME,
+    });
+    expect(source?.metadata).toMatchObject({
+      scaffoldOnly: false,
+      oauth_connected: true,
+      instagram_account_id: MOONARQ_INSTAGRAM_ACCOUNT_ID,
+      instagram_username: MOONARQ_INSTAGRAM_USERNAME,
+      page_id: MOONARQ_FACEBOOK_PAGE_ID,
+      graph_api_version: "v25.0",
+    });
+  });
+
+  it("keeps Auto Lab account enforcement when reconnecting", async () => {
+    addAutoLabInstagramSource();
+    mockInstagramGraphApi({ username: "wrong-account", accountId: "17841470000000999" });
+    const state = createInstagramOAuthState(AUTO_LAB_INSTAGRAM_SOURCE_ID);
+    const response = await instagramOAuthCallbackRoute(
+      new Request(`https://app.example.com/api/oauth/instagram/callback?code=code-from-meta&state=${encodeURIComponent(state)}`, {
+        headers: { cookie: oauthStateCookie(state) },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toContain("instagram_oauth=error");
+    const source = getDemoStore().sources.find((item) => item.id === AUTO_LAB_INSTAGRAM_SOURCE_ID);
+    expect(source?.status).toBe("needs_credentials");
+    expect(source?.external_account_id).toBeNull();
+    expect(getDemoStore().connectorEvents.some((event) => event.source_id === AUTO_LAB_INSTAGRAM_SOURCE_ID && event.event_type === "instagram_oauth_error")).toBe(true);
   });
 
   it("runs a real sanitized Test Connection against the mocked Graph API", async () => {
@@ -373,5 +490,42 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     expect(moonarqWorkbook).not.toContain("Auto_Lab_Instagram");
     expect(autoLabWorkbook).not.toContain("MoonArq_Website_Vercel");
     expect(autoLabWorkbook).not.toContain("MoonArq_Supabase");
+  });
+
+  it("syncs MoonArq Instagram through the same connector without leaking into Auto Lab reports or exports", async () => {
+    addAutoLabInstagramSource({ status: "healthy" });
+    addMoonArqInstagramSource({ status: "healthy" });
+    await saveInstagramCredentials();
+    await saveInstagramCredentialsForSource(MOONARQ_INSTAGRAM_SOURCE_ID, MOONARQ_INSTAGRAM_ACCOUNT_ID, MOONARQ_INSTAGRAM_USERNAME);
+
+    mockInstagramGraphApi({ username: MOONARQ_INSTAGRAM_USERNAME, accountId: MOONARQ_INSTAGRAM_ACCOUNT_ID, pageId: MOONARQ_FACEBOOK_PAGE_ID, followers: 1200, mediaCount: 44 });
+    const moonarqRun = await enqueueSyncRun({ sourceId: MOONARQ_INSTAGRAM_SOURCE_ID, trigger: "manual" });
+    expect(moonarqRun.status).toBe("success");
+
+    mockInstagramGraphApi({ username: AUTO_LAB_INSTAGRAM_USERNAME, accountId: AUTO_LAB_INSTAGRAM_ACCOUNT_ID, pageId: AUTO_LAB_FACEBOOK_PAGE_ID, followers: 428, mediaCount: 17 });
+    const autoLabRun = await enqueueSyncRun({ sourceId: AUTO_LAB_INSTAGRAM_SOURCE_ID, trigger: "manual" });
+    expect(autoLabRun.status).toBe("success");
+
+    const store = getDemoStore();
+    expect(store.metricsDaily.some((metric) => metric.source_id === MOONARQ_INSTAGRAM_SOURCE_ID && metric.metric_key === "instagram_media_reach")).toBe(true);
+    expect(store.metricsDaily.some((metric) => metric.source_id === AUTO_LAB_INSTAGRAM_SOURCE_ID && metric.metric_key === "instagram_media_reach")).toBe(true);
+
+    const dataSpaces = await listDataSpaces();
+    const moonarq = dataSpaces.find((space) => space.slug === "moonarq");
+    const autoLab = dataSpaces.find((space) => space.slug === "auto-lab");
+    const moonarqReport = await generateDailyReport("2026-04-22", moonarq);
+    const autoLabReport = await generateDailyReport("2026-04-22", autoLab);
+
+    expect(JSON.stringify(moonarqReport)).toContain("MoonArq Instagram");
+    expect(JSON.stringify(moonarqReport)).not.toContain("Auto Lab Instagram");
+    expect(JSON.stringify(autoLabReport)).toContain("Auto Lab Instagram");
+    expect(JSON.stringify(autoLabReport)).not.toContain("MoonArq Instagram");
+
+    const moonarqWorkbook = dailyReportToExcelXml(moonarqReport);
+    const autoLabWorkbook = dailyReportToExcelXml(autoLabReport);
+    expect(moonarqWorkbook).toContain("MoonArq_Instagram");
+    expect(moonarqWorkbook).not.toContain("Auto_Lab_Instagram");
+    expect(autoLabWorkbook).toContain("Auto_Lab_Instagram");
+    expect(autoLabWorkbook).not.toContain("MoonArq_Instagram");
   });
 });

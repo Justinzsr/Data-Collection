@@ -340,6 +340,20 @@ function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsit
   };
 }
 
+function sourceRank(source: Source) {
+  if (source.status === "healthy" && source.metadata.oauth_connected === true) return 0;
+  if (source.status === "healthy") return 1;
+  if (source.status === "needs_credentials") return 2;
+  if (source.status === "demo") return 4;
+  return 3;
+}
+
+function primarySourceForModule(sources: Source[], moduleKey: ModuleKey) {
+  return sources
+    .filter((source) => source.source_type_key === moduleKey)
+    .sort((left, right) => sourceRank(left) - sourceRank(right) || left.display_name.localeCompare(right.display_name))[0] ?? null;
+}
+
 function createModule(input: {
   moduleKey: ModuleKey;
   source: Source | null;
@@ -470,7 +484,7 @@ export async function getPlatformModules(
   ];
 
   for (const moduleKey of platformOrder.filter((item) => item !== "website" && item !== "supabase")) {
-    const source = sources.find((item) => item.source_type_key === moduleKey) ?? null;
+    const source = primarySourceForModule(sources, moduleKey);
     modules.push(
       createModule({
         moduleKey,

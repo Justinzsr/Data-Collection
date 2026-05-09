@@ -290,7 +290,11 @@ export async function getInstagramDashboardSummary(options: { dataSpaceId?: stri
     listContentMetrics({ dataSpaceId: options.dataSpaceId }),
     listMetrics({ metricKeys: [...ACCOUNT_METRIC_KEYS, ...MEDIA_METRIC_KEYS, "instagram_engagement_rate"], sourceTypeKey: "instagram", dataSpaceId: options.dataSpaceId }),
   ]);
-  const instagramSources = sources.filter((source) => source.source_type_key === "instagram");
+  const allInstagramSources = sources.filter((source) => source.source_type_key === "instagram");
+  const hasConfiguredInstagramSource = allInstagramSources.some((source) => source.status !== "demo");
+  const instagramSources = hasConfiguredInstagramSource
+    ? allInstagramSources.filter((source) => !(source.status === "demo" && source.metadata.scaffoldOnly === true))
+    : allInstagramSources;
   const sourceIds = new Set(instagramSources.map((source) => source.id));
   const snapshots = await listLatestSnapshots(options.dataSpaceId, sourceIds);
   const snapshotBySourceId = new Map(snapshots.map((snapshot) => [snapshot.sourceId, snapshot]));
@@ -323,6 +327,10 @@ export async function getInstagramDashboardSummary(options: { dataSpaceId?: stri
       },
       media: media.slice(0, 12),
     } satisfies InstagramDashboardSource;
+  }).sort((left, right) => {
+    const leftRank = left.status === "healthy" ? 0 : left.media.length > 0 ? 1 : 2;
+    const rightRank = right.status === "healthy" ? 0 : right.media.length > 0 ? 1 : 2;
+    return leftRank - rightRank || left.displayName.localeCompare(right.displayName);
   });
 
   const aggregateMedia = sourcesWithInsights.flatMap((source) => source.media);

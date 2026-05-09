@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { getInstagramDashboardSummary, type InstagramDashboardSummary } from "@/aggregation/services/instagram-dashboard-service";
 import { getSupabaseDailyReportingRow, getWebsiteDailyReportingRow, type SupabaseDailyReportRow, type WebsiteDailyReportRow } from "@/aggregation/services/reporting-service";
 import { isRuntimeDatabaseConfigured, queryRows, withDatabaseTransaction } from "@/storage/db/client";
 import type { DailyReportMetric, DailyReportRun, DailyReportSection, DataSpace, JsonRecord } from "@/storage/db/schema";
@@ -14,6 +15,7 @@ export type DailyReport = {
   metrics: DailyReportMetric[];
   website: WebsiteDailyReportRow | null;
   supabase: SupabaseDailyReportRow | null;
+  instagram: InstagramDashboardSummary;
   dataSpace: DataSpace;
 };
 
@@ -49,6 +51,10 @@ function n(value: unknown) {
   return typeof value === "number" ? value : Number(value ?? 0);
 }
 
+function connectedInstagramSources(instagram: InstagramDashboardSummary) {
+  return instagram.sources.filter((source) => source.status === "healthy");
+}
+
 function section(section_key: string, title: string, summary: string, sort_order: number, metadata: JsonRecord = {}): SectionInput {
   return { section_key, title, summary, sort_order, metadata };
 }
@@ -58,13 +64,16 @@ function metric(section_key: string, metric_key: string, label: string, value: n
 }
 
 async function buildReportForDataSpace(reportDatePt: string, dataSpace: DataSpace) {
-  const [website, supabase, sources, events] = await Promise.all([
+  const [website, supabase, sources, events, instagram] = await Promise.all([
     getWebsiteDailyReportingRow(reportDatePt, { dataSpaceId: dataSpace.id, dataSpaceSlug: dataSpace.slug }),
     getSupabaseDailyReportingRow(reportDatePt, { dataSpaceId: dataSpace.id, dataSpaceSlug: dataSpace.slug }),
     listSources({ dataSpaceId: dataSpace.id }),
     listConnectorEvents(50, { dataSpaceId: dataSpace.id }),
+    getInstagramDashboardSummary({ dataSpaceId: dataSpace.id }),
   ]);
   const activeSources = sources.filter((source) => source.status !== "disabled");
+  const instagramSources = connectedInstagramSources(instagram);
+  const instagramConnected = instagramSources.length > 0;
   const errors = events.filter((event) => event.severity === "error").length;
   const healthStatus = errors > 0 ? "warning" : "healthy";
   if (activeSources.length === 0) {
@@ -84,19 +93,25 @@ async function buildReportForDataSpace(reportDatePt: string, dataSpace: DataSpac
       metric("future_platforms", "tiktok", "TikTok", null, "Needs TikTok API/OAuth setup", "status", 10),
       metric("future_platforms", "instagram", "Instagram", null, "Needs Instagram Graph API setup", "status", 20),
     ];
-    return { website: null, supabase: null, sourceCount: 0, healthStatus: "empty", summary, sections, metrics, dataSpace };
+    return { website: null, supabase: null, instagram, sourceCount: 0, healthStatus: "empty", summary, sections, metrics, dataSpace };
   }
   const pageViews = n(website?.page_views);
   const visitors = n(website?.unique_visitors);
   const newSignups = n(supabase?.new_signups);
   const usersTotal = n(supabase?.users_total);
-  const summary = `Yesterday ${dataSpace.display_name} recorded ${pageViews.toLocaleString("en-US")} website views, ${visitors.toLocaleString("en-US")} unique visitors, ${newSignups.toLocaleString("en-US")} new signups, and ${usersTotal.toLocaleString("en-US")} total Supabase users.`;
+  const instagramSummaryText = instagramConnected
+    ? ` Instagram added ${instagram.totals.reach.toLocaleString("en-US")} media reach and ${instagram.totals.totalInteractions.toLocaleString("en-US")} total interactions.`
+    : "";
+  const summary = `Yesterday ${dataSpace.display_name} recorded ${pageViews.toLocaleString("en-US")} website views, ${visitors.toLocaleString("en-US")} unique visitors, ${newSignups.toLocaleString("en-US")} new signups, and ${usersTotal.toLocaleString("en-US")} total Supabase users.${instagramSummaryText}`;
   const sections = [
     section("executive_summary", "Executive Summary", summary, 10),
     section("website_vercel", `${dataSpace.display_name} Website / Vercel`, website ? `${website.source_mode} reported ${pageViews.toLocaleString("en-US")} page views. Top page: ${website.top_page ?? "not enough data yet"}.` : "No website reporting data landed for this Pacific day yet.", 20),
     section("supabase", `${dataSpace.display_name} Supabase`, supabase ? `${newSignups.toLocaleString("en-US")} new signups; latest snapshot shows ${usersTotal.toLocaleString("en-US")} total users.` : "No Supabase reporting data landed for this Pacific day yet.", 30),
     section("source_health", "Sources Health", `${activeSources.length} active source(s), ${errors} recent error event(s), status ${healthStatus}.`, 40),
-    section("future_platforms", "Future Platforms", "TikTok, Instagram, and Shopify remain intentionally unconnected unless this data space has its own source setup.", 50),
+    ...(instagramConnected
+      ? [section("instagram", `${dataSpace.display_name} Instagram`, `${instagramSources.map((source) => source.username ? `@${source.username}` : source.displayName).join(", ")} reported ${instagram.totals.reach.toLocaleString("en-US")} reach, ${instagram.totals.likes.toLocaleString("en-US")} likes, and ${instagram.totals.comments.toLocaleString("en-US")} comments across ${instagram.totals.fetchedMediaCount.toLocaleString("en-US")} synced media item(s).`, 50)]
+      : []),
+    section("future_platforms", "Future Platforms", `TikTok${instagramConnected ? "" : ", Instagram"}, and Shopify remain intentionally unconnected unless this data space has its own source setup.`, 60),
   ];
   const metrics = [
     metric("executive_summary", "summary", "Summary", null, summary, null, 10),
@@ -119,11 +134,23 @@ async function buildReportForDataSpace(reportDatePt: string, dataSpace: DataSpac
     metric("source_health", "sync_errors", "Sync errors", errors, null, "count", 20),
     metric("source_health", "latest_website_sync", "Latest website sync", null, website?.last_sync_at_pt ?? "Not synced", "text", 30),
     metric("source_health", "latest_supabase_sync", "Latest Supabase sync", null, supabase?.last_sync_at_pt ?? "Not synced", "text", 40),
+    ...(instagramConnected
+      ? [
+          metric("instagram", "instagram_followers", "Followers", instagramSources[0]?.stats.followers ?? null, null, "count", 10),
+          metric("instagram", "instagram_media_count", "Account media count", instagramSources[0]?.stats.accountMediaCount ?? null, null, "count", 20),
+          metric("instagram", "instagram_media_reach", "Media reach", instagram.totals.reach, null, "count", 30),
+          metric("instagram", "instagram_media_likes", "Media likes", instagram.totals.likes, null, "count", 40),
+          metric("instagram", "instagram_media_comments", "Media comments", instagram.totals.comments, null, "count", 50),
+          metric("instagram", "instagram_media_saved", "Media saved", instagram.totals.saved, null, "count", 60),
+          metric("instagram", "instagram_media_total_interactions", "Total interactions", instagram.totals.totalInteractions, null, "count", 70),
+          metric("instagram", "instagram_engagement_rate", "Engagement rate", instagram.totals.engagementRate, null, "percent", 80),
+        ]
+      : []),
     metric("future_platforms", "tiktok", "TikTok", null, "Not connected", "status", 10),
-    metric("future_platforms", "instagram", "Instagram", null, "Not connected", "status", 20),
+    metric("future_platforms", "instagram", "Instagram", null, instagramConnected ? "Connected" : "Not connected", "status", 20),
     metric("future_platforms", "shopify", "Shopify", null, "Not connected", "status", 30),
   ];
-  return { website, supabase, sourceCount: activeSources.length, healthStatus, summary, sections, metrics, dataSpace };
+  return { website, supabase, instagram, sourceCount: activeSources.length, healthStatus, summary, sections, metrics, dataSpace };
 }
 
 function normalizeRun(row: DailyReportRun): DailyReportRun {
@@ -146,19 +173,21 @@ export async function getDailyReport(reportDatePt: string, dataSpace?: DataSpace
       metrics: store.dailyReportMetrics.filter((item) => item.report_run_id === run.id).sort((a, b) => a.sort_order - b.sort_order),
       website: await getWebsiteDailyReportingRow(reportDatePt, { dataSpaceId: resolvedDataSpace.id, dataSpaceSlug: resolvedDataSpace.slug }),
       supabase: await getSupabaseDailyReportingRow(reportDatePt, { dataSpaceId: resolvedDataSpace.id, dataSpaceSlug: resolvedDataSpace.slug }),
+      instagram: await getInstagramDashboardSummary({ dataSpaceId: resolvedDataSpace.id }),
       dataSpace: resolvedDataSpace,
     };
   }
   if (!(await isDailyReportStorageReady())) return null;
   const runs = await queryRows<DailyReportRun>("select * from daily_report_runs where data_space_id = $1 and report_date = $2 limit 1", [resolvedDataSpace.id, reportDatePt]);
   if (!runs[0]) return null;
-  const [sections, metrics, website, supabase] = await Promise.all([
+  const [sections, metrics, website, supabase, instagram] = await Promise.all([
     queryRows<DailyReportSection>("select * from daily_report_sections where report_run_id = $1 order by sort_order asc", [runs[0].id]),
     queryRows<DailyReportMetric>("select * from daily_report_metrics where report_run_id = $1 order by section_key asc, sort_order asc", [runs[0].id]),
     getWebsiteDailyReportingRow(reportDatePt, { dataSpaceId: resolvedDataSpace.id, dataSpaceSlug: resolvedDataSpace.slug }),
     getSupabaseDailyReportingRow(reportDatePt, { dataSpaceId: resolvedDataSpace.id, dataSpaceSlug: resolvedDataSpace.slug }),
+    getInstagramDashboardSummary({ dataSpaceId: resolvedDataSpace.id }),
   ]);
-  return { run: normalizeRun(runs[0]), sections, metrics: metrics.map(normalizeMetric), website, supabase, dataSpace: resolvedDataSpace };
+  return { run: normalizeRun(runs[0]), sections, metrics: metrics.map(normalizeMetric), website, supabase, instagram, dataSpace: resolvedDataSpace };
 }
 
 export async function listDailyReports(limit = 30, dataSpace?: DataSpace) {
@@ -206,7 +235,7 @@ export async function generateDailyReport(reportDatePt: string, dataSpace?: Data
     const metrics = built.metrics.map((item) => ({ ...item, id: randomUUID(), report_run_id: reportRun.id }));
     store.dailyReportSections.push(...sections);
     store.dailyReportMetrics.push(...metrics);
-    return { run: reportRun, sections, metrics, website: built.website, supabase: built.supabase, dataSpace: resolvedDataSpace };
+    return { run: reportRun, sections, metrics, website: built.website, supabase: built.supabase, instagram: built.instagram, dataSpace: resolvedDataSpace };
   }
   return withDatabaseTransaction(async (client) => {
     const runs = await queryRows<DailyReportRun>(
@@ -228,7 +257,7 @@ export async function generateDailyReport(reportDatePt: string, dataSpace?: Data
     for (const item of built.metrics) {
       metrics.push(normalizeMetric((await queryRows<DailyReportMetric>("insert into daily_report_metrics (id, report_run_id, section_key, metric_key, label, value, text_value, unit, sort_order, metadata) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb) returning *", [randomUUID(), reportRun.id, item.section_key, item.metric_key, item.label, item.value, item.text_value, item.unit, item.sort_order, JSON.stringify(item.metadata)], client))[0]));
     }
-    return { run: reportRun, sections, metrics, website: built.website, supabase: built.supabase, dataSpace: resolvedDataSpace };
+    return { run: reportRun, sections, metrics, website: built.website, supabase: built.supabase, instagram: built.instagram, dataSpace: resolvedDataSpace };
   });
 }
 
@@ -255,10 +284,21 @@ function worksheet(name: string, rows: Array<Array<string | number | null>>) {
 export function dailyReportToExcelXml(report: DailyReport) {
   const summaryRows: Array<Array<string | number | null>> = [["section", "metric", "value", "unit", "note"]];
   for (const item of report.metrics) summaryRows.push([item.section_key, item.label, item.value ?? item.text_value ?? "", item.unit ?? "", ""]);
-  if (report.dataSpace.slug === "auto-lab" && !report.website && !report.supabase) {
+  const instagramSources = connectedInstagramSources(report.instagram);
+  const hasInstagram = instagramSources.length > 0;
+  if (report.dataSpace.slug === "auto-lab" && !report.website && !report.supabase && !hasInstagram) {
     return `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${worksheet("Summary", summaryRows)}</Workbook>`;
   }
   const websiteRows: Array<Array<string | number | null>> = [["date_pt", "page_views", "unique_visitors", "sessions", "custom_events", "top_page", "top_referrer", "top_country", "top_device", "last_event_at_pt"], [report.run.report_date, report.website?.page_views ?? 0, report.website?.unique_visitors ?? 0, report.website?.sessions ?? 0, report.website?.custom_events ?? 0, report.website?.top_page ?? "", report.website?.top_referrer ?? "", report.website?.top_country ?? "", report.website?.top_device ?? "", report.website?.last_event_at_pt ?? ""]];
   const supabaseRows: Array<Array<string | number | null>> = [["date_pt", "new_signups", "users_total", "confirmed_users", "provider_email", "provider_google", "provider_other", "last_sync_at_pt"], [report.run.report_date, report.supabase?.new_signups ?? 0, report.supabase?.users_total ?? 0, report.supabase?.confirmed_users ?? 0, report.supabase?.provider_email ?? 0, report.supabase?.provider_google ?? 0, report.supabase?.provider_other ?? 0, report.supabase?.last_sync_at_pt ?? ""]];
-  return `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${worksheet("Summary", summaryRows)}${worksheet("MoonArq_Website_Vercel", websiteRows)}${worksheet("MoonArq_Supabase", supabaseRows)}</Workbook>`;
+  const instagramRows: Array<Array<string | number | null>> = [
+    ["username", "followers", "account_media_count", "fetched_media", "reach", "likes", "comments", "saved", "total_interactions", "engagement_rate"],
+    ...instagramSources.map((source) => [source.username ?? source.displayName, source.stats.followers ?? "", source.stats.accountMediaCount ?? "", source.stats.fetchedMediaCount, source.stats.reach, source.stats.likes, source.stats.comments, source.stats.saved, source.stats.totalInteractions, source.stats.engagementRate ?? ""]),
+  ];
+  const coreSheets = report.dataSpace.slug === "auto-lab" && !report.website && !report.supabase
+    ? ""
+    : `${worksheet("MoonArq_Website_Vercel", websiteRows)}${worksheet("MoonArq_Supabase", supabaseRows)}`;
+  const instagramSheetName = report.dataSpace.slug === "auto-lab" ? "Auto_Lab_Instagram" : "MoonArq_Instagram";
+  const instagramSheet = hasInstagram ? worksheet(instagramSheetName, instagramRows) : "";
+  return `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${worksheet("Summary", summaryRows)}${coreSheets}${instagramSheet}</Workbook>`;
 }

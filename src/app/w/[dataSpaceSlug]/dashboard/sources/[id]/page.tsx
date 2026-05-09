@@ -1,10 +1,10 @@
 import { ArrowLeft, Camera, Clipboard, RadioTower, ShieldAlert, Webhook } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getConnector } from "@/collection/connectors/registry";
+import { expectedInstagramCopy } from "@/collection/connectors/instagram/source-policy";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { getWebsiteModeLabel, isWebsiteSourceKey } from "@/collection/tracking/website-sources";
 import { getPublicAppUrl, getPublicAppUrlWarning } from "@/storage/runtime/app-config";
-import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { getSource } from "@/storage/repositories/sources-repository";
 import { listCredentialHints } from "@/storage/repositories/credentials-repository";
@@ -19,10 +19,6 @@ import { dashboardPath } from "@/presentation/routes/data-space-routes";
 import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
-
-function isAutoLabInstagramSource(source: { source_type_key: string; data_space_id: string }) {
-  return source.source_type_key === "instagram" && source.data_space_id === DATA_SPACE_IDS.autoLab;
-}
 
 function tokenStatus(source: { metadata: Record<string, unknown> }) {
   const expiresAt = typeof source.metadata.token_expires_at === "string" ? source.metadata.token_expires_at : null;
@@ -58,8 +54,9 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const publicAppUrlWarning = getPublicAppUrlWarning();
   const endpoint = `${publicAppUrl ?? "http://127.0.0.1:3100"}/api/track`;
   const setup = connector.getSetupInstructions(source);
-  const showInstagramOAuth = isAutoLabInstagramSource(source);
+  const showInstagramOAuth = source.source_type_key === "instagram";
   const instagramConnected = source.metadata.oauth_connected === true;
+  const instagramOAuthHref = `/api/oauth/instagram/start?sourceId=${encodeURIComponent(source.id)}&dataSpaceSlug=${encodeURIComponent(dataSpace.slug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${source.id}`)}`;
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6">
@@ -76,7 +73,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
             <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
             {showInstagramOAuth ? (
-              <LinkButton href={`/api/oauth/instagram/start?sourceId=${source.id}`} variant="primary">
+              <LinkButton href={instagramOAuthHref} variant="primary">
                 <Camera className="h-4 w-4" />
                 Connect Instagram
               </LinkButton>
@@ -129,10 +126,10 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             <div>
               <div className="mb-2 flex items-center gap-2 text-base font-semibold text-white">
                 <Camera className="h-4 w-4 text-cyan-200" />
-                Auto Lab Instagram OAuth
+                Instagram OAuth
               </div>
               <p className="text-sm leading-6 text-slate-300">
-                Connects only the Auto Lab just.4is Instagram account through the official Meta Graph API. Tokens stay encrypted server-side.
+                Connects this {dataSpace.display_name} Instagram source through the official Meta Graph API. Tokens stay encrypted server-side and are stored only for this source.
               </p>
             </div>
             <Badge tone={instagramConnected ? "green" : "amber"}>{instagramConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
@@ -140,7 +137,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-3">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Expected account</p>
-              <p className="mt-2 text-white">just.4is</p>
+              <p className="mt-2 text-white">{expectedInstagramCopy(source)}</p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Graph API</p>
@@ -152,7 +149,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <LinkButton href={`/api/oauth/instagram/start?sourceId=${source.id}`} variant="primary">
+            <LinkButton href={instagramOAuthHref} variant="primary">
               <Camera className="h-4 w-4" />
               {instagramConnected ? "Reconnect Instagram" : "Connect Instagram"}
             </LinkButton>

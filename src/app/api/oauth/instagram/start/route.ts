@@ -5,11 +5,11 @@ import {
   INSTAGRAM_OAUTH_STATE_COOKIE,
   INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,
 } from "@/collection/connectors/instagram/oauth-state";
-import { AUTO_LAB_INSTAGRAM_SOURCE_ID } from "@/collection/connectors/instagram/constants";
-import { AUTO_LAB_DATA_SPACE_SLUG } from "@/storage/data-spaces";
+import { safeInstagramReturnPath } from "@/collection/connectors/instagram/source-policy";
 import { isDashboardRequestAuthenticated } from "@/storage/auth/dashboard-session";
-import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
+import { getDataSpaceBySlug, listDataSpaces } from "@/storage/repositories/data-spaces-repository";
 import { getSource } from "@/storage/repositories/sources-repository";
+import type { DataSpace, Source } from "@/storage/db/schema";
 
 export const runtime = "nodejs";
 
@@ -24,22 +24,34 @@ function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
 }
 
+async function resolveOAuthSource(sourceId: string, dataSpaceSlug: string | null): Promise<{ source: Source; dataSpace: DataSpace } | null> {
+  if (dataSpaceSlug) {
+    const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
+    if (!dataSpace) return null;
+    const source = await getSource(sourceId, { dataSpaceId: dataSpace.id });
+    return source ? { source, dataSpace } : null;
+  }
+  const source = await getSource(sourceId);
+  if (!source) return null;
+  const dataSpace = (await listDataSpaces()).find((space) => space.id === source.data_space_id);
+  return dataSpace ? { source, dataSpace } : null;
+}
+
 export async function GET(request: Request) {
   if (!(await isDashboardRequestAuthenticated(request))) return loginRedirect(request);
 
   const requestUrl = new URL(request.url);
-  const sourceId = requestUrl.searchParams.get("sourceId") ?? AUTO_LAB_INSTAGRAM_SOURCE_ID;
-  const autoLab = await getDataSpaceBySlug(AUTO_LAB_DATA_SPACE_SLUG);
-  if (!autoLab) return jsonError("Auto Lab data space is unavailable.", 404);
-  const source = await getSource(sourceId, { dataSpaceId: autoLab.id });
-  if (!source) return jsonError("Auto Lab Instagram source not found.", 404);
-  if (source.id !== AUTO_LAB_INSTAGRAM_SOURCE_ID || source.source_type_key !== "instagram") {
-    return jsonError("Instagram OAuth is available only for the existing Auto Lab Instagram source.", 403);
-  }
+  const sourceId = requestUrl.searchParams.get("sourceId");
+  if (!sourceId) return jsonError("sourceId is required for Instagram OAuth.", 400);
+  const resolved = await resolveOAuthSource(sourceId, requestUrl.searchParams.get("dataSpaceSlug"));
+  if (!resolved) return jsonError("Instagram source not found in the requested data space.", 404);
+  const { source, dataSpace } = resolved;
+  if (source.source_type_key !== "instagram") return jsonError("Instagram OAuth can only be started for Instagram sources.", 403);
 
   try {
     const config = getInstagramOAuthConfig();
-    const state = createInstagramOAuthState(source.id);
+    const returnPath = safeInstagramReturnPath(requestUrl.searchParams.get("returnPath"), dataSpace.slug, source.id);
+    const state = createInstagramOAuthState({ sourceId: source.id, dataSpaceSlug: dataSpace.slug, returnPath });
     const response = NextResponse.redirect(buildInstagramAuthorizationUrl(config, state));
     response.cookies.set({
       name: INSTAGRAM_OAUTH_STATE_COOKIE,

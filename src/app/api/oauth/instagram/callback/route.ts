@@ -12,11 +12,10 @@ import {
   validateInstagramOAuthState,
 } from "@/collection/connectors/instagram/oauth-state";
 import {
-  AUTO_LAB_INSTAGRAM_ACCOUNT_ID,
-  AUTO_LAB_INSTAGRAM_SOURCE_ID,
-  AUTO_LAB_INSTAGRAM_USERNAME,
-} from "@/collection/connectors/instagram/constants";
-import { AUTO_LAB_DATA_SPACE_SLUG } from "@/storage/data-spaces";
+  getInstagramAccountSelection,
+  safeInstagramReturnPath,
+  validateInstagramAccountForSource,
+} from "@/collection/connectors/instagram/source-policy";
 import { saveCredential } from "@/storage/repositories/credentials-repository";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
@@ -37,8 +36,8 @@ function parseCookies(request: Request) {
   );
 }
 
-function sourceRedirect(request: Request, sourceId = AUTO_LAB_INSTAGRAM_SOURCE_ID, params: Record<string, string> = {}) {
-  const url = new URL(`/w/${AUTO_LAB_DATA_SPACE_SLUG}/dashboard/sources/${sourceId}`, request.url);
+function sourceRedirect(request: Request, returnPath: string, params: Record<string, string> = {}) {
+  const url = new URL(returnPath, request.url);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   const response = NextResponse.redirect(url, { status: 303 });
   response.cookies.set({
@@ -65,27 +64,26 @@ async function saveInstagramCredentials(sourceId: string, credentials: Record<st
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
-  const oauthError = requestUrl.searchParams.get("error_description") ?? requestUrl.searchParams.get("error");
-  if (oauthError) {
-    return sourceRedirect(request, AUTO_LAB_INSTAGRAM_SOURCE_ID, { instagram_oauth: "error", message: "Meta OAuth was cancelled or rejected." });
-  }
-  const code = requestUrl.searchParams.get("code");
-  if (!code) return jsonError("Missing Instagram OAuth authorization code.", 400);
-
   let state;
   try {
     state = validateInstagramOAuthState(requestUrl.searchParams.get("state"), parseCookies(request)[INSTAGRAM_OAUTH_STATE_COOKIE]);
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Invalid Instagram OAuth state.", 400);
   }
+  const returnPath = safeInstagramReturnPath(state.returnPath, state.dataSpaceSlug, state.sourceId);
 
-  const autoLab = await getDataSpaceBySlug(AUTO_LAB_DATA_SPACE_SLUG);
-  if (!autoLab) return jsonError("Auto Lab data space is unavailable.", 404);
-  const source = await getSource(state.sourceId, { dataSpaceId: autoLab.id });
-  if (!source) return jsonError("Auto Lab Instagram source not found.", 404);
-  if (source.id !== AUTO_LAB_INSTAGRAM_SOURCE_ID || source.source_type_key !== "instagram") {
-    return jsonError("Instagram OAuth callback rejected for this source.", 403);
+  const oauthError = requestUrl.searchParams.get("error_description") ?? requestUrl.searchParams.get("error");
+  if (oauthError) {
+    return sourceRedirect(request, returnPath, { instagram_oauth: "error", message: "Meta OAuth was cancelled or rejected." });
   }
+  const code = requestUrl.searchParams.get("code");
+  if (!code) return sourceRedirect(request, returnPath, { instagram_oauth: "error", message: "Missing Instagram OAuth authorization code." });
+
+  const dataSpace = await getDataSpaceBySlug(state.dataSpaceSlug);
+  if (!dataSpace) return jsonError("Instagram OAuth data space is unavailable.", 404);
+  const source = await getSource(state.sourceId, { dataSpaceId: dataSpace.id });
+  if (!source) return jsonError("Instagram OAuth source was not found in the requested data space.", 403);
+  if (source.source_type_key !== "instagram") return jsonError("Instagram OAuth callback rejected for this source.", 403);
 
   try {
     const connectedAt = new Date();
@@ -105,13 +103,8 @@ export async function GET(request: Request) {
     }
     const activeToken = longToken?.access_token ?? shortToken.access_token;
     const expiresAt = tokenExpiresAt(longToken?.expires_in ?? shortToken.expires_in, connectedAt);
-    const profile = await fetchInstagramAccountProfile(activeToken, config, AUTO_LAB_INSTAGRAM_ACCOUNT_ID);
-    if (profile.id !== AUTO_LAB_INSTAGRAM_ACCOUNT_ID) {
-      throw new Error("Connected Instagram account ID does not match Auto Lab.");
-    }
-    if (profile.username !== AUTO_LAB_INSTAGRAM_USERNAME) {
-      throw new Error("Connected Instagram username does not match just.4is.");
-    }
+    const profile = await fetchInstagramAccountProfile(activeToken, config, getInstagramAccountSelection(source));
+    validateInstagramAccountForSource(source, profile);
 
     await saveInstagramCredentials(source.id, {
       instagram_access_token: shortToken.access_token,
@@ -131,6 +124,7 @@ export async function GET(request: Request) {
       normalized_url: `https://www.instagram.com/${profile.username}`,
       metadata: {
         ...source.metadata,
+        scaffoldOnly: false,
         oauth_connected: true,
         instagram_account_id: profile.id,
         instagram_username: profile.username,
@@ -147,7 +141,7 @@ export async function GET(request: Request) {
       message: `Instagram OAuth connected for ${profile.username}.`,
       metadata: { instagramAccountId: profile.id, username: profile.username, pageId: profile.page_id ?? null },
     });
-    return sourceRedirect(request, source.id, { instagram_oauth: "connected" });
+    return sourceRedirect(request, returnPath, { instagram_oauth: "connected" });
   } catch (error) {
     await recordConnectorEvent({
       source_id: source.id,
@@ -156,6 +150,6 @@ export async function GET(request: Request) {
       message: error instanceof Error ? error.message : "Instagram OAuth callback failed.",
       metadata: { sanitized: true },
     });
-    return sourceRedirect(request, source.id, { instagram_oauth: "error", message: "Instagram OAuth setup failed." });
+    return sourceRedirect(request, returnPath, { instagram_oauth: "error", message: "Instagram OAuth setup failed." });
   }
 }

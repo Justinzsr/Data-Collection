@@ -1,11 +1,6 @@
 import { createHash } from "node:crypto";
 import type { JsonRecord } from "@/storage/db/schema";
-import {
-  AUTO_LAB_FACEBOOK_PAGE_ID,
-  AUTO_LAB_INSTAGRAM_ACCOUNT_ID,
-  AUTO_LAB_INSTAGRAM_USERNAME,
-  INSTAGRAM_OAUTH_SCOPES,
-} from "@/collection/connectors/instagram/constants";
+import { INSTAGRAM_OAUTH_SCOPES } from "@/collection/connectors/instagram/constants";
 
 export type InstagramOAuthConfig = {
   appId: string;
@@ -26,6 +21,11 @@ export type InstagramAccountProfile = {
   followers_count: number;
   media_count: number;
   page_id?: string | null;
+};
+
+export type InstagramAccountLookupOptions = {
+  preferredAccountId?: string | null;
+  preferredUsername?: string | null;
 };
 
 export type InstagramMedia = {
@@ -175,21 +175,37 @@ export async function exchangeForLongLivedToken(accessToken: string, config: Ins
   return graphFetch<InstagramTokenResponse>(url);
 }
 
-export async function fetchInstagramAccountProfile(accessToken: string, config: Pick<InstagramOAuthConfig, "graphApiVersion">, preferredAccountId = AUTO_LAB_INSTAGRAM_ACCOUNT_ID): Promise<InstagramAccountProfile> {
+export async function fetchInstagramAccountProfile(
+  accessToken: string,
+  config: Pick<InstagramOAuthConfig, "graphApiVersion">,
+  options: InstagramAccountLookupOptions | string = {},
+): Promise<InstagramAccountProfile> {
+  const lookup = typeof options === "string" ? { preferredAccountId: options } : options;
   const accountsUrl = graphUrl(config, "/me/accounts");
   accountsUrl.searchParams.set("fields", "id,name,instagram_business_account{id,username,followers_count,media_count}");
   const accounts = await graphFetch<{ data?: Array<{ id?: string; instagram_business_account?: InstagramAccountProfile }> }>(accountsUrl, accessToken);
-  const pageMatch = accounts.data?.find((page) => page.instagram_business_account?.id === preferredAccountId || page.instagram_business_account?.username === AUTO_LAB_INSTAGRAM_USERNAME);
+  const pages = accounts.data ?? [];
+  const pageMatch = pages.find((page) => {
+    const instagram = page.instagram_business_account;
+    if (!instagram?.id) return false;
+    if (lookup.preferredAccountId && instagram.id === lookup.preferredAccountId) return true;
+    if (lookup.preferredUsername && instagram.username === lookup.preferredUsername) return true;
+    return false;
+  }) ?? (!lookup.preferredAccountId && !lookup.preferredUsername ? pages.find((page) => page.instagram_business_account?.id) : undefined);
   if (pageMatch?.instagram_business_account?.id) {
     return {
       ...pageMatch.instagram_business_account,
       followers_count: numberValue(pageMatch.instagram_business_account.followers_count),
       media_count: numberValue(pageMatch.instagram_business_account.media_count),
-      page_id: pageMatch.id ?? AUTO_LAB_FACEBOOK_PAGE_ID,
+      page_id: pageMatch.id ?? null,
     };
   }
 
-  const profileUrl = graphUrl(config, `/${preferredAccountId}`);
+  if (!lookup.preferredAccountId) {
+    throw new InstagramGraphApiError("No connected Instagram Business or Creator account was found for this Meta user.", { status: 404 });
+  }
+
+  const profileUrl = graphUrl(config, `/${lookup.preferredAccountId}`);
   profileUrl.searchParams.set("fields", "id,username,followers_count,media_count");
   const profile = await graphFetch<InstagramAccountProfile>(profileUrl, accessToken);
   return {
@@ -197,7 +213,7 @@ export async function fetchInstagramAccountProfile(accessToken: string, config: 
     username: profile.username,
     followers_count: numberValue(profile.followers_count),
     media_count: numberValue(profile.media_count),
-    page_id: AUTO_LAB_FACEBOOK_PAGE_ID,
+    page_id: profile.page_id ?? null,
   };
 }
 

@@ -1,5 +1,4 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { AUTO_LAB_DATA_SPACE_SLUG } from "@/storage/data-spaces";
 
 export const INSTAGRAM_OAUTH_STATE_COOKIE = "__Host-moonarq_instagram_oauth";
 export const INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
@@ -7,7 +6,8 @@ export const INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 type InstagramOAuthStatePayload = {
   v: 1;
   sourceId: string;
-  dataSpaceSlug: typeof AUTO_LAB_DATA_SPACE_SLUG;
+  dataSpaceSlug: string;
+  returnPath: string;
   nonce: string;
   iat: number;
   exp: number;
@@ -38,12 +38,16 @@ function sign(payloadPart: string, secret: string) {
   return createHmac("sha256", secret).update(payloadPart).digest("base64url");
 }
 
-export function createInstagramOAuthState(sourceId: string, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
+export function createInstagramOAuthState(input: { sourceId: string; dataSpaceSlug: string; returnPath: string } | string, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
   const issuedAt = Math.floor(now / 1000);
+  const payloadInput = typeof input === "string"
+    ? { sourceId: input, dataSpaceSlug: "auto-lab", returnPath: `/w/auto-lab/dashboard/sources/${input}` }
+    : input;
   const payload: InstagramOAuthStatePayload = {
     v: 1,
-    sourceId,
-    dataSpaceSlug: AUTO_LAB_DATA_SPACE_SLUG,
+    sourceId: payloadInput.sourceId,
+    dataSpaceSlug: payloadInput.dataSpaceSlug,
+    returnPath: payloadInput.returnPath,
     nonce: randomBytes(16).toString("base64url"),
     iat: issuedAt,
     exp: issuedAt + INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,
@@ -65,7 +69,15 @@ export function validateInstagramOAuthState(state: string | null | undefined, co
   } catch {
     throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
   }
-  if (payload.v !== 1 || payload.dataSpaceSlug !== AUTO_LAB_DATA_SPACE_SLUG || typeof payload.sourceId !== "string" || !payload.sourceId) {
+  if (
+    payload.v !== 1 ||
+    typeof payload.sourceId !== "string" ||
+    !payload.sourceId ||
+    typeof payload.dataSpaceSlug !== "string" ||
+    !payload.dataSpaceSlug ||
+    typeof payload.returnPath !== "string" ||
+    !payload.returnPath.startsWith("/")
+  ) {
     throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
   }
   if (typeof payload.exp !== "number" || payload.exp <= Math.floor(now / 1000)) {

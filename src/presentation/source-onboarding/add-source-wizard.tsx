@@ -26,6 +26,7 @@ function examplesFor(dataSpaceSlug: string) {
   return [
     "https://moonarqstudio.com",
     "https://xxxxx.supabase.co",
+    "https://www.instagram.com/moonarqstudio",
     "https://vercel.com/team/project",
     "https://your-store.myshopify.com",
   ];
@@ -112,7 +113,7 @@ function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePat
   );
 }
 
-function templateDetection(template: string | null, dataSpaceName: string): Detection | null {
+function templateDetection(template: string | null, dataSpaceName: string, dataSpaceSlug: string): Detection | null {
   if (template === "tiktok") {
     return {
       sourceTypeKey: "tiktok",
@@ -126,14 +127,15 @@ function templateDetection(template: string | null, dataSpaceName: string): Dete
     };
   }
   if (template === "instagram") {
+    const accountName = dataSpaceSlug === "auto-lab" ? "auto_lab_cars" : "moonarqstudio";
     return {
       sourceTypeKey: "instagram",
       displayName: "Instagram",
       confidence: 1,
-      normalizedUrl: "https://www.instagram.com/auto_lab_cars",
-      accountName: "auto_lab_cars",
-      requiredSetup: ["Needs Instagram Graph API setup. Insights may require a Business or Creator account; save credentials server-side later."],
-      possibleMetrics: ["reach", "impressions", "followers", "profile_views", "engagement_rate"],
+      normalizedUrl: `https://www.instagram.com/${accountName}`,
+      accountName,
+      requiredSetup: ["Needs Instagram Graph API/OAuth setup. Insights may require a Business or Creator account; tokens are saved only through encrypted server-side credential storage."],
+      possibleMetrics: ["instagram_followers", "instagram_media_count", "instagram_media_reach", "instagram_media_likes", "instagram_media_comments", "instagram_media_saved", "instagram_media_total_interactions", "instagram_engagement_rate"],
       reasons: [`${dataSpaceName} Instagram scaffold selected.`],
     };
   }
@@ -150,7 +152,7 @@ export function AddSourceWizard({
   basePath?: string;
 }) {
   const searchParams = useSearchParams();
-  const initialDetection = templateDetection(searchParams.get("template"), dataSpaceName);
+  const initialDetection = templateDetection(searchParams.get("template"), dataSpaceName, dataSpaceSlug);
   const [inputUrl, setInputUrl] = useState(() => initialDetection?.normalizedUrl ?? "");
   const [detections, setDetections] = useState<Detection[]>(() => initialDetection ? [initialDetection] : []);
   const [selected, setSelected] = useState<Detection | null>(() => initialDetection);
@@ -182,6 +184,7 @@ export function AddSourceWizard({
     try {
       const isMoonArqWebsite = selected.sourceTypeKey === "website";
       const isAutoLab = dataSpaceSlug === "auto-lab";
+      const isInstagram = effectiveSourceTypeKey === "instagram";
       const response = await fetch("/api/sources", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -192,6 +195,8 @@ export function AddSourceWizard({
             ? "Auto Lab TikTok"
             : isAutoLab && effectiveSourceTypeKey === "instagram"
               ? "Auto Lab Instagram"
+              : dataSpaceSlug === "moonarq" && isInstagram
+                ? "MoonArq Instagram"
               : isMoonArqWebsite
             ? "MoonArq Website / Vercel"
             : selected.accountName
@@ -205,6 +210,8 @@ export function AddSourceWizard({
             ? { monitored_source: "moonarq_website", website_mode: effectiveSourceTypeKey }
             : isAutoLab
               ? { intended_use: "personal_car_content_testing", scaffoldOnly: true }
+              : isInstagram
+                ? { scaffoldOnly: true }
               : undefined,
         }),
       });
@@ -401,8 +408,16 @@ export function AddSourceWizard({
             {savedSource ? (
               savedSource.source_type_key === "website" || savedSource.source_type_key === "vercel_web_analytics_drain" ? (
                 <WebsiteSourceSetup source={savedSource} basePath={basePath} />
-              ) : (
-                <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" dataSpaceSlug={dataSpaceSlug} />
+            ) : (
+                <div className="grid gap-3">
+                  {savedSource.source_type_key === "instagram" ? (
+                    <LinkButton href={`/api/oauth/instagram/start?sourceId=${encodeURIComponent(savedSource.id)}&dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${savedSource.id}`)}`} variant="primary">
+                      <KeyRound className="h-4 w-4" />
+                      Connect Instagram
+                    </LinkButton>
+                  ) : null}
+                  <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" dataSpaceSlug={dataSpaceSlug} />
+                </div>
               )
             ) : (
               (selected?.requiredSetup ?? [

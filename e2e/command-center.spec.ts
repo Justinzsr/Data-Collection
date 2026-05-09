@@ -38,6 +38,20 @@ test("add source wizard detects Supabase and Website and shows credentials after
   await expect(page.getByRole("link", { name: "Open Source Snippet" })).toBeVisible();
 });
 
+test("add source wizard prepares MoonArq Instagram OAuth", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard/sources/new");
+  await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
+  await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://www.instagram.com/moonarqstudio");
+  await page.getByRole("button", { name: "Detect" }).click();
+  await expect(page.getByText("Instagram").first()).toBeVisible();
+  await page.getByRole("button", { name: "Save Source" }).click();
+  const connect = page.getByRole("link", { name: "Connect Instagram" });
+  await expect(connect).toBeVisible();
+  await expect(connect).toHaveAttribute("href", /dataSpaceSlug=moonarq/);
+  await expect(page.getByLabel("Instagram account ID")).toBeVisible();
+});
+
 test("events page shows non-empty JavaScript tracking snippet", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard/events");

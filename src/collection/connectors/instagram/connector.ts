@@ -1,9 +1,5 @@
 import type { ConnectionTestResult, ConnectorDefinition, NormalizedContentMetric, NormalizedMetric, RawPayload, SyncContext } from "@/collection/connectors/types";
-import {
-  AUTO_LAB_INSTAGRAM_ACCOUNT_ID,
-  AUTO_LAB_INSTAGRAM_SOURCE_ID,
-  AUTO_LAB_INSTAGRAM_USERNAME,
-} from "@/collection/connectors/instagram/constants";
+import { AUTO_LAB_INSTAGRAM_USERNAME } from "@/collection/connectors/instagram/constants";
 import {
   fetchInstagramAccountProfile,
   fetchInstagramMedia,
@@ -14,14 +10,15 @@ import {
   selectInstagramAccessToken,
   type InstagramSyncSnapshot,
 } from "@/collection/connectors/instagram/graph-api";
+import {
+  expectedInstagramCopy,
+  getInstagramAccountSelection,
+  instagramSourceLabel,
+  validateInstagramAccountForSource,
+} from "@/collection/connectors/instagram/source-policy";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
-import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
-
-function isAutoLabInstagramSource(source: Source) {
-  return source.source_type_key === "instagram" && source.data_space_id === DATA_SPACE_IDS.autoLab && source.id === AUTO_LAB_INSTAGRAM_SOURCE_ID;
-}
 
 function validUrl(inputUrl: string) {
   try {
@@ -48,32 +45,13 @@ function mediaMetric(date: string, source: Source, metricKey: string, metricValu
   };
 }
 
-function createScaffoldPayload(ctx: SyncContext): RawPayload {
-  const fetchedAt = new Date().toISOString();
-  const payload: JsonRecord = {
-    connector: "instagram",
-    mode: "scaffold_demo",
-    trigger: ctx.trigger,
-    message: "Instagram connector scaffold remains inactive outside the Auto Lab just.4is source.",
-  };
-  return {
-    externalId: `instagram-scaffold-${ctx.source.id}`,
-    fetchedAt,
-    payload,
-    payloadHash: hashInstagramPayload(payload),
-    cursor: { fetchedAt, scaffoldOnly: true },
-  };
-}
-
 async function fetchSnapshot(ctx: SyncContext): Promise<{ snapshot: InstagramSyncSnapshot; failures: number }> {
   const config = getInstagramOAuthConfig();
   const accessToken = selectInstagramAccessToken(ctx.credentials);
   if (!accessToken) throw new Error("Instagram OAuth credentials are missing.");
   if (isTokenExpired(ctx.credentials)) throw new Error("Instagram OAuth token expired. Reconnect Instagram.");
-  const account = await fetchInstagramAccountProfile(accessToken, config, ctx.credentials.instagram_account_id || AUTO_LAB_INSTAGRAM_ACCOUNT_ID);
-  if (account.id !== AUTO_LAB_INSTAGRAM_ACCOUNT_ID || account.username !== AUTO_LAB_INSTAGRAM_USERNAME) {
-    throw new Error("Connected Instagram account does not match Auto Lab just.4is.");
-  }
+  const account = await fetchInstagramAccountProfile(accessToken, config, getInstagramAccountSelection(ctx.source, ctx.credentials));
+  validateInstagramAccountForSource(ctx.source, account);
   const media = await fetchInstagramMedia(accessToken, config, account.id);
   let failures = 0;
   const mediaWithInsights = [];
@@ -106,7 +84,7 @@ async function fetchSnapshot(ctx: SyncContext): Promise<{ snapshot: InstagramSyn
 export const instagramConnector: ConnectorDefinition = {
   key: "instagram",
   displayName: "Instagram",
-  description: "Meta/Instagram Graph API connector for the isolated Auto Lab just.4is source.",
+  description: "Meta/Instagram Graph API connector for source-specific Instagram account, media, and insight metrics.",
   category: "Content",
   icon: "Instagram",
   urlPatterns: [/^https:\/\/(www\.)?instagram\.com\/[^/?#]+/i],
@@ -124,7 +102,7 @@ export const instagramConnector: ConnectorDefinition = {
     {
       key: "instagram_account_id",
       label: "Instagram account ID",
-      description: "Expected Auto Lab Instagram account ID resolved during OAuth.",
+      description: "Instagram account ID resolved during OAuth.",
       required: true,
       secret: false,
       type: "text",
@@ -172,20 +150,12 @@ export const instagramConnector: ConnectorDefinition = {
     };
   },
   async testConnection(ctx): Promise<ConnectionTestResult> {
-    if (!isAutoLabInstagramSource(ctx.source)) {
-      return {
-        ok: true,
-        status: ctx.credentials.instagram_account_id ? "unsupported" : "needs_credentials",
-        message: "Real Instagram Graph API collection is enabled only for the isolated Auto Lab just.4is source.",
-        details: { scaffoldOnly: true, autoLabOnly: true },
-      };
-    }
     const accessToken = selectInstagramAccessToken(ctx.credentials);
     if (!accessToken || !ctx.credentials.instagram_account_id) {
       return {
         ok: false,
         status: "needs_credentials",
-        message: "Connect Instagram with OAuth before testing Auto Lab Instagram.",
+        message: `Connect Instagram with OAuth before testing ${instagramSourceLabel(ctx.source)}.`,
         details: { required: ["instagram_long_lived_access_token", "instagram_account_id"] },
       };
     }
@@ -199,15 +169,8 @@ export const instagramConnector: ConnectorDefinition = {
     }
     try {
       const config = getInstagramOAuthConfig();
-      const account = await fetchInstagramAccountProfile(accessToken, config, ctx.credentials.instagram_account_id);
-      if (account.id !== AUTO_LAB_INSTAGRAM_ACCOUNT_ID || account.username !== AUTO_LAB_INSTAGRAM_USERNAME) {
-        return {
-          ok: false,
-          status: "error",
-          message: "Connected Instagram account does not match Auto Lab just.4is.",
-          details: { expectedUsername: AUTO_LAB_INSTAGRAM_USERNAME, receivedUsername: account.username, receivedAccountId: account.id },
-        };
-      }
+      const account = await fetchInstagramAccountProfile(accessToken, config, getInstagramAccountSelection(ctx.source, ctx.credentials));
+      validateInstagramAccountForSource(ctx.source, account);
       return {
         ok: true,
         status: "connected",
@@ -230,15 +193,6 @@ export const instagramConnector: ConnectorDefinition = {
     }
   },
   async sync(ctx) {
-    if (!isAutoLabInstagramSource(ctx.source)) {
-      const payload = createScaffoldPayload(ctx);
-      return {
-        rawPayloads: [payload],
-        cursorAfter: payload.cursor ?? null,
-        recordsFetched: 1,
-        message: "Instagram scaffold sync recorded for non-Auto-Lab source.",
-      };
-    }
     const { snapshot, failures } = await fetchSnapshot(ctx);
     return {
       rawPayloads: [
@@ -322,14 +276,10 @@ export const instagramConnector: ConnectorDefinition = {
     return metricDefinitions.filter((metric) => metric.source_type_key === "instagram");
   },
   getSetupInstructions(source) {
-    if (source && !isAutoLabInstagramSource(source)) {
-      return [
-        "Instagram Graph API collection is enabled only for the isolated Auto Lab just.4is source in this sprint.",
-        "Do not connect this source to MoonArq production reporting.",
-      ];
-    }
+    const expected = source ? expectedInstagramCopy(source) : "the selected Instagram account";
     return [
       "Use Connect Instagram to start the server-side Meta OAuth flow.",
+      `Expected account: ${expected}.`,
       "The Meta app must include this valid OAuth redirect URI: https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback",
       "Required server env vars: META_APP_ID, META_APP_SECRET, META_GRAPH_API_VERSION, and META_REDIRECT_URI.",
       "Use the official Meta/Instagram Graph API only. Do not scrape Instagram or Meta dashboards.",
