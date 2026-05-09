@@ -4,6 +4,7 @@ import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
 import type { SyncRun, SyncTrigger } from "@/storage/db/schema";
 import { getDecryptedCredentialMap } from "@/storage/repositories/credentials-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
+import { upsertContentMetrics } from "@/storage/repositories/content-repository";
 import { upsertMetrics } from "@/storage/repositories/metrics-repository";
 import { recordChangeEventsForRawPayloads } from "@/storage/repositories/platform-change-events-repository";
 import { storeRawPayloads } from "@/storage/repositories/raw-ingestions-repository";
@@ -73,6 +74,7 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
     await recordChangeEventsForRawPayloads(source, syncResult.rawPayloads);
     const normalized = await connector.normalize(syncResult.rawPayloads, source);
     const metrics = await upsertMetrics(normalized.metrics);
+    const content = await upsertContentMetrics(normalized.contentMetrics ?? []);
     const finishedAt = new Date();
 
     await markSourceSyncState(source.id, input.trigger, { ok: true });
@@ -89,9 +91,9 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       finished_at: finishedAt.toISOString(),
       duration_ms: finishedAt.getTime() - startedAt.getTime(),
       records_fetched: syncResult.recordsFetched,
-      records_inserted: raw.inserted + (syncResult.recordsInserted ?? 0),
+      records_inserted: raw.inserted + content.itemsUpserted + content.metricsUpserted + (syncResult.recordsInserted ?? 0),
       records_updated: syncResult.recordsUpdated ?? 0,
-      metrics_upserted: metrics.upserted,
+      metrics_upserted: metrics.upserted + content.metricsUpserted,
       cursor_after: syncResult.cursorAfter ?? null,
     })) as SyncRun;
   } catch (error) {

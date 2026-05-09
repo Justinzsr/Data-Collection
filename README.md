@@ -79,6 +79,33 @@ Links identify the source. Private metrics still require the right ingestion pat
 
 Credentials are per-source, encrypted with AES-256-GCM, and stored server-side. Saved values are never shown again; the UI only displays masked hints.
 
+## Auto Lab Instagram OAuth
+
+Auto Lab Instagram is the only real Instagram connector enabled in this sprint. It is scoped to the existing `auto-lab` data space source for `just.4is`; MoonArq sources, reports, exports, Vercel Drain, and MoonArq Supabase credentials are not part of this connector.
+
+Set these Vercel environment variables before using the deployed OAuth flow:
+
+```bash
+META_APP_ID=1287137936945850
+META_APP_SECRET=your-meta-app-secret
+META_GRAPH_API_VERSION=v25.0
+META_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback
+```
+
+Do not commit or paste `META_APP_SECRET` or access tokens. Add the secret only in Vercel Project Settings, then redeploy so the server-side OAuth routes can read it.
+
+In the Meta Developer app for **Auto Lab IS350**, add this Valid OAuth Redirect URI in the Instagram/Facebook Login settings area:
+
+`https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback`
+
+Use the public compliance URLs in Meta app settings:
+
+- Privacy Policy URL: `https://moonarq-data-hub.vercel.app/privacy`
+- Terms of Service URL: `https://moonarq-data-hub.vercel.app/terms`
+- User Data Deletion URL: `https://moonarq-data-hub.vercel.app/data-deletion`
+
+The connector uses the official Meta Graph API. It does not collect Instagram passwords, scrape dashboards, or expose token values in UI/API responses.
+
 ## MoonArq Supabase Setup
 
 MoonArq Supabase is a monitored source. It is not the same thing as the Data Hub app's own storage/auth runtime.

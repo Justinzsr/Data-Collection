@@ -1,9 +1,10 @@
-import { ArrowLeft, Clipboard, RadioTower, ShieldAlert, Webhook } from "lucide-react";
+import { ArrowLeft, Camera, Clipboard, RadioTower, ShieldAlert, Webhook } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getConnector } from "@/collection/connectors/registry";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { getWebsiteModeLabel, isWebsiteSourceKey } from "@/collection/tracking/website-sources";
 import { getPublicAppUrl, getPublicAppUrlWarning } from "@/storage/runtime/app-config";
+import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { getSource } from "@/storage/repositories/sources-repository";
 import { listCredentialHints } from "@/storage/repositories/credentials-repository";
@@ -18,6 +19,19 @@ import { dashboardPath } from "@/presentation/routes/data-space-routes";
 import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
+
+function isAutoLabInstagramSource(source: { source_type_key: string; data_space_id: string }) {
+  return source.source_type_key === "instagram" && source.data_space_id === DATA_SPACE_IDS.autoLab;
+}
+
+function tokenStatus(source: { metadata: Record<string, unknown> }) {
+  const expiresAt = typeof source.metadata.token_expires_at === "string" ? source.metadata.token_expires_at : null;
+  if (!expiresAt) return "Not available";
+  const time = new Date(expiresAt).getTime();
+  if (Number.isNaN(time)) return "Unknown";
+  if (time <= Date.now()) return `Expired ${formatAppDateTime(expiresAt)}`;
+  return `Expires ${formatAppDateTime(expiresAt)}`;
+}
 
 export default async function SourceDetailPage({ params }: { params: Promise<{ dataSpaceSlug: string; id: string }> }) {
   const { dataSpaceSlug, id } = await params;
@@ -44,6 +58,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const publicAppUrlWarning = getPublicAppUrlWarning();
   const endpoint = `${publicAppUrl ?? "http://127.0.0.1:3100"}/api/track`;
   const setup = connector.getSetupInstructions(source);
+  const showInstagramOAuth = isAutoLabInstagramSource(source);
+  const instagramConnected = source.metadata.oauth_connected === true;
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6">
@@ -59,6 +75,12 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             </LinkButton>
             <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
             <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
+            {showInstagramOAuth ? (
+              <LinkButton href={`/api/oauth/instagram/start?sourceId=${source.id}`} variant="primary">
+                <Camera className="h-4 w-4" />
+                Connect Instagram
+              </LinkButton>
+            ) : null}
           </>
         }
       />
@@ -74,6 +96,13 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             <p>Platform: <span className="text-white">{connector.displayName}</span></p>
             <p>Monitored mode: <span className="text-white">{source.source_type_key === "supabase" ? `${dataSpace.display_name} Supabase` : isWebsiteSourceKey(source.source_type_key) ? getWebsiteModeLabel(source) : connector.displayName}</span></p>
             <p>Sync mode: <span className="text-white">{source.sync_mode}</span></p>
+            {showInstagramOAuth ? (
+              <>
+                <p>OAuth: <span className="text-white">{instagramConnected ? "connected" : "not connected"}</span></p>
+                <p>Instagram account: <span className="text-white">{typeof source.metadata.instagram_username === "string" ? source.metadata.instagram_username : source.account_name ?? "not resolved"}</span></p>
+                <p>Token expiry: <span className="text-white">{tokenStatus(source)}</span></p>
+              </>
+            ) : null}
             <p>Last success: <span className="text-white">{formatAppDateTime(source.last_success_at)}</span></p>
             <p>Next sync: <span className="text-white">{formatAppDateTime(source.next_sync_at, "manual only")}</span></p>
             <p>Last error: <span className="text-white">{source.last_error ?? "none"}</span></p>
@@ -93,6 +122,45 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           ) : null}
         </GlassPanel>
       </div>
+
+      {showInstagramOAuth ? (
+        <GlassPanel className="p-4 sm:p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-base font-semibold text-white">
+                <Camera className="h-4 w-4 text-cyan-200" />
+                Auto Lab Instagram OAuth
+              </div>
+              <p className="text-sm leading-6 text-slate-300">
+                Connects only the Auto Lab just.4is Instagram account through the official Meta Graph API. Tokens stay encrypted server-side.
+              </p>
+            </div>
+            <Badge tone={instagramConnected ? "green" : "amber"}>{instagramConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
+          </div>
+          <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-3">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Expected account</p>
+              <p className="mt-2 text-white">just.4is</p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Graph API</p>
+              <p className="mt-2 text-white">{typeof source.metadata.graph_api_version === "string" ? source.metadata.graph_api_version : "v25.0"}</p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Token</p>
+              <p className="mt-2 text-white">{tokenStatus(source)}</p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <LinkButton href={`/api/oauth/instagram/start?sourceId=${source.id}`} variant="primary">
+              <Camera className="h-4 w-4" />
+              {instagramConnected ? "Reconnect Instagram" : "Connect Instagram"}
+            </LinkButton>
+            <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
+            <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
+          </div>
+        </GlassPanel>
+      ) : null}
 
       <GlassPanel className="p-4 sm:p-5">
         <div className="mb-4 flex items-center gap-2">

@@ -80,6 +80,27 @@ export async function verifyDashboardSession(cookieValue: string | undefined | n
   }
 }
 
+function parseCookieHeader(cookieHeader: string | null) {
+  return Object.fromEntries(
+    (cookieHeader ?? "")
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const [key, ...value] = part.split("=");
+        return [key, decodeURIComponent(value.join("="))];
+      }),
+  );
+}
+
+export async function isDashboardRequestAuthenticated(request: Request, env: NodeJS.ProcessEnv = process.env) {
+  const setup = getDashboardAuthSetup(env);
+  if (setup.bypass) return true;
+  if (!setup.configured) return false;
+  const cookies = parseCookieHeader(request.headers.get("cookie"));
+  return verifyDashboardSession(cookies[DASHBOARD_SESSION_COOKIE], env.DASHBOARD_SESSION_SECRET);
+}
+
 export function isProtectedUiPath(pathname: string) {
   return (
     pathname === "/dashboard" ||

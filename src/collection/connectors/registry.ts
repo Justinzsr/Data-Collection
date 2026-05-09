@@ -6,11 +6,11 @@ import { vercelWebAnalyticsDrainConnector } from "@/collection/connectors/vercel
 import {
   customApiConnector,
   customCsvConnector,
-  instagramConnector,
   shopifyConnector,
   tiktokConnector,
   vercelProjectConnector,
 } from "@/collection/connectors/future-connectors";
+import { instagramConnector } from "@/collection/connectors/instagram/connector";
 
 export const connectorRegistry: ConnectorDefinition[] = [
   vercelWebAnalyticsDrainConnector,

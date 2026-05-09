@@ -172,6 +172,60 @@ order by created_at desc
 limit 100;
 ```
 
+## Auto Lab Instagram
+
+Auto Lab Instagram uses official Meta Graph API OAuth and is scoped to `auto-lab` only. Verify source placement and connection status without reading credential values:
+
+```sql
+select
+  s.id,
+  s.display_name,
+  s.source_type_key,
+  s.status,
+  s.external_account_id,
+  s.account_name,
+  ds.slug as data_space_slug
+from sources s
+join data_spaces ds on ds.id = s.data_space_id
+where s.id = '29f678e5-820c-4de7-a128-0e56654fc51a';
+```
+
+Expected account fields after OAuth:
+
+- `data_space_slug = 'auto-lab'`
+- `source_type_key = 'instagram'`
+- `external_account_id = '17841471505463499'`
+- `account_name = 'just.4is'`
+
+Verify stored credential field names only; never select `encrypted_value`, token values, or secrets:
+
+```sql
+select
+  field_key,
+  value_hint,
+  updated_at
+from source_credentials
+where source_id = '29f678e5-820c-4de7-a128-0e56654fc51a'
+order by field_key;
+```
+
+Verify Auto Lab Instagram metrics without mixing MoonArq rows:
+
+```sql
+select
+  m.date,
+  m.metric_key,
+  m.metric_value,
+  m.dimensions
+from metrics_daily m
+join sources s on s.id = m.source_id
+join data_spaces ds on ds.id = s.data_space_id
+where ds.slug = 'auto-lab'
+  and s.source_type_key = 'instagram'
+order by m.date desc, m.metric_key
+limit 100;
+```
+
 ## Reporting Views
 
 ```sql

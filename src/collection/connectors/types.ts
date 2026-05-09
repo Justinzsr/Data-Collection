@@ -66,7 +66,10 @@ export interface NormalizedContentMetric {
   externalContentId: string;
   contentType: string;
   title?: string | null;
+  caption?: string | null;
   url?: string | null;
+  thumbnailUrl?: string | null;
+  publishedAt?: string | null;
   metricKey: string;
   metricValue: number;
   unit: string;

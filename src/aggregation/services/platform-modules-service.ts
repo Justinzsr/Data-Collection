@@ -117,14 +117,14 @@ const metricConfig: Record<ModuleKey, MetricConfig> = {
     ],
   },
   instagram: {
-    primaryKey: "reach",
+    primaryKey: "instagram_media_reach",
     primaryLabel: "Reach",
     unit: "count",
     secondary: [
-      { key: "impressions", label: "Impressions", unit: "count" },
-      { key: "followers", label: "Followers", unit: "count", mode: "latest" },
-      { key: "profile_views", label: "Profile views", unit: "count" },
-      { key: "engagement_rate", label: "Engagement", unit: "percent", mode: "latest" },
+      { key: "instagram_followers", label: "Followers", unit: "count", mode: "latest" },
+      { key: "instagram_media_likes", label: "Likes", unit: "count" },
+      { key: "instagram_media_comments", label: "Comments", unit: "count" },
+      { key: "instagram_engagement_rate", label: "Engagement", unit: "percent", mode: "latest" },
     ],
   },
   shopify: {

@@ -119,6 +119,44 @@ export async function recordChangeEventsForRawPayloads(source: Source, rawPayloa
     } else if (source.source_type_key === "vercel_web_analytics_drain" && isRecord(rawPayload.payload)) {
       const result = await recordPlatformChangeEvent({ sourceId: source.id, sourceTypeKey: source.source_type_key, platformRecordType: "vercel_analytics_event", externalRecordId: getExternalRecordId(source.source_type_key, rawPayload.payload, rawPayload.externalId), changeType: "event", changedAt: typeof rawPayload.payload.timestamp === "number" ? new Date(rawPayload.payload.timestamp).toISOString() : rawPayload.fetchedAt, payload: rawPayload.payload });
       if (result.inserted) inserted += 1;
+    } else if (source.source_type_key === "instagram" && isRecord(rawPayload.payload) && isRecord(rawPayload.payload.account)) {
+      const account = rawPayload.payload.account;
+      const accountResult = await recordPlatformChangeEvent({
+        sourceId: source.id,
+        sourceTypeKey: source.source_type_key,
+        platformRecordType: "instagram_account",
+        externalRecordId: typeof account.id === "string" ? account.id : rawPayload.externalId ?? source.id,
+        changeType: "snapshot",
+        changedAt: rawPayload.fetchedAt,
+        payload: {
+          id: typeof account.id === "string" ? account.id : null,
+          username: typeof account.username === "string" ? account.username : null,
+          followers_count: typeof account.followers_count === "number" ? account.followers_count : null,
+          media_count: typeof account.media_count === "number" ? account.media_count : null,
+        },
+      });
+      if (accountResult.inserted) inserted += 1;
+      const media = Array.isArray(rawPayload.payload.media) ? rawPayload.payload.media.filter(isRecord) : [];
+      for (const item of media) {
+        const mediaResult = await recordPlatformChangeEvent({
+          sourceId: source.id,
+          sourceTypeKey: source.source_type_key,
+          platformRecordType: "instagram_media",
+          externalRecordId: typeof item.id === "string" ? item.id : rawPayload.externalId ?? stablePayloadHash(item),
+          changeType: "snapshot",
+          changedAt: typeof item.timestamp === "string" ? item.timestamp : rawPayload.fetchedAt,
+          payload: {
+            id: typeof item.id === "string" ? item.id : null,
+            media_type: typeof item.media_type === "string" ? item.media_type : null,
+            permalink: typeof item.permalink === "string" ? item.permalink : null,
+            timestamp: typeof item.timestamp === "string" ? item.timestamp : null,
+            like_count: typeof item.like_count === "number" ? item.like_count : null,
+            comments_count: typeof item.comments_count === "number" ? item.comments_count : null,
+            insights: isRecord(item.insights) ? item.insights : {},
+          },
+        });
+        if (mediaResult.inserted) inserted += 1;
+      }
     }
   }
   return { inserted };
