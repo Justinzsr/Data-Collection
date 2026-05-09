@@ -27,12 +27,17 @@ describe("dashboard session gate", () => {
 
   it("identifies protected UI and private API routes without blocking ingestion routes", () => {
     expect(isProtectedUiPath("/dashboard/sources")).toBe(true);
+    expect(isProtectedUiPath("/w/moonarq/dashboard")).toBe(true);
+    expect(isProtectedUiPath("/w/auto-lab/dashboard")).toBe(true);
     expect(isProtectedUiPath("/settings")).toBe(true);
+    expect(isProtectedUiPath("/privacy")).toBe(false);
+    expect(isProtectedUiPath("/terms")).toBe(false);
+    expect(isProtectedUiPath("/data-deletion")).toBe(false);
     expect(isPrivateApiPath("/api/sources/abc/credentials")).toBe(true);
     expect(isPrivateApiPath("/api/metrics/summary")).toBe(true);
     expect(isPrivateApiPath("/api/track")).toBe(false);
     expect(isPrivateApiPath("/api/cron/sync")).toBe(false);
+    expect(isPrivateApiPath("/api/cron/daily-report")).toBe(false);
     expect(isPrivateApiPath("/api/webhooks/vercel/analytics-drain/source")).toBe(false);
   });
 });
-
