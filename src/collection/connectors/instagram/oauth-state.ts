@@ -3,11 +3,14 @@ import { createHmac, randomBytes } from "node:crypto";
 export const INSTAGRAM_OAUTH_STATE_COOKIE = "__Host-moonarq_instagram_oauth";
 export const INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 
+type InstagramMetaAppProfileKey = "default" | "moonarq";
+
 type InstagramOAuthStatePayload = {
   v: 1;
   sourceId: string;
   dataSpaceSlug: string;
   returnPath: string;
+  metaAppProfile?: InstagramMetaAppProfileKey;
   nonce: string;
   iat: number;
   exp: number;
@@ -38,7 +41,11 @@ function sign(payloadPart: string, secret: string) {
   return createHmac("sha256", secret).update(payloadPart).digest("base64url");
 }
 
-export function createInstagramOAuthState(input: { sourceId: string; dataSpaceSlug: string; returnPath: string } | string, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
+export function createInstagramOAuthState(
+  input: { sourceId: string; dataSpaceSlug: string; returnPath: string; metaAppProfile?: InstagramMetaAppProfileKey } | string,
+  env: NodeJS.ProcessEnv = process.env,
+  now = Date.now(),
+) {
   const issuedAt = Math.floor(now / 1000);
   const payloadInput = typeof input === "string"
     ? { sourceId: input, dataSpaceSlug: "auto-lab", returnPath: `/w/auto-lab/dashboard/sources/${input}` }
@@ -48,6 +55,7 @@ export function createInstagramOAuthState(input: { sourceId: string; dataSpaceSl
     sourceId: payloadInput.sourceId,
     dataSpaceSlug: payloadInput.dataSpaceSlug,
     returnPath: payloadInput.returnPath,
+    metaAppProfile: payloadInput.metaAppProfile,
     nonce: randomBytes(16).toString("base64url"),
     iat: issuedAt,
     exp: issuedAt + INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,
@@ -76,7 +84,8 @@ export function validateInstagramOAuthState(state: string | null | undefined, co
     typeof payload.dataSpaceSlug !== "string" ||
     !payload.dataSpaceSlug ||
     typeof payload.returnPath !== "string" ||
-    !payload.returnPath.startsWith("/")
+    !payload.returnPath.startsWith("/") ||
+    (payload.metaAppProfile !== undefined && payload.metaAppProfile !== "default" && payload.metaAppProfile !== "moonarq")
   ) {
     throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
   }

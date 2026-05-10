@@ -27,6 +27,8 @@ import { listSources } from "@/storage/repositories/sources-repository";
 const ORIGINAL_ENV = { ...process.env };
 const META_APP_ID = "1287137936945850";
 const META_SECRET = "meta-secret-for-tests";
+const MOONARQ_META_APP_ID = "999999999999999";
+const MOONARQ_META_SECRET = "moonarq-meta-secret-for-tests";
 const REDIRECT_URI = "https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback";
 const MEDIA_ID = "18112617760837714";
 const MOONARQ_INSTAGRAM_SOURCE_ID = "77777777-7777-4777-8777-777777777777";
@@ -240,6 +242,10 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       META_APP_SECRET: META_SECRET,
       META_GRAPH_API_VERSION: "v25.0",
       META_REDIRECT_URI: REDIRECT_URI,
+      MOONARQ_META_APP_ID,
+      MOONARQ_META_APP_SECRET: MOONARQ_META_SECRET,
+      MOONARQ_META_GRAPH_API_VERSION: "v25.0",
+      MOONARQ_META_REDIRECT_URI: REDIRECT_URI,
     };
     delete process.env.DATABASE_URL;
     resetDemoStore();
@@ -258,6 +264,7 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     const location = response.headers.get("location") ?? "";
     expect(location).toContain("https://www.facebook.com/v25.0/dialog/oauth");
     expect(location).toContain(`client_id=${META_APP_ID}`);
+    expect(location).not.toContain(`client_id=${MOONARQ_META_APP_ID}`);
     expect(decodeURIComponent(location)).toContain("instagram_basic");
     expect(decodeURIComponent(location)).toContain("instagram_manage_insights");
     expect(location).not.toContain(META_SECRET);
@@ -270,6 +277,31 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       sourceId: AUTO_LAB_INSTAGRAM_SOURCE_ID,
       dataSpaceSlug: "auto-lab",
       returnPath: `/w/auto-lab/dashboard/sources/${AUTO_LAB_INSTAGRAM_SOURCE_ID}`,
+      metaAppProfile: "default",
+    });
+  });
+
+  it("uses the MoonArq Meta app profile for MoonArq Instagram OAuth start", async () => {
+    addMoonArqInstagramSource();
+    const response = await instagramOAuthStartRoute(
+      new Request(`https://app.example.com/api/oauth/instagram/start?sourceId=${MOONARQ_INSTAGRAM_SOURCE_ID}&dataSpaceSlug=moonarq&returnPath=${encodeURIComponent(`/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`)}`, {
+        headers: { cookie: await dashboardCookie() },
+      }),
+    );
+
+    expect(response.status).toBe(307);
+    const location = response.headers.get("location") ?? "";
+    expect(location).toContain(`client_id=${MOONARQ_META_APP_ID}`);
+    expect(location).not.toContain(MOONARQ_META_SECRET);
+    expect(location).not.toContain(META_SECRET);
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    const cookieValue = decodeURIComponent(setCookie.match(new RegExp(`${INSTAGRAM_OAUTH_STATE_COOKIE}=([^;]+)`))?.[1] ?? "");
+    const state = new URL(location).searchParams.get("state");
+    expect(validateInstagramOAuthState(state, cookieValue)).toMatchObject({
+      sourceId: MOONARQ_INSTAGRAM_SOURCE_ID,
+      dataSpaceSlug: "moonarq",
+      returnPath: `/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`,
+      metaAppProfile: "moonarq",
     });
   });
 
@@ -285,6 +317,22 @@ describe("Auto Lab Instagram OAuth and sync", () => {
 
     expect(response.status).toBe(503);
     expect(body.error).toContain("META_APP_SECRET");
+    expect(JSON.stringify(body)).not.toContain(META_SECRET);
+  });
+
+  it("returns a sanitized setup error when MoonArq Meta app env vars are incomplete", async () => {
+    addMoonArqInstagramSource();
+    delete process.env.MOONARQ_META_APP_SECRET;
+    const response = await instagramOAuthStartRoute(
+      new Request(`https://app.example.com/api/oauth/instagram/start?sourceId=${MOONARQ_INSTAGRAM_SOURCE_ID}&dataSpaceSlug=moonarq`, {
+        headers: { cookie: await dashboardCookie() },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.error).toContain("MOONARQ_META_APP_SECRET");
+    expect(JSON.stringify(body)).not.toContain(MOONARQ_META_SECRET);
     expect(JSON.stringify(body)).not.toContain(META_SECRET);
   });
 
@@ -334,6 +382,7 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       instagram_username: AUTO_LAB_INSTAGRAM_USERNAME,
       page_id: AUTO_LAB_FACEBOOK_PAGE_ID,
       graph_api_version: "v25.0",
+      meta_app_profile: "default",
     });
 
     const hints = await listCredentialHints(AUTO_LAB_INSTAGRAM_SOURCE_ID);
@@ -364,6 +413,7 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       sourceId: MOONARQ_INSTAGRAM_SOURCE_ID,
       dataSpaceSlug: "moonarq",
       returnPath: `/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`,
+      metaAppProfile: "moonarq",
     });
     const response = await instagramOAuthCallbackRoute(
       new Request(`https://app.example.com/api/oauth/instagram/callback?code=code-from-meta&state=${encodeURIComponent(state)}`, {
@@ -374,6 +424,9 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toContain(`/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`);
     expect(calls.some((call) => call.includes("/me/accounts"))).toBe(true);
+    const tokenCalls = calls.filter((call) => call.includes("/oauth/access_token"));
+    expect(tokenCalls.every((call) => new URL(call).searchParams.get("client_id") === MOONARQ_META_APP_ID)).toBe(true);
+    expect(tokenCalls.every((call) => new URL(call).searchParams.get("client_secret") === MOONARQ_META_SECRET)).toBe(true);
 
     const source = getDemoStore().sources.find((item) => item.id === MOONARQ_INSTAGRAM_SOURCE_ID);
     expect(source).toMatchObject({
@@ -390,7 +443,12 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       instagram_username: MOONARQ_INSTAGRAM_USERNAME,
       page_id: MOONARQ_FACEBOOK_PAGE_ID,
       graph_api_version: "v25.0",
+      meta_app_profile: "moonarq",
     });
+    const autoLabHints = await listCredentialHints(AUTO_LAB_INSTAGRAM_SOURCE_ID);
+    const moonarqHints = await listCredentialHints(MOONARQ_INSTAGRAM_SOURCE_ID);
+    expect(autoLabHints).toHaveLength(0);
+    expect(moonarqHints.map((hint) => hint.field_key)).toEqual(expect.arrayContaining(["instagram_long_lived_access_token", "instagram_account_id"]));
   });
 
   it("keeps Auto Lab account enforcement when reconnecting", async () => {

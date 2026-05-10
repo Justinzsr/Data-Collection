@@ -79,11 +79,11 @@ Links identify the source. Private metrics still require the right ingestion pat
 
 Credentials are per-source, encrypted with AES-256-GCM, and stored server-side. Saved values are never shown again; the UI only displays masked hints.
 
-## Auto Lab Instagram OAuth
+## Instagram OAuth
 
-Auto Lab Instagram is the only real Instagram connector enabled in this sprint. It is scoped to the existing `auto-lab` data space source for `just.4is`; MoonArq sources, reports, exports, Vercel Drain, and MoonArq Supabase credentials are not part of this connector.
+Instagram uses the official Meta Graph API OAuth flow. Credentials are saved per source, encrypted server-side, and scoped through the source's data space. Auto Lab Instagram continues to use the existing Auto Lab Meta app and still validates the `just.4is` account. MoonArq Instagram can use a separate MoonArq Meta app without changing Auto Lab credentials, MoonArq Website / Vercel Drain, or MoonArq Supabase credentials.
 
-Set these Vercel environment variables before using the deployed OAuth flow:
+Default / Auto Lab Meta app profile:
 
 ```bash
 META_APP_ID=1287137936945850
@@ -92,9 +92,18 @@ META_GRAPH_API_VERSION=v25.0
 META_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback
 ```
 
-Do not commit or paste `META_APP_SECRET` or access tokens. Add the secret only in Vercel Project Settings, then redeploy so the server-side OAuth routes can read it.
+MoonArq Meta app profile:
 
-In the Meta Developer app for **Auto Lab IS350**, add this Valid OAuth Redirect URI in the Instagram/Facebook Login settings area:
+```bash
+MOONARQ_META_APP_ID=your-moonarq-meta-app-id
+MOONARQ_META_APP_SECRET=your-moonarq-meta-app-secret
+MOONARQ_META_GRAPH_API_VERSION=v25.0
+MOONARQ_META_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback
+```
+
+If the `MOONARQ_META_*` variables are configured, MoonArq Instagram sources use that profile. If they are absent, Instagram falls back to the default `META_*` profile. Do not commit or paste app secrets or access tokens. Add secrets only in Vercel Project Settings, then redeploy so the server-side OAuth routes can read them.
+
+In each Meta Developer app used for Instagram OAuth, add this Valid OAuth Redirect URI in the Instagram/Facebook Login settings area:
 
 `https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback`
 
@@ -105,6 +114,8 @@ Use the public compliance URLs in Meta app settings:
 - User Data Deletion URL: `https://moonarq-data-hub.vercel.app/data-deletion`
 
 The connector uses the official Meta Graph API. It does not collect Instagram passwords, scrape dashboards, or expose token values in UI/API responses.
+
+To connect MoonArq Instagram, create an Instagram source in `/w/moonarq/dashboard/sources/new`, save it as `MoonArq Instagram`, then use the source detail page's `Connect Instagram` button. The source discovers and stores the Instagram account ID and username during OAuth unless `expected_username` or `expected_account_id` metadata is set on the source.
 
 ## MoonArq Supabase Setup
 

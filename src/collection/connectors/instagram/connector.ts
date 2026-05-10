@@ -4,7 +4,8 @@ import {
   fetchInstagramAccountProfile,
   fetchInstagramMedia,
   fetchMediaInsights,
-  getInstagramOAuthConfig,
+  getInstagramMetaAppDisplay,
+  getInstagramOAuthConfigForSource,
   hashInstagramPayload,
   isTokenExpired,
   selectInstagramAccessToken,
@@ -46,7 +47,7 @@ function mediaMetric(date: string, source: Source, metricKey: string, metricValu
 }
 
 async function fetchSnapshot(ctx: SyncContext): Promise<{ snapshot: InstagramSyncSnapshot; failures: number }> {
-  const config = getInstagramOAuthConfig();
+  const config = getInstagramOAuthConfigForSource(ctx.source);
   const accessToken = selectInstagramAccessToken(ctx.credentials);
   if (!accessToken) throw new Error("Instagram OAuth credentials are missing.");
   if (isTokenExpired(ctx.credentials)) throw new Error("Instagram OAuth token expired. Reconnect Instagram.");
@@ -168,7 +169,7 @@ export const instagramConnector: ConnectorDefinition = {
       };
     }
     try {
-      const config = getInstagramOAuthConfig();
+      const config = getInstagramOAuthConfigForSource(ctx.source);
       const account = await fetchInstagramAccountProfile(accessToken, config, getInstagramAccountSelection(ctx.source, ctx.credentials));
       validateInstagramAccountForSource(ctx.source, account);
       return {
@@ -277,11 +278,16 @@ export const instagramConnector: ConnectorDefinition = {
   },
   getSetupInstructions(source) {
     const expected = source ? expectedInstagramCopy(source) : "the selected Instagram account";
+    const metaApp = source ? getInstagramMetaAppDisplay(source) : null;
+    const envVars = metaApp
+      ? `${metaApp.appIdEnvKey}, ${metaApp.appSecretEnvKey}, ${metaApp.graphApiVersionEnvKey}, and ${metaApp.redirectUriEnvKey}`
+      : "META_APP_ID, META_APP_SECRET, META_GRAPH_API_VERSION, META_REDIRECT_URI, or a data-space-specific Meta app profile";
     return [
       "Use Connect Instagram to start the server-side Meta OAuth flow.",
       `Expected account: ${expected}.`,
+      metaApp ? `Meta app profile: ${metaApp.label}.` : "Meta app profile is selected server-side for the source data space.",
       "The Meta app must include this valid OAuth redirect URI: https://moonarq-data-hub.vercel.app/api/oauth/instagram/callback",
-      "Required server env vars: META_APP_ID, META_APP_SECRET, META_GRAPH_API_VERSION, and META_REDIRECT_URI.",
+      `Server env vars for this source: ${envVars}.`,
       "Use the official Meta/Instagram Graph API only. Do not scrape Instagram or Meta dashboards.",
     ];
   },

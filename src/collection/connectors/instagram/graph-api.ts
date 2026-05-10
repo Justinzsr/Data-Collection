@@ -1,12 +1,18 @@
 import { createHash } from "node:crypto";
-import type { JsonRecord } from "@/storage/db/schema";
+import { DATA_SPACE_IDS } from "@/storage/data-spaces";
+import type { JsonRecord, Source } from "@/storage/db/schema";
 import { INSTAGRAM_OAUTH_SCOPES } from "@/collection/connectors/instagram/constants";
+
+export type InstagramMetaAppProfileKey = "default" | "moonarq";
 
 export type InstagramOAuthConfig = {
   appId: string;
   appSecret: string;
   graphApiVersion: string;
   redirectUri: string;
+  profileKey: InstagramMetaAppProfileKey;
+  profileLabel: string;
+  appIdEnvKey: string;
 };
 
 export type InstagramTokenResponse = {
@@ -79,25 +85,126 @@ export class InstagramGraphApiError extends Error {
   }
 }
 
+type MetaAppProfileDefinition = {
+  key: InstagramMetaAppProfileKey;
+  label: string;
+  appIdEnvKey: string;
+  appSecretEnvKey: string;
+  graphApiVersionEnvKey: string;
+  redirectUriEnvKey: string;
+};
+
+export type InstagramMetaAppDisplay = Omit<MetaAppProfileDefinition, "appSecretEnvKey"> & {
+  appSecretEnvKey: string;
+  appIdConfigured: boolean;
+  redirectUriConfigured: boolean;
+  graphApiVersion: string;
+};
+
+const META_APP_PROFILES: Record<InstagramMetaAppProfileKey, MetaAppProfileDefinition> = {
+  default: {
+    key: "default",
+    label: "Default / Auto Lab Meta app",
+    appIdEnvKey: "META_APP_ID",
+    appSecretEnvKey: "META_APP_SECRET",
+    graphApiVersionEnvKey: "META_GRAPH_API_VERSION",
+    redirectUriEnvKey: "META_REDIRECT_URI",
+  },
+  moonarq: {
+    key: "moonarq",
+    label: "MoonArq Meta app",
+    appIdEnvKey: "MOONARQ_META_APP_ID",
+    appSecretEnvKey: "MOONARQ_META_APP_SECRET",
+    graphApiVersionEnvKey: "MOONARQ_META_GRAPH_API_VERSION",
+    redirectUriEnvKey: "MOONARQ_META_REDIRECT_URI",
+  },
+};
+
 function requiredEnv(env: NodeJS.ProcessEnv, key: keyof NodeJS.ProcessEnv & string) {
   const value = env[key]?.trim();
   if (!value) throw new InstagramConfigError(`${key} is required for Instagram OAuth.`);
   return value;
 }
 
+function metadataString(source: Source, key: string) {
+  const value = source.metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function moonarqProfileConfigured(env: NodeJS.ProcessEnv) {
+  return Boolean(
+    env.MOONARQ_META_APP_ID?.trim() ||
+      env.MOONARQ_META_APP_SECRET?.trim() ||
+      env.MOONARQ_META_GRAPH_API_VERSION?.trim() ||
+      env.MOONARQ_META_REDIRECT_URI?.trim(),
+  );
+}
+
+function profileKeyForSource(source: Source, env: NodeJS.ProcessEnv = process.env): InstagramMetaAppProfileKey {
+  const explicitProfile = metadataString(source, "meta_app_profile");
+  if (explicitProfile === "default" || explicitProfile === "moonarq") return explicitProfile;
+  if (explicitProfile) throw new InstagramConfigError(`Unsupported Instagram Meta app profile "${explicitProfile}".`);
+  if (source.data_space_id === DATA_SPACE_IDS.moonarq && moonarqProfileConfigured(env)) return "moonarq";
+  return "default";
+}
+
+export function getInstagramMetaAppProfileForSource(source: Source, env: NodeJS.ProcessEnv = process.env) {
+  return META_APP_PROFILES[profileKeyForSource(source, env)];
+}
+
+export function getInstagramMetaAppDisplay(source: Source, env: NodeJS.ProcessEnv = process.env): InstagramMetaAppDisplay {
+  const profile = getInstagramMetaAppProfileForSource(source, env);
+  return {
+    ...profile,
+    appIdConfigured: Boolean(env[profile.appIdEnvKey]?.trim()),
+    redirectUriConfigured: Boolean(env[profile.redirectUriEnvKey]?.trim()),
+    graphApiVersion: env[profile.graphApiVersionEnvKey]?.trim() || env.META_GRAPH_API_VERSION?.trim() || "v25.0",
+  };
+}
+
+function validateRedirectUri(redirectUri: string, envKey: string) {
+  try {
+    const parsed = new URL(redirectUri);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("invalid protocol");
+  } catch {
+    throw new InstagramConfigError(`${envKey} must be a valid absolute URL.`);
+  }
+}
+
 export function getInstagramOAuthConfig(env: NodeJS.ProcessEnv = process.env): InstagramOAuthConfig {
-  const config = {
+  const profile = META_APP_PROFILES.default;
+  const config: InstagramOAuthConfig = {
     appId: requiredEnv(env, "META_APP_ID"),
     appSecret: requiredEnv(env, "META_APP_SECRET"),
     graphApiVersion: env.META_GRAPH_API_VERSION?.trim() || "v25.0",
     redirectUri: requiredEnv(env, "META_REDIRECT_URI"),
+    profileKey: profile.key,
+    profileLabel: profile.label,
+    appIdEnvKey: profile.appIdEnvKey,
   };
-  try {
-    const parsed = new URL(config.redirectUri);
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("invalid protocol");
-  } catch {
-    throw new InstagramConfigError("META_REDIRECT_URI must be a valid absolute URL.");
+  validateRedirectUri(config.redirectUri, profile.redirectUriEnvKey);
+  return config;
+}
+
+export function getInstagramOAuthConfigForSource(
+  source: Source,
+  env: NodeJS.ProcessEnv = process.env,
+  expectedProfileKey?: InstagramMetaAppProfileKey,
+): InstagramOAuthConfig {
+  const profile = getInstagramMetaAppProfileForSource(source, env);
+  if (expectedProfileKey && profile.key !== expectedProfileKey) {
+    throw new InstagramConfigError(`Instagram OAuth state was issued for ${expectedProfileKey} Meta app profile, but this source now resolves to ${profile.key}.`);
   }
+  const config: InstagramOAuthConfig = {
+    appId: requiredEnv(env, profile.appIdEnvKey),
+    appSecret: requiredEnv(env, profile.appSecretEnvKey),
+    graphApiVersion: env[profile.graphApiVersionEnvKey]?.trim() || env.META_GRAPH_API_VERSION?.trim() || "v25.0",
+    redirectUri: requiredEnv(env, profile.redirectUriEnvKey),
+    profileKey: profile.key,
+    profileLabel: profile.label,
+    appIdEnvKey: profile.appIdEnvKey,
+  };
+  validateRedirectUri(config.redirectUri, profile.redirectUriEnvKey);
   return config;
 }
 

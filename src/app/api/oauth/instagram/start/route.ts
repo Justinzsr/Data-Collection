@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildInstagramAuthorizationUrl, getInstagramOAuthConfig } from "@/collection/connectors/instagram/graph-api";
+import { buildInstagramAuthorizationUrl, getInstagramOAuthConfigForSource } from "@/collection/connectors/instagram/graph-api";
 import {
   createInstagramOAuthState,
   INSTAGRAM_OAUTH_STATE_COOKIE,
@@ -49,9 +49,9 @@ export async function GET(request: Request) {
   if (source.source_type_key !== "instagram") return jsonError("Instagram OAuth can only be started for Instagram sources.", 403);
 
   try {
-    const config = getInstagramOAuthConfig();
+    const config = getInstagramOAuthConfigForSource(source);
     const returnPath = safeInstagramReturnPath(requestUrl.searchParams.get("returnPath"), dataSpace.slug, source.id);
-    const state = createInstagramOAuthState({ sourceId: source.id, dataSpaceSlug: dataSpace.slug, returnPath });
+    const state = createInstagramOAuthState({ sourceId: source.id, dataSpaceSlug: dataSpace.slug, returnPath, metaAppProfile: config.profileKey });
     const response = NextResponse.redirect(buildInstagramAuthorizationUrl(config, state));
     response.cookies.set({
       name: INSTAGRAM_OAUTH_STATE_COOKIE,

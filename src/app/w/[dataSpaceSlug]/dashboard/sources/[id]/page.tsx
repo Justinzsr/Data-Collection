@@ -1,6 +1,7 @@
 import { ArrowLeft, Camera, Clipboard, RadioTower, ShieldAlert, Webhook } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getConnector } from "@/collection/connectors/registry";
+import { getInstagramMetaAppDisplay } from "@/collection/connectors/instagram/graph-api";
 import { expectedInstagramCopy } from "@/collection/connectors/instagram/source-policy";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { getWebsiteModeLabel, isWebsiteSourceKey } from "@/collection/tracking/website-sources";
@@ -56,6 +57,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const setup = connector.getSetupInstructions(source);
   const showInstagramOAuth = source.source_type_key === "instagram";
   const instagramConnected = source.metadata.oauth_connected === true;
+  const instagramMetaApp = showInstagramOAuth ? getInstagramMetaAppDisplay(source) : null;
   const instagramOAuthHref = `/api/oauth/instagram/start?sourceId=${encodeURIComponent(source.id)}&dataSpaceSlug=${encodeURIComponent(dataSpace.slug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${source.id}`)}`;
 
   return (
@@ -96,6 +98,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             {showInstagramOAuth ? (
               <>
                 <p>OAuth: <span className="text-white">{instagramConnected ? "connected" : "not connected"}</span></p>
+                <p>Meta app profile: <span className="text-white">{instagramMetaApp?.label ?? "not selected"}</span></p>
                 <p>Instagram account: <span className="text-white">{typeof source.metadata.instagram_username === "string" ? source.metadata.instagram_username : source.account_name ?? "not resolved"}</span></p>
                 <p>Token expiry: <span className="text-white">{tokenStatus(source)}</span></p>
               </>
@@ -134,14 +137,19 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             </div>
             <Badge tone={instagramConnected ? "green" : "amber"}>{instagramConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
           </div>
-          <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-3">
+          <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Expected account</p>
               <p className="mt-2 text-white">{expectedInstagramCopy(source)}</p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Meta app profile</p>
+              <p className="mt-2 text-white">{instagramMetaApp?.label ?? "Default Meta app"}</p>
+              <p className="mt-1 text-xs text-slate-500">{instagramMetaApp ? `${instagramMetaApp.appIdEnvKey} ${instagramMetaApp.appIdConfigured ? "configured" : "not configured"}` : "Server-side only"}</p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Graph API</p>
-              <p className="mt-2 text-white">{typeof source.metadata.graph_api_version === "string" ? source.metadata.graph_api_version : "v25.0"}</p>
+              <p className="mt-2 text-white">{typeof source.metadata.graph_api_version === "string" ? source.metadata.graph_api_version : instagramMetaApp?.graphApiVersion ?? "v25.0"}</p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Token</p>

@@ -3,7 +3,7 @@ import {
   exchangeCodeForToken,
   exchangeForLongLivedToken,
   fetchInstagramAccountProfile,
-  getInstagramOAuthConfig,
+  getInstagramOAuthConfigForSource,
   tokenExpiresAt,
   type InstagramTokenResponse,
 } from "@/collection/connectors/instagram/graph-api";
@@ -87,7 +87,7 @@ export async function GET(request: Request) {
 
   try {
     const connectedAt = new Date();
-    const config = getInstagramOAuthConfig();
+    const config = getInstagramOAuthConfigForSource(source, process.env, state.metaAppProfile);
     const shortToken = await exchangeCodeForToken(code, config);
     let longToken: InstagramTokenResponse | null = null;
     try {
@@ -115,6 +115,7 @@ export async function GET(request: Request) {
       instagram_account_id: profile.id,
       instagram_username: profile.username,
       graph_api_version: config.graphApiVersion,
+      meta_app_profile: config.profileKey,
       connected_at: connectedAt.toISOString(),
     });
     await updateSource(source.id, {
@@ -130,6 +131,7 @@ export async function GET(request: Request) {
         instagram_username: profile.username,
         page_id: profile.page_id ?? null,
         graph_api_version: config.graphApiVersion,
+        meta_app_profile: config.profileKey,
         connected_at: connectedAt.toISOString(),
         token_expires_at: expiresAt,
       },
