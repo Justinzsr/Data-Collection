@@ -9,6 +9,7 @@ import {
 } from "@/collection/connectors/instagram/graph-api";
 import {
   INSTAGRAM_OAUTH_STATE_COOKIE,
+  validateSignedInstagramOAuthState,
   validateInstagramOAuthState,
 } from "@/collection/connectors/instagram/oauth-state";
 import {
@@ -65,8 +66,14 @@ async function saveInstagramCredentials(sourceId: string, credentials: Record<st
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   let state;
+  let usedSignedStateFallback = false;
   try {
-    state = validateInstagramOAuthState(requestUrl.searchParams.get("state"), parseCookies(request)[INSTAGRAM_OAUTH_STATE_COOKIE]);
+    const stateParam = requestUrl.searchParams.get("state");
+    const stateCookie = parseCookies(request)[INSTAGRAM_OAUTH_STATE_COOKIE];
+    state = stateCookie
+      ? validateInstagramOAuthState(stateParam, stateCookie)
+      : validateSignedInstagramOAuthState(stateParam);
+    usedSignedStateFallback = !stateCookie;
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Invalid Instagram OAuth state.", 400);
   }
@@ -84,6 +91,16 @@ export async function GET(request: Request) {
   const source = await getSource(state.sourceId, { dataSpaceId: dataSpace.id });
   if (!source) return jsonError("Instagram OAuth source was not found in the requested data space.", 403);
   if (source.source_type_key !== "instagram") return jsonError("Instagram OAuth callback rejected for this source.", 403);
+
+  if (usedSignedStateFallback) {
+    await recordConnectorEvent({
+      source_id: source.id,
+      event_type: "instagram_oauth_state_cookie_missing",
+      severity: "warning",
+      message: "Instagram OAuth callback used signed-state fallback because the state cookie was missing.",
+      metadata: { sanitized: true, dataSpaceSlug: state.dataSpaceSlug, metaAppProfile: state.metaAppProfile ?? null },
+    });
+  }
 
   try {
     const connectedAt = new Date();

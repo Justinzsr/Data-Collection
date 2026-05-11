@@ -41,33 +41,8 @@ function sign(payloadPart: string, secret: string) {
   return createHmac("sha256", secret).update(payloadPart).digest("base64url");
 }
 
-export function createInstagramOAuthState(
-  input: { sourceId: string; dataSpaceSlug: string; returnPath: string; metaAppProfile?: InstagramMetaAppProfileKey } | string,
-  env: NodeJS.ProcessEnv = process.env,
-  now = Date.now(),
-) {
-  const issuedAt = Math.floor(now / 1000);
-  const payloadInput = typeof input === "string"
-    ? { sourceId: input, dataSpaceSlug: "auto-lab", returnPath: `/w/auto-lab/dashboard/sources/${input}` }
-    : input;
-  const payload: InstagramOAuthStatePayload = {
-    v: 1,
-    sourceId: payloadInput.sourceId,
-    dataSpaceSlug: payloadInput.dataSpaceSlug,
-    returnPath: payloadInput.returnPath,
-    metaAppProfile: payloadInput.metaAppProfile,
-    nonce: randomBytes(16).toString("base64url"),
-    iat: issuedAt,
-    exp: issuedAt + INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,
-  };
-  const payloadPart = base64UrlEncode(JSON.stringify(payload));
-  return `${payloadPart}.${sign(payloadPart, signingSecret(env))}`;
-}
-
-export function validateInstagramOAuthState(state: string | null | undefined, cookieValue: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
+function verifySignedState(state: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
   if (!state) throw new InstagramOAuthStateError("Missing Instagram OAuth state.");
-  if (!cookieValue) throw new InstagramOAuthStateError("Missing Instagram OAuth state cookie.");
-  if (state !== cookieValue) throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
   const [payloadPart, signature] = state.split(".");
   if (!payloadPart || !signature) throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
   if (sign(payloadPart, signingSecret(env)) !== signature) throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
@@ -93,4 +68,38 @@ export function validateInstagramOAuthState(state: string | null | undefined, co
     throw new InstagramOAuthStateError("Instagram OAuth state expired.");
   }
   return payload as InstagramOAuthStatePayload;
+}
+
+export function createInstagramOAuthState(
+  input: { sourceId: string; dataSpaceSlug: string; returnPath: string; metaAppProfile?: InstagramMetaAppProfileKey } | string,
+  env: NodeJS.ProcessEnv = process.env,
+  now = Date.now(),
+) {
+  const issuedAt = Math.floor(now / 1000);
+  const payloadInput = typeof input === "string"
+    ? { sourceId: input, dataSpaceSlug: "auto-lab", returnPath: `/w/auto-lab/dashboard/sources/${input}` }
+    : input;
+  const payload: InstagramOAuthStatePayload = {
+    v: 1,
+    sourceId: payloadInput.sourceId,
+    dataSpaceSlug: payloadInput.dataSpaceSlug,
+    returnPath: payloadInput.returnPath,
+    metaAppProfile: payloadInput.metaAppProfile,
+    nonce: randomBytes(16).toString("base64url"),
+    iat: issuedAt,
+    exp: issuedAt + INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,
+  };
+  const payloadPart = base64UrlEncode(JSON.stringify(payload));
+  return `${payloadPart}.${sign(payloadPart, signingSecret(env))}`;
+}
+
+export function validateSignedInstagramOAuthState(state: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
+  return verifySignedState(state, env, now);
+}
+
+export function validateInstagramOAuthState(state: string | null | undefined, cookieValue: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
+  if (!state) throw new InstagramOAuthStateError("Missing Instagram OAuth state.");
+  if (!cookieValue) throw new InstagramOAuthStateError("Missing Instagram OAuth state cookie.");
+  if (state !== cookieValue) throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
+  return verifySignedState(state, env, now);
 }
