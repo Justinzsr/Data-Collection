@@ -130,7 +130,7 @@ function tamperState(state: string) {
   return `${state.slice(0, -1)}${state.endsWith("a") ? "b" : "a"}`;
 }
 
-function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; username?: string; accountId?: string; pageId?: string; followers?: number; mediaCount?: number; mediaId?: string } = {}) {
+function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; username?: string; accountId?: string; pageId?: string; followers?: number; mediaCount?: number; mediaId?: string; accountsIncludeInstagram?: boolean } = {}) {
   const insights = options.insights ?? "success";
   const username = options.username ?? AUTO_LAB_INSTAGRAM_USERNAME;
   const accountId = options.accountId ?? AUTO_LAB_INSTAGRAM_ACCOUNT_ID;
@@ -138,6 +138,7 @@ function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; use
   const followers = options.followers ?? 428;
   const mediaCount = options.mediaCount ?? 17;
   const mediaId = options.mediaId ?? MEDIA_ID;
+  const accountsIncludeInstagram = options.accountsIncludeInstagram ?? true;
   const calls: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const href = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
@@ -155,17 +156,35 @@ function mockInstagramGraphApi(options: { insights?: "success" | "fallback"; use
     if (url.pathname.endsWith("/me/accounts")) {
       return jsonResponse({
         data: [
-          {
-            id: pageId,
-            name: "Auto Lab IS350",
-            instagram_business_account: {
-              id: accountId,
-              username,
-              followers_count: followers,
-              media_count: mediaCount,
-            },
-          },
+          accountsIncludeInstagram
+            ? {
+                id: pageId,
+                name: "Auto Lab IS350",
+                instagram_business_account: {
+                  id: accountId,
+                  username,
+                  followers_count: followers,
+                  media_count: mediaCount,
+                },
+              }
+            : {
+                id: pageId,
+                name: "Auto Lab IS350",
+              },
         ],
+      });
+    }
+
+    if (url.pathname.endsWith("/debug_token")) {
+      return jsonResponse({
+        data: {
+          granular_scopes: [
+            { scope: "instagram_basic", target_ids: [accountId] },
+            { scope: "instagram_manage_insights", target_ids: [accountId] },
+            { scope: "pages_show_list", target_ids: [pageId] },
+            { scope: "pages_read_engagement", target_ids: [pageId] },
+          ],
+        },
       });
     }
 
@@ -492,6 +511,48 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     const moonarqHints = await listCredentialHints(MOONARQ_INSTAGRAM_SOURCE_ID);
     expect(autoLabHints).toHaveLength(0);
     expect(moonarqHints.map((hint) => hint.field_key)).toEqual(expect.arrayContaining(["instagram_long_lived_access_token", "instagram_account_id"]));
+  });
+
+  it("discovers MoonArq Instagram from Business Login selected account targets when Page lookup omits instagram_business_account", async () => {
+    addMoonArqInstagramSource();
+    const { calls } = mockInstagramGraphApi({
+      username: MOONARQ_INSTAGRAM_USERNAME,
+      accountId: MOONARQ_INSTAGRAM_ACCOUNT_ID,
+      pageId: MOONARQ_FACEBOOK_PAGE_ID,
+      followers: 1200,
+      mediaCount: 44,
+      accountsIncludeInstagram: false,
+    });
+    const state = createInstagramOAuthState({
+      sourceId: MOONARQ_INSTAGRAM_SOURCE_ID,
+      dataSpaceSlug: "moonarq",
+      returnPath: `/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`,
+      metaAppProfile: "moonarq",
+    });
+    const response = await instagramOAuthCallbackRoute(
+      new Request(`https://app.example.com/api/oauth/instagram/callback?code=code-from-meta&state=${encodeURIComponent(state)}`, {
+        headers: { cookie: oauthStateCookie(state) },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toContain("instagram_oauth=connected");
+    expect(calls.some((call) => call.includes("/debug_token"))).toBe(true);
+    expect(calls.some((call) => call.includes(`/${MOONARQ_INSTAGRAM_ACCOUNT_ID}`))).toBe(true);
+
+    const source = getDemoStore().sources.find((item) => item.id === MOONARQ_INSTAGRAM_SOURCE_ID);
+    expect(source).toMatchObject({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      status: "healthy",
+      external_account_id: MOONARQ_INSTAGRAM_ACCOUNT_ID,
+      account_name: MOONARQ_INSTAGRAM_USERNAME,
+    });
+    expect(source?.metadata).toMatchObject({
+      instagram_account_id: MOONARQ_INSTAGRAM_ACCOUNT_ID,
+      instagram_username: MOONARQ_INSTAGRAM_USERNAME,
+      page_id: MOONARQ_FACEBOOK_PAGE_ID,
+      meta_app_profile: "moonarq",
+    });
   });
 
   it("accepts valid signed callback state when the state cookie is missing and records a warning", async () => {

@@ -34,6 +34,16 @@ export type InstagramAccountLookupOptions = {
   preferredUsername?: string | null;
 };
 
+type InstagramDebugTokenResponse = {
+  data?: {
+    granular_scopes?: Array<{
+      scope?: string;
+      target_ids?: string[];
+    }>;
+  };
+};
+type InstagramDebugTokenScope = NonNullable<NonNullable<InstagramDebugTokenResponse["data"]>["granular_scopes"]>;
+
 export type InstagramMedia = {
   id: string;
   caption?: string;
@@ -284,7 +294,7 @@ export async function exchangeForLongLivedToken(accessToken: string, config: Ins
 
 export async function fetchInstagramAccountProfile(
   accessToken: string,
-  config: Pick<InstagramOAuthConfig, "graphApiVersion">,
+  config: Pick<InstagramOAuthConfig, "appId" | "appSecret" | "graphApiVersion">,
   options: InstagramAccountLookupOptions | string = {},
 ): Promise<InstagramAccountProfile> {
   const lookup = typeof options === "string" ? { preferredAccountId: options } : options;
@@ -308,13 +318,14 @@ export async function fetchInstagramAccountProfile(
     };
   }
 
+  const selectedProfile = await fetchProfileFromSelectedInstagramTargets(accessToken, config, lookup, pages.map((page) => page.id).find(Boolean) ?? null);
+  if (selectedProfile) return selectedProfile;
+
   if (!lookup.preferredAccountId) {
     throw new InstagramGraphApiError("No connected Instagram Business or Creator account was found for this Meta user.", { status: 404 });
   }
 
-  const profileUrl = graphUrl(config, `/${lookup.preferredAccountId}`);
-  profileUrl.searchParams.set("fields", "id,username,followers_count,media_count");
-  const profile = await graphFetch<InstagramAccountProfile>(profileUrl, accessToken);
+  const profile = await fetchInstagramProfileById(accessToken, config, lookup.preferredAccountId);
   return {
     id: profile.id,
     username: profile.username,
@@ -322,6 +333,64 @@ export async function fetchInstagramAccountProfile(
     media_count: numberValue(profile.media_count),
     page_id: profile.page_id ?? null,
   };
+}
+
+async function fetchInstagramProfileById(
+  accessToken: string,
+  config: Pick<InstagramOAuthConfig, "graphApiVersion">,
+  accountId: string,
+  pageId: string | null = null,
+): Promise<InstagramAccountProfile> {
+  const profileUrl = graphUrl(config, `/${accountId}`);
+  profileUrl.searchParams.set("fields", "id,username,followers_count,media_count");
+  const profile = await graphFetch<InstagramAccountProfile>(profileUrl, accessToken);
+  return {
+    id: profile.id,
+    username: profile.username,
+    followers_count: numberValue(profile.followers_count),
+    media_count: numberValue(profile.media_count),
+    page_id: profile.page_id ?? pageId,
+  };
+}
+
+function uniqueTargetIds(scopes: InstagramDebugTokenScope | undefined, predicate: (scope: string) => boolean) {
+  const ids = new Set<string>();
+  for (const item of scopes ?? []) {
+    if (!item.scope || !predicate(item.scope)) continue;
+    for (const targetId of item.target_ids ?? []) {
+      if (targetId.trim()) ids.add(targetId.trim());
+    }
+  }
+  return [...ids];
+}
+
+async function fetchProfileFromSelectedInstagramTargets(
+  accessToken: string,
+  config: Pick<InstagramOAuthConfig, "appId" | "appSecret" | "graphApiVersion">,
+  lookup: InstagramAccountLookupOptions,
+  fallbackPageId: string | null,
+) {
+  try {
+    const debugUrl = graphUrl(config, "/debug_token");
+    debugUrl.searchParams.set("input_token", accessToken);
+    const debug = await graphFetch<InstagramDebugTokenResponse>(debugUrl, `${config.appId}|${config.appSecret}`);
+    const selectedInstagramIds = uniqueTargetIds(debug.data?.granular_scopes, (scope) => scope.startsWith("instagram_"));
+    const selectedPageId = uniqueTargetIds(debug.data?.granular_scopes, (scope) => scope.startsWith("pages_"))[0] ?? fallbackPageId;
+
+    for (const accountId of selectedInstagramIds) {
+      if (lookup.preferredAccountId && lookup.preferredAccountId !== accountId) continue;
+      try {
+        const profile = await fetchInstagramProfileById(accessToken, config, accountId, selectedPageId);
+        if (lookup.preferredUsername && profile.username !== lookup.preferredUsername) continue;
+        return profile;
+      } catch {
+        // Ignore target IDs that Meta includes in token metadata but rejects for profile reads.
+      }
+    }
+  } catch {
+    // Keep the public callback error stable if Meta debug-token introspection is unavailable.
+  }
+  return null;
 }
 
 export async function fetchInstagramMedia(accessToken: string, config: Pick<InstagramOAuthConfig, "graphApiVersion">, instagramAccountId: string): Promise<InstagramMedia[]> {
