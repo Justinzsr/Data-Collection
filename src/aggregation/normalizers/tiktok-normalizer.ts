@@ -1,1 +1,1 @@
-export { tiktokConnector as tiktokNormalizer } from "@/collection/connectors/future-connectors";
+export { tiktokConnector as tiktokNormalizer } from "@/collection/connectors/tiktok/connector";

@@ -106,14 +106,16 @@ const metricConfig: Record<ModuleKey, MetricConfig> = {
     ],
   },
   tiktok: {
-    primaryKey: "video_views",
+    primaryKey: "tiktok_video_views",
     primaryLabel: "Video views",
     unit: "count",
     secondary: [
-      { key: "likes", label: "Likes", unit: "count" },
-      { key: "comments", label: "Comments", unit: "count" },
-      { key: "shares", label: "Shares", unit: "count" },
-      { key: "engagement_rate", label: "Engagement", unit: "percent", mode: "latest" },
+      { key: "tiktok_likes", label: "Likes", unit: "count" },
+      { key: "tiktok_comments", label: "Comments", unit: "count" },
+      { key: "tiktok_shares", label: "Shares", unit: "count" },
+      { key: "tiktok_engagement_rate", label: "Engagement", unit: "percent", mode: "latest" },
+      { key: "tiktok_followers", label: "Followers", unit: "count", mode: "latest" },
+      { key: "tiktok_video_count", label: "Videos", unit: "count", mode: "latest" },
     ],
   },
   instagram: {
@@ -306,7 +308,7 @@ function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsit
         message: `${getWebsiteModeLabel(source)} is the active website ingestion mode. Keep the secondary website source idle to avoid double counting.`,
       };
     }
-    return { label: "Connected", severity: "ok", message: "This monitored MoonArq source is live and syncing through the shared engine." };
+    return { label: "Connected", severity: "ok", message: `This monitored ${dataSpaceName} source is live and syncing through the shared engine.` };
   }
   if (source.status === "needs_credentials") {
     return {
@@ -425,7 +427,7 @@ export async function getPlatformModules(
     listSources({ dataSpaceId: options.dataSpaceId }),
     listMetrics({ startDate: range.startDate, endDate: range.endDate, dataSpaceId: options.dataSpaceId }),
     listMetrics({ startDate: previousRange.startDate, endDate: previousRange.endDate, dataSpaceId: options.dataSpaceId }),
-    listMetrics({ metricKeys: ["users_total", "confirmed_users", "followers", "engagement_rate", "latest_deployment_status"], dataSpaceId: options.dataSpaceId }),
+    listMetrics({ metricKeys: ["users_total", "confirmed_users", "followers", "engagement_rate", "tiktok_engagement_rate", "tiktok_followers", "tiktok_video_count", "latest_deployment_status"], dataSpaceId: options.dataSpaceId }),
   ]);
 
   const websiteSource = resolvePrimaryWebsiteSource(sources);

@@ -121,8 +121,8 @@ function templateDetection(template: string | null, dataSpaceName: string, dataS
       confidence: 1,
       normalizedUrl: "https://www.tiktok.com/@auto_lab_cars",
       accountName: "@auto_lab_cars",
-      requiredSetup: ["Needs TikTok API/OAuth setup. Save credentials server-side later; do not paste tokens into chat."],
-      possibleMetrics: ["video_views", "likes", "comments", "shares", "engagement_rate"],
+      requiredSetup: ["Needs TikTok Login Kit/OAuth setup. Use official encrypted credential storage only; do not paste tokens into chat."],
+      possibleMetrics: ["tiktok_video_views", "tiktok_likes", "tiktok_comments", "tiktok_shares", "tiktok_engagement_rate", "tiktok_followers", "tiktok_video_count"],
       reasons: [`${dataSpaceName} TikTok scaffold selected.`],
     };
   }
@@ -233,7 +233,7 @@ export function AddSourceWizard({
 
   async function runInitialSync() {
     if (!savedSource) return;
-    const response = await fetch(`/api/sources/${savedSource.id}/sync`, { method: "POST" });
+    const response = await fetch(`/api/sources/${savedSource.id}/sync?dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}`, { method: "POST" });
     const body = await response.json();
     setSyncRunId(body.run?.id ?? null);
     toast.success("Initial sync created", { description: body.run?.id });
@@ -414,6 +414,12 @@ export function AddSourceWizard({
                     <LinkButton href={`/api/oauth/instagram/start?sourceId=${encodeURIComponent(savedSource.id)}&dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${savedSource.id}`)}`} variant="primary">
                       <KeyRound className="h-4 w-4" />
                       Connect Instagram
+                    </LinkButton>
+                  ) : null}
+                  {savedSource.source_type_key === "tiktok" && dataSpaceSlug === "auto-lab" ? (
+                    <LinkButton href={`/api/oauth/tiktok/start?sourceId=${encodeURIComponent(savedSource.id)}&dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${savedSource.id}`)}`} variant="primary">
+                      <KeyRound className="h-4 w-4" />
+                      Connect TikTok
                     </LinkButton>
                   ) : null}
                   <CredentialForm sourceId={savedSource.id} title="Encrypted credential fields" dataSpaceSlug={dataSpaceSlug} />

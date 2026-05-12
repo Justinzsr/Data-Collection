@@ -7,10 +7,10 @@ import {
   customApiConnector,
   customCsvConnector,
   shopifyConnector,
-  tiktokConnector,
   vercelProjectConnector,
 } from "@/collection/connectors/future-connectors";
 import { instagramConnector } from "@/collection/connectors/instagram/connector";
+import { tiktokConnector } from "@/collection/connectors/tiktok/connector";
 
 export const connectorRegistry: ConnectorDefinition[] = [
   vercelWebAnalyticsDrainConnector,

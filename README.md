@@ -117,6 +117,38 @@ The connector uses the official Meta Graph API. It does not collect Instagram pa
 
 To connect MoonArq Instagram, create an Instagram source in `/w/moonarq/dashboard/sources/new`, save it as `MoonArq Instagram`, then use the source detail page's `Connect Instagram` button. The source discovers and stores the Instagram account ID and username during OAuth unless `expected_username` or `expected_account_id` metadata is set on the source.
 
+## Auto Lab TikTok OAuth
+
+Auto Lab TikTok uses official TikTok Login Kit OAuth and TikTok API v2. It is intentionally limited to the existing Auto Lab TikTok source:
+
+`dfb2d0d1-471e-4905-9a8a-1875a39e66b5`
+
+MoonArq TikTok sources are rejected for this sprint, and Auto Lab TikTok data remains scoped to the `auto-lab` data space.
+
+Set these server-side Vercel environment variables before connecting:
+
+```bash
+TIKTOK_CLIENT_KEY=your-tiktok-client-key
+TIKTOK_CLIENT_SECRET=your-tiktok-client-secret
+TIKTOK_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback
+TIKTOK_API_BASE_URL=https://open.tiktokapis.com
+```
+
+Configure the same redirect URI in TikTok Developer Login Kit settings:
+
+`https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback`
+
+The connector requests these scopes:
+
+- `user.info.basic`
+- `user.info.profile`
+- `user.info.stats`
+- `video.list`
+
+`user.info.stats` provides follower, likes, and video counts when TikTok grants the scope. `video.list` provides public video rows and video metrics such as views, likes, comments, and shares. TikTok may require app review before these scopes work for production accounts.
+
+To connect Auto Lab TikTok, open `/w/auto-lab/dashboard/sources/dfb2d0d1-471e-4905-9a8a-1875a39e66b5`, choose `Connect TikTok`, authorize through TikTok, then use `Test Connection` and `Run Sync Now`. The connector does not collect TikTok passwords, scrape dashboards, or expose token values in UI/API responses.
+
 ## MoonArq Supabase Setup
 
 MoonArq Supabase is a monitored source. It is not the same thing as the Data Hub app's own storage/auth runtime.

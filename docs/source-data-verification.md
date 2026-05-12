@@ -226,6 +226,100 @@ order by m.date desc, m.metric_key
 limit 100;
 ```
 
+## Auto Lab TikTok
+
+Auto Lab TikTok uses official TikTok Login Kit OAuth and TikTok API v2. It is scoped to `auto-lab` only and currently allows only source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`.
+
+Verify source placement and connection status without reading credential values:
+
+```sql
+select
+  s.id,
+  s.display_name,
+  s.source_type_key,
+  s.status,
+  s.external_account_id,
+  s.account_name,
+  ds.slug as data_space_slug,
+  s.metadata->>'oauth_connected' as oauth_connected
+from sources s
+join data_spaces ds on ds.id = s.data_space_id
+where s.id = 'dfb2d0d1-471e-4905-9a8a-1875a39e66b5';
+```
+
+Expected fields after OAuth:
+
+- `data_space_slug = 'auto-lab'`
+- `source_type_key = 'tiktok'`
+- `status = 'healthy'`
+- `external_account_id` stores the TikTok `open_id` returned for this app.
+
+Verify stored credential field names only; never select `encrypted_value`, token values, or secrets:
+
+```sql
+select
+  field_key,
+  value_hint,
+  updated_at
+from source_credentials
+where source_id = 'dfb2d0d1-471e-4905-9a8a-1875a39e66b5'
+order by field_key;
+```
+
+Expected credential field names include:
+
+- `tiktok_access_token`
+- `tiktok_refresh_token`
+- `open_id`
+- `scope`
+- `expires_at`
+- `refresh_expires_at`
+
+Verify Auto Lab TikTok metrics without mixing MoonArq rows:
+
+```sql
+select
+  m.date,
+  m.metric_key,
+  m.metric_value,
+  m.dimensions
+from metrics_daily m
+join sources s on s.id = m.source_id
+join data_spaces ds on ds.id = s.data_space_id
+where ds.slug = 'auto-lab'
+  and s.source_type_key = 'tiktok'
+order by m.date desc, m.metric_key
+limit 100;
+```
+
+Expected metric keys after a successful TikTok sync:
+
+- `tiktok_video_views`
+- `tiktok_likes`
+- `tiktok_comments`
+- `tiktok_shares`
+- `tiktok_engagement_rate`
+- `tiktok_followers` when `user.info.stats` is granted
+- `tiktok_video_count` when `user.info.stats` is granted
+
+Verify TikTok content rows:
+
+```sql
+select
+  c.external_content_id,
+  c.title,
+  c.caption,
+  c.url,
+  c.published_at
+from content_items c
+join sources s on s.id = c.source_id
+join data_spaces ds on ds.id = s.data_space_id
+where ds.slug = 'auto-lab'
+  and s.source_type_key = 'tiktok'
+order by c.published_at desc nulls last, c.created_at desc
+limit 100;
+```
+
 ## Reporting Views
 
 ```sql
@@ -284,6 +378,20 @@ from sources s
 join data_spaces ds on ds.id = s.data_space_id
 where ds.slug = 'moonarq'
   and s.display_name in ('Auto Lab TikTok', 'Auto Lab Instagram');
+```
+
+Auto Lab TikTok and Instagram data should not appear in MoonArq metrics or content:
+
+```sql
+select count(*) as auto_lab_social_metrics_in_moonarq
+from metrics_daily m
+join sources s on s.id = m.source_id
+join data_spaces ds on ds.id = s.data_space_id
+where ds.slug = 'moonarq'
+  and s.id in (
+    'dfb2d0d1-471e-4905-9a8a-1875a39e66b5',
+    '29f678e5-820c-4de7-a128-0e56654fc51a'
+  );
 ```
 
 Rows with `null` source ids are intentionally excluded from data-space-specific explorer, health, sync center, and report views unless a future migration adds a safe explicit data-space mapping.
