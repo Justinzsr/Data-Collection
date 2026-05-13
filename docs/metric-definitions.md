@@ -14,7 +14,7 @@ Primary MVP KPIs:
 
 Commerce metrics are scaffolded but not dominant until Shopify is connected.
 
-Auto Lab TikTok metrics from official TikTok API sync:
+TikTok metrics from official TikTok API sync, scoped by source and data space:
 
 - `tiktok_video_views`
 - `tiktok_likes`

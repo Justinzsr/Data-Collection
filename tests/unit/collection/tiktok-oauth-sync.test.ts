@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPlatformModules } from "@/aggregation/services/platform-modules-service";
 import { AUTO_LAB_TIKTOK_SOURCE_ID, TIKTOK_OAUTH_SCOPES } from "@/collection/connectors/tiktok/constants";
 import {
@@ -22,9 +22,13 @@ const ORIGINAL_ENV = { ...process.env };
 const TIKTOK_CLIENT_KEY = "test-tiktok-client-key";
 const TIKTOK_CLIENT_SECRET = "test-tiktok-client-secret";
 const TIKTOK_REDIRECT_URI = "https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback";
+const MOONARQ_TIKTOK_CLIENT_KEY = "test-moonarq-tiktok-client-key";
+const MOONARQ_TIKTOK_CLIENT_SECRET = "test-moonarq-tiktok-client-secret";
+const MOONARQ_TIKTOK_REDIRECT_URI = "https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback";
 const ACCESS_TOKEN = "act.test-access-token";
 const REFRESH_TOKEN = "rft.test-refresh-token";
 const OPEN_ID = "open-id-auto-lab-tiktok";
+const MOONARQ_OPEN_ID = "open-id-moonarq-tiktok";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -72,7 +76,7 @@ function addAutoLabTikTokSource(patch: Partial<Source> = {}) {
 function addMoonArqTikTokSource(patch: Partial<Source> = {}) {
   const now = "2026-05-11T17:00:00.000Z";
   const source: Source = {
-    id: "44444444-4444-4444-8444-444444444444",
+    id: "66666666-6666-4666-8666-666666666666",
     data_space_id: DATA_SPACE_IDS.moonarq,
     source_type_key: "tiktok",
     display_name: "MoonArq TikTok",
@@ -115,8 +119,55 @@ function tamperState(state: string) {
   return `${state.slice(0, -1)}${state.endsWith("a") ? "b" : "a"}`;
 }
 
-function mockTikTokApi(options: { scope?: string; missingVideoScope?: boolean } = {}) {
+function mockTikTokApi(options: {
+  scope?: string;
+  missingVideoScope?: boolean;
+  user?: {
+    open_id?: string;
+    display_name?: string;
+    username?: string;
+    profile_deep_link?: string;
+    follower_count?: number;
+    likes_count?: number;
+    video_count?: number;
+  };
+  video?: {
+    id?: string;
+    share_url?: string;
+    title?: string;
+    video_description?: string;
+    like_count?: number;
+    comment_count?: number;
+    share_count?: number;
+    view_count?: number;
+  };
+} = {}) {
   const scope = options.scope ?? TIKTOK_OAUTH_SCOPES.join(",");
+  const user = {
+    open_id: OPEN_ID,
+    union_id: "union-id",
+    display_name: "Auto Lab IS350",
+    username: "auto_lab_cars",
+    profile_deep_link: "https://www.tiktok.com/@auto_lab_cars",
+    follower_count: 321,
+    following_count: 44,
+    likes_count: 1200,
+    video_count: 9,
+    ...options.user,
+  };
+  const video = {
+    id: "video-1",
+    create_time: 1_778_587_200,
+    cover_image_url: "https://example.com/cover.jpg",
+    share_url: "https://www.tiktok.com/@auto_lab_cars/video/1",
+    video_description: "IS350 canyon shakedown.",
+    title: "IS350 shakedown",
+    like_count: 42,
+    comment_count: 5,
+    share_count: 3,
+    view_count: 1000,
+    ...options.video,
+  };
   const calls: Array<{ url: string; body?: string | null }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
@@ -130,7 +181,7 @@ function mockTikTokApi(options: { scope?: string; missingVideoScope?: boolean } 
         token_type: "Bearer",
         expires_in: 86_400,
         refresh_expires_in: 31_536_000,
-        open_id: OPEN_ID,
+        open_id: user.open_id,
         scope,
       });
     }
@@ -138,17 +189,7 @@ function mockTikTokApi(options: { scope?: string; missingVideoScope?: boolean } 
     if (url.pathname.endsWith("/v2/user/info/")) {
       return jsonResponse({
         data: {
-          user: {
-            open_id: OPEN_ID,
-            union_id: "union-id",
-            display_name: "Auto Lab IS350",
-            username: "auto_lab_cars",
-            profile_deep_link: "https://www.tiktok.com/@auto_lab_cars",
-            follower_count: 321,
-            following_count: 44,
-            likes_count: 1200,
-            video_count: 9,
-          },
+          user,
         },
         error: { code: "ok", message: "", log_id: "log-id" },
       });
@@ -160,20 +201,7 @@ function mockTikTokApi(options: { scope?: string; missingVideoScope?: boolean } 
       }
       return jsonResponse({
         data: {
-          videos: [
-            {
-              id: "video-1",
-              create_time: 1_779_120_000,
-              cover_image_url: "https://example.com/cover.jpg",
-              share_url: "https://www.tiktok.com/@auto_lab_cars/video/1",
-              video_description: "IS350 canyon shakedown.",
-              title: "IS350 shakedown",
-              like_count: 42,
-              comment_count: 5,
-              share_count: 3,
-              view_count: 1000,
-            },
-          ],
+          videos: [video],
           cursor: 0,
           has_more: false,
         },
@@ -198,6 +226,8 @@ async function saveTikTokCredentials(sourceId = AUTO_LAB_TIKTOK_SOURCE_ID, scope
 
 describe("Auto Lab TikTok OAuth and sync", () => {
   beforeEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     process.env = {
       ...ORIGINAL_ENV,
       APP_ENCRYPTION_KEY: "test-key-32-bytes-long-for-aes!!",
@@ -210,8 +240,17 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       TIKTOK_REDIRECT_URI,
     };
     delete process.env.DATABASE_URL;
+    delete process.env.MOONARQ_TIKTOK_CLIENT_KEY;
+    delete process.env.MOONARQ_TIKTOK_CLIENT_SECRET;
+    delete process.env.MOONARQ_TIKTOK_REDIRECT_URI;
+    delete process.env.MOONARQ_TIKTOK_API_BASE_URL;
     resetDemoStore();
-    vi.unstubAllGlobals();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-05-12T17:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("builds the TikTok authorization URL without exposing secrets", async () => {
@@ -237,6 +276,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       sourceId: AUTO_LAB_TIKTOK_SOURCE_ID,
       dataSpaceSlug: "auto-lab",
       returnPath: `/w/auto-lab/dashboard/sources/${AUTO_LAB_TIKTOK_SOURCE_ID}`,
+      tiktokAppProfile: "default",
     });
   });
 
@@ -255,19 +295,39 @@ describe("Auto Lab TikTok OAuth and sync", () => {
     expect(JSON.stringify(body)).not.toContain(TIKTOK_CLIENT_SECRET);
   });
 
-  it("rejects MoonArq TikTok sources at OAuth start and callback", async () => {
+  it("starts MoonArq TikTok OAuth with the MoonArq app profile when configured", async () => {
     const moonarqSource = addMoonArqTikTokSource();
-    const startResponse = await tiktokOAuthStartRoute(
+    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
+    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
+    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
+
+    const response = await tiktokOAuthStartRoute(
       new Request(`https://app.example.com/api/oauth/tiktok/start?sourceId=${moonarqSource.id}&dataSpaceSlug=moonarq`, {
         headers: { cookie: await dashboardCookie() },
       }),
     );
-    expect(startResponse.status).toBe(403);
+    expect(response.status).toBe(307);
+    const location = response.headers.get("location") ?? "";
+    expect(location).toContain(`client_key=${MOONARQ_TIKTOK_CLIENT_KEY}`);
+    expect(location).not.toContain(MOONARQ_TIKTOK_CLIENT_SECRET);
+    expect(location).not.toContain(TIKTOK_CLIENT_SECRET);
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    const cookieValue = decodeURIComponent(setCookie.match(new RegExp(`${TIKTOK_OAUTH_STATE_COOKIE}=([^;]+)`))?.[1] ?? "");
+    const state = new URL(location).searchParams.get("state");
+    expect(validateTikTokOAuthState(state, cookieValue)).toMatchObject({
+      sourceId: moonarqSource.id,
+      dataSpaceSlug: "moonarq",
+      tiktokAppProfile: "moonarq",
+    });
+  });
 
+  it("rejects TikTok OAuth callback when state and source data space do not match", async () => {
+    const moonarqSource = addMoonArqTikTokSource();
     const state = createTikTokOAuthState({
       sourceId: moonarqSource.id,
       dataSpaceSlug: "auto-lab",
       returnPath: `/w/auto-lab/dashboard/sources/${moonarqSource.id}`,
+      tiktokAppProfile: "default",
     });
     const callbackResponse = await tiktokOAuthCallbackRoute(
       new Request(`https://app.example.com/api/oauth/tiktok/callback?code=code-from-tiktok&state=${encodeURIComponent(state)}`, {
@@ -283,6 +343,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       sourceId: AUTO_LAB_TIKTOK_SOURCE_ID,
       dataSpaceSlug: "auto-lab",
       returnPath: `/w/auto-lab/dashboard/sources/${AUTO_LAB_TIKTOK_SOURCE_ID}`,
+      tiktokAppProfile: "default",
     });
     const invalidResponse = await tiktokOAuthCallbackRoute(
       new Request(`https://app.example.com/api/oauth/tiktok/callback?code=code-from-tiktok&state=${encodeURIComponent(tamperState(state))}`),
@@ -339,6 +400,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       tiktok_username: "auto_lab_cars",
       tiktok_display_name: "Auto Lab IS350",
       tiktok_scopes: TIKTOK_OAUTH_SCOPES.join(","),
+      tiktok_app_profile: "default",
     });
 
     const hints = await listCredentialHints(AUTO_LAB_TIKTOK_SOURCE_ID);
@@ -347,6 +409,72 @@ describe("Auto Lab TikTok OAuth and sync", () => {
     expect(credentialStore).not.toContain(ACCESS_TOKEN);
     expect(credentialStore).not.toContain(REFRESH_TOKEN);
     expect(credentialStore).not.toContain(TIKTOK_CLIENT_SECRET);
+  });
+
+  it("stores MoonArq TikTok OAuth credentials only on the MoonArq source", async () => {
+    addAutoLabTikTokSource();
+    const moonarqSource = addMoonArqTikTokSource();
+    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
+    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
+    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
+    const { calls } = mockTikTokApi({
+      user: {
+        open_id: MOONARQ_OPEN_ID,
+        display_name: "MoonArq Studio",
+        username: "moonarq",
+        profile_deep_link: "https://www.tiktok.com/@moonarq",
+        follower_count: 888,
+        likes_count: 4000,
+        video_count: 12,
+      },
+      video: {
+        share_url: "https://www.tiktok.com/@moonarq/video/1",
+        title: "MoonArq studio drop",
+        video_description: "MoonArq campaign clip.",
+        view_count: 5000,
+        like_count: 300,
+        comment_count: 20,
+        share_count: 50,
+      },
+    });
+    const state = createTikTokOAuthState({
+      sourceId: moonarqSource.id,
+      dataSpaceSlug: "moonarq",
+      returnPath: `/w/moonarq/dashboard/sources/${moonarqSource.id}`,
+      tiktokAppProfile: "moonarq",
+    });
+
+    const response = await tiktokOAuthCallbackRoute(
+      new Request(`https://app.example.com/api/oauth/tiktok/callback?code=code-from-tiktok&state=${encodeURIComponent(state)}`, {
+        headers: { cookie: oauthStateCookie(state) },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toContain(`/w/moonarq/dashboard/sources/${moonarqSource.id}`);
+    expect(calls.find((call) => call.url.includes("/v2/oauth/token/"))?.body).toContain(`client_key=${MOONARQ_TIKTOK_CLIENT_KEY}`);
+    const source = await getSource(moonarqSource.id, { dataSpaceId: DATA_SPACE_IDS.moonarq });
+    expect(source).toMatchObject({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "tiktok",
+      status: "healthy",
+      external_account_id: MOONARQ_OPEN_ID,
+      account_name: "moonarq",
+    });
+    expect(source?.metadata).toMatchObject({
+      oauth_connected: true,
+      tiktok_open_id: MOONARQ_OPEN_ID,
+      tiktok_username: "moonarq",
+      tiktok_display_name: "MoonArq Studio",
+      tiktok_app_profile: "moonarq",
+    });
+    expect(await listCredentialHints(AUTO_LAB_TIKTOK_SOURCE_ID)).toHaveLength(0);
+    const moonarqHints = await listCredentialHints(moonarqSource.id);
+    expect(moonarqHints.map((hint) => hint.field_key)).toEqual(expect.arrayContaining(["tiktok_access_token", "tiktok_refresh_token", "open_id", "scope", "tiktok_app_profile"]));
+    const credentialStore = JSON.stringify(getDemoStore().credentials);
+    expect(credentialStore).not.toContain(ACCESS_TOKEN);
+    expect(credentialStore).not.toContain(REFRESH_TOKEN);
+    expect(credentialStore).not.toContain(MOONARQ_TIKTOK_CLIENT_SECRET);
   });
 
   it("runs a real mocked Test Connection and reports missing video scope", async () => {
@@ -365,6 +493,43 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       status: "unsupported",
     });
     expect(body.result.message).toContain("video.list scope is missing");
+    expect(JSON.stringify(body)).not.toContain(ACCESS_TOKEN);
+  });
+
+  it("runs Test Connection for MoonArq TikTok without touching Auto Lab", async () => {
+    addAutoLabTikTokSource();
+    const moonarqSource = addMoonArqTikTokSource({ status: "healthy", metadata: { oauth_connected: true, tiktok_app_profile: "moonarq" } });
+    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
+    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
+    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
+    await saveTikTokCredentials(moonarqSource.id);
+    mockTikTokApi({
+      user: {
+        open_id: MOONARQ_OPEN_ID,
+        display_name: "MoonArq Studio",
+        username: "moonarq",
+        follower_count: 888,
+        likes_count: 4000,
+        video_count: 12,
+      },
+    });
+
+    const response = await testSourceRoute(
+      new Request(`https://app.example.com/api/sources/${moonarqSource.id}/test?dataSpaceSlug=moonarq`, { method: "POST" }),
+      { params: Promise.resolve({ id: moonarqSource.id }) },
+    );
+    const body = await response.json();
+
+    expect(body.result).toMatchObject({
+      ok: true,
+      status: "connected",
+      details: {
+        openId: MOONARQ_OPEN_ID,
+        username: "moonarq",
+        tiktokAppProfile: "moonarq",
+      },
+    });
+    expect(await listCredentialHints(AUTO_LAB_TIKTOK_SOURCE_ID)).toHaveLength(0);
     expect(JSON.stringify(body)).not.toContain(ACCESS_TOKEN);
   });
 
@@ -402,5 +567,56 @@ describe("Auto Lab TikTok OAuth and sync", () => {
     expect(autoLabTikTok?.sourceId).toBe(AUTO_LAB_TIKTOK_SOURCE_ID);
     expect(autoLabTikTok?.primaryMetric.value).toBe(1000);
     expect(moonarqTikTok?.sourceId).not.toBe(AUTO_LAB_TIKTOK_SOURCE_ID);
+  });
+
+  it("syncs MoonArq TikTok through the same connector without leaking into Auto Lab reports or exports", async () => {
+    addAutoLabTikTokSource();
+    const moonarqSource = addMoonArqTikTokSource({ status: "healthy", metadata: { oauth_connected: true, tiktok_app_profile: "moonarq" } });
+    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
+    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
+    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
+    await saveTikTokCredentials(moonarqSource.id);
+    mockTikTokApi({
+      user: {
+        open_id: MOONARQ_OPEN_ID,
+        display_name: "MoonArq Studio",
+        username: "moonarq",
+        profile_deep_link: "https://www.tiktok.com/@moonarq",
+        follower_count: 888,
+        likes_count: 4000,
+        video_count: 12,
+      },
+      video: {
+        id: "moonarq-video-1",
+        share_url: "https://www.tiktok.com/@moonarq/video/1",
+        title: "MoonArq studio drop",
+        video_description: "MoonArq campaign clip.",
+        view_count: 5000,
+        like_count: 300,
+        comment_count: 20,
+        share_count: 50,
+      },
+    });
+
+    const run = await enqueueSyncRun({ sourceId: moonarqSource.id, trigger: "manual" });
+
+    expect(run.status).toBe("success");
+    const store = getDemoStore();
+    expect(store.metricsDaily.find((row) => row.source_id === AUTO_LAB_TIKTOK_SOURCE_ID)).toBeUndefined();
+    expect(store.contentItems.find((item) => item.source_id === AUTO_LAB_TIKTOK_SOURCE_ID)).toBeUndefined();
+    expect(store.contentItems.find((item) => item.source_id === moonarqSource.id)).toMatchObject({
+      source_type_key: "tiktok",
+      external_content_id: "moonarq-video-1",
+      title: "MoonArq studio drop",
+      url: "https://www.tiktok.com/@moonarq/video/1",
+    });
+
+    const autoLabModules = await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.autoLab, dataSpaceName: "Auto Lab" });
+    const moonarqModules = await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq, dataSpaceName: "MoonArq" });
+    expect(autoLabModules.find((module) => module.sourceTypeKey === "tiktok")?.sourceId).not.toBe(moonarqSource.id);
+    expect(moonarqModules.find((module) => module.sourceTypeKey === "tiktok")).toMatchObject({
+      sourceId: moonarqSource.id,
+      primaryMetric: expect.objectContaining({ key: "tiktok_video_views", value: 5000 }),
+    });
   });
 });

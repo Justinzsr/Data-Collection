@@ -117,15 +117,15 @@ The connector uses the official Meta Graph API. It does not collect Instagram pa
 
 To connect MoonArq Instagram, create an Instagram source in `/w/moonarq/dashboard/sources/new`, save it as `MoonArq Instagram`, then use the source detail page's `Connect Instagram` button. The source discovers and stores the Instagram account ID and username during OAuth unless `expected_username` or `expected_account_id` metadata is set on the source.
 
-## Auto Lab TikTok OAuth
+## TikTok OAuth
 
-Auto Lab TikTok uses official TikTok Login Kit OAuth and TikTok API v2. It is intentionally limited to the existing Auto Lab TikTok source:
+TikTok uses official TikTok Login Kit OAuth and TikTok API v2. Auto Lab continues to use the existing default TikTok app profile for the current Auto Lab TikTok source:
 
 `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`
 
-MoonArq TikTok sources are rejected for this sprint, and Auto Lab TikTok data remains scoped to the `auto-lab` data space.
+MoonArq TikTok can be added later as a separate MoonArq source. The OAuth callback reloads the source inside the signed state data space and saves tokens only to that source, so Auto Lab and MoonArq TikTok data stay isolated.
 
-Set these server-side Vercel environment variables before connecting:
+Default / Auto Lab server-side Vercel environment variables:
 
 ```bash
 TIKTOK_CLIENT_KEY=your-tiktok-client-key
@@ -133,6 +133,17 @@ TIKTOK_CLIENT_SECRET=your-tiktok-client-secret
 TIKTOK_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback
 TIKTOK_API_BASE_URL=https://open.tiktokapis.com
 ```
+
+Optional MoonArq-specific server-side Vercel environment variables:
+
+```bash
+MOONARQ_TIKTOK_CLIENT_KEY=your-moonarq-tiktok-client-key
+MOONARQ_TIKTOK_CLIENT_SECRET=your-moonarq-tiktok-client-secret
+MOONARQ_TIKTOK_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback
+MOONARQ_TIKTOK_API_BASE_URL=https://open.tiktokapis.com
+```
+
+If the `MOONARQ_TIKTOK_*` variables are absent, MoonArq TikTok falls back to the default `TIKTOK_*` app profile. If any MoonArq TikTok override is configured, the MoonArq key, secret, and redirect URI must all be configured.
 
 Configure the same redirect URI in TikTok Developer Login Kit settings:
 
@@ -147,7 +158,11 @@ The connector requests these scopes:
 
 `user.info.stats` provides follower, likes, and video counts when TikTok grants the scope. `video.list` provides public video rows and video metrics such as views, likes, comments, and shares. TikTok may require app review before these scopes work for production accounts.
 
-To connect Auto Lab TikTok, open `/w/auto-lab/dashboard/sources/dfb2d0d1-471e-4905-9a8a-1875a39e66b5`, choose `Connect TikTok`, authorize through TikTok, then use `Test Connection` and `Run Sync Now`. The connector does not collect TikTok passwords, scrape dashboards, or expose token values in UI/API responses.
+To connect Auto Lab TikTok, open `/w/auto-lab/dashboard/sources/dfb2d0d1-471e-4905-9a8a-1875a39e66b5`, choose `Connect TikTok`, authorize through TikTok, then use `Test Connection` and `Run Sync Now`.
+
+To prepare MoonArq TikTok, open `/w/moonarq/dashboard/sources/new?template=tiktok`, save the source as `MoonArq TikTok`, then use the source detail page's `Connect TikTok` button after the MoonArq TikTok app profile is configured or after confirming the default profile fallback is intended.
+
+The connector does not collect TikTok passwords, scrape dashboards, or expose token values in UI/API responses.
 
 ## MoonArq Supabase Setup
 

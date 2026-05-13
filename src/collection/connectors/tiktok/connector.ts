@@ -16,7 +16,7 @@ import {
   type TikTokTokenResponse,
   type TikTokVideo,
 } from "@/collection/connectors/tiktok/api";
-import { assertAutoLabTikTokSource, isAutoLabTikTokSource, tiktokSourceLabel } from "@/collection/connectors/tiktok/source-policy";
+import { assertTikTokSource, getTikTokAppProfileKeyForSource, tiktokSourceLabel } from "@/collection/connectors/tiktok/source-policy";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { saveCredential } from "@/storage/repositories/credentials-repository";
@@ -86,7 +86,7 @@ async function ensureAccessToken(ctx: SyncContext | { source: Source; credential
   if (!refreshToken || isTikTokRefreshExpired(ctx.credentials)) {
     throw new Error("TikTok OAuth token expired. Reconnect TikTok.");
   }
-  const config = getTikTokOAuthConfig();
+  const config = getTikTokOAuthConfig({ profileKey: getTikTokAppProfileKeyForSource(ctx.source) });
   const refreshed = await refreshTikTokAccessToken(refreshToken, config);
   const now = new Date();
   const { expiresAt, refreshExpiresAt } = await saveTikTokTokenFields(ctx.source.id, refreshed, now);
@@ -96,6 +96,9 @@ async function ensureAccessToken(ctx: SyncContext | { source: Source; credential
       token_expires_at: expiresAt,
       refresh_expires_at: refreshExpiresAt,
       tiktok_scopes: refreshed.scope ?? ctx.credentials.scope ?? null,
+      tiktok_app_profile: config.profileKey,
+      tiktok_app_profile_label: config.profileLabel,
+      tiktok_uses_default_app_fallback: config.usesDefaultFallback,
     },
   });
   accessToken = refreshed.access_token;
@@ -110,8 +113,8 @@ async function ensureAccessToken(ctx: SyncContext | { source: Source; credential
 }
 
 async function fetchSnapshot(ctx: SyncContext): Promise<TikTokSyncSnapshot> {
-  assertAutoLabTikTokSource(ctx.source);
-  const config = getTikTokOAuthConfig();
+  assertTikTokSource(ctx.source);
+  const config = getTikTokOAuthConfig({ profileKey: getTikTokAppProfileKeyForSource(ctx.source) });
   const accessToken = await ensureAccessToken(ctx);
   const scopes = [...parseTikTokScopes(ctx.credentials.scope)];
   const missingVideoScopes = missingTikTokScopes(ctx.credentials.scope, ["video.list"]);
@@ -134,7 +137,7 @@ async function fetchSnapshot(ctx: SyncContext): Promise<TikTokSyncSnapshot> {
 export const tiktokConnector: ConnectorDefinition = {
   key: "tiktok",
   displayName: "TikTok",
-  description: "Official TikTok Login Kit and Display API connector for Auto Lab video/account metrics.",
+  description: "Official TikTok Login Kit and Display API connector for data-space-scoped video/account metrics.",
   category: "Content",
   icon: "Video",
   urlPatterns: [/^https:\/\/(www\.)?tiktok\.com\/@/i],
@@ -186,14 +189,7 @@ export const tiktokConnector: ConnectorDefinition = {
     };
   },
   async testConnection(ctx): Promise<ConnectionTestResult> {
-    if (!isAutoLabTikTokSource(ctx.source)) {
-      return {
-        ok: false,
-        status: "unsupported",
-        message: "TikTok OAuth/API sync is currently enabled only for Auto Lab TikTok.",
-        details: { sanitized: true },
-      };
-    }
+    assertTikTokSource(ctx.source);
     if (!selectTikTokAccessToken(ctx.credentials)) {
       return {
         ok: false,
@@ -203,7 +199,7 @@ export const tiktokConnector: ConnectorDefinition = {
       };
     }
     try {
-      const config = getTikTokOAuthConfig();
+      const config = getTikTokOAuthConfig({ profileKey: getTikTokAppProfileKeyForSource(ctx.source) });
       const accessToken = await ensureAccessToken(ctx);
       const user = await fetchTikTokUserInfo(accessToken, config, ctx.credentials.scope);
       const missingVideo = missingTikTokScopes(ctx.credentials.scope, ["video.list"]);
@@ -228,6 +224,8 @@ export const tiktokConnector: ConnectorDefinition = {
           likesCount: user.likes_count ?? null,
           videoCount: user.video_count ?? null,
           missingOptionalScopes: missingStats,
+          tiktokAppProfile: config.profileKey,
+          tiktokAppProfileLabel: config.profileLabel,
         },
       };
     } catch (error) {
@@ -327,12 +325,13 @@ export const tiktokConnector: ConnectorDefinition = {
     return metricDefinitions.filter((item) => item.source_type_key === "tiktok");
   },
   getSetupInstructions(source) {
-    const sourceLabel = source ? tiktokSourceLabel(source) : "Auto Lab TikTok";
+    const sourceLabel = source ? tiktokSourceLabel(source) : "TikTok source";
     return [
       "Use Connect TikTok to start the server-side TikTok Login Kit OAuth flow.",
-      `${sourceLabel} uses official TikTok APIs only and is currently limited to the Auto Lab data space.`,
+      `${sourceLabel} uses official TikTok APIs only. Tokens and synced metrics stay scoped to this source and data space.`,
       "Required TikTok OAuth redirect URI: https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback",
-      "Required Vercel env vars: TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_REDIRECT_URI, and optionally TIKTOK_API_BASE_URL.",
+      "Auto Lab uses TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_REDIRECT_URI, and optionally TIKTOK_API_BASE_URL.",
+      "MoonArq can use MOONARQ_TIKTOK_CLIENT_KEY, MOONARQ_TIKTOK_CLIENT_SECRET, MOONARQ_TIKTOK_REDIRECT_URI, and optionally MOONARQ_TIKTOK_API_BASE_URL. If those are not configured, MoonArq falls back to the default TikTok app profile.",
       `Requested scopes: ${TIKTOK_OAUTH_SCOPES.join(", ")}.`,
       "TikTok may require app review before user.info.stats or video.list can return profile stats and public video metrics.",
       "Do not paste TikTok passwords, scrape dashboards, or expose token values. Tokens are stored encrypted server-side.",

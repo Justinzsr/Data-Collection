@@ -5,11 +5,11 @@ import {
   TIKTOK_OAUTH_STATE_COOKIE,
   TIKTOK_OAUTH_STATE_MAX_AGE_SECONDS,
 } from "@/collection/connectors/tiktok/oauth-state";
-import { assertAutoLabTikTokSource, safeTikTokReturnPath } from "@/collection/connectors/tiktok/source-policy";
+import { assertTikTokSource, getTikTokAppProfileKeyForSource, safeTikTokReturnPath } from "@/collection/connectors/tiktok/source-policy";
 import { isDashboardRequestAuthenticated } from "@/storage/auth/dashboard-session";
-import { AUTO_LAB_DATA_SPACE_SLUG } from "@/storage/data-spaces";
-import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
+import { getDataSpaceBySlug, listDataSpaces } from "@/storage/repositories/data-spaces-repository";
 import { getSource } from "@/storage/repositories/sources-repository";
+import type { DataSpace, Source } from "@/storage/db/schema";
 
 export const runtime = "nodejs";
 
@@ -24,24 +24,35 @@ function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
 }
 
+async function resolveOAuthSource(sourceId: string, dataSpaceSlug: string | null): Promise<{ source: Source; dataSpace: DataSpace } | null> {
+  if (dataSpaceSlug) {
+    const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
+    if (!dataSpace) return null;
+    const source = await getSource(sourceId, { dataSpaceId: dataSpace.id });
+    return source ? { source, dataSpace } : null;
+  }
+  const source = await getSource(sourceId);
+  if (!source) return null;
+  const dataSpace = (await listDataSpaces()).find((space) => space.id === source.data_space_id);
+  return dataSpace ? { source, dataSpace } : null;
+}
+
 export async function GET(request: Request) {
   if (!(await isDashboardRequestAuthenticated(request))) return loginRedirect(request);
 
   const requestUrl = new URL(request.url);
   const sourceId = requestUrl.searchParams.get("sourceId");
   if (!sourceId) return jsonError("sourceId is required for TikTok OAuth.", 400);
-  const dataSpaceSlug = requestUrl.searchParams.get("dataSpaceSlug") ?? AUTO_LAB_DATA_SPACE_SLUG;
-  if (dataSpaceSlug !== AUTO_LAB_DATA_SPACE_SLUG) return jsonError("TikTok OAuth is currently enabled only for Auto Lab.", 403);
-  const dataSpace = await getDataSpaceBySlug(AUTO_LAB_DATA_SPACE_SLUG);
-  if (!dataSpace) return jsonError("Auto Lab data space is unavailable.", 404);
-  const source = await getSource(sourceId, { dataSpaceId: dataSpace.id });
-  if (!source) return jsonError("Auto Lab TikTok source not found.", 404);
+  const resolved = await resolveOAuthSource(sourceId, requestUrl.searchParams.get("dataSpaceSlug"));
+  if (!resolved) return jsonError("TikTok source not found in the requested data space.", 404);
+  const { source, dataSpace } = resolved;
+  if (source.source_type_key !== "tiktok") return jsonError("TikTok OAuth can only be started for TikTok sources.", 403);
 
   try {
-    assertAutoLabTikTokSource(source);
-    const config = getTikTokOAuthConfig();
-    const returnPath = safeTikTokReturnPath(requestUrl.searchParams.get("returnPath"), AUTO_LAB_DATA_SPACE_SLUG, source.id);
-    const state = createTikTokOAuthState({ sourceId: source.id, dataSpaceSlug: AUTO_LAB_DATA_SPACE_SLUG, returnPath });
+    assertTikTokSource(source);
+    const config = getTikTokOAuthConfig({ profileKey: getTikTokAppProfileKeyForSource(source) });
+    const returnPath = safeTikTokReturnPath(requestUrl.searchParams.get("returnPath"), dataSpace.slug, source.id);
+    const state = createTikTokOAuthState({ sourceId: source.id, dataSpaceSlug: dataSpace.slug, returnPath, tiktokAppProfile: config.profileKey });
     const response = NextResponse.redirect(buildTikTokAuthorizationUrl(config, state));
     response.cookies.set({
       name: TIKTOK_OAUTH_STATE_COOKIE,

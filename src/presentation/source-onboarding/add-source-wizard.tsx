@@ -27,6 +27,7 @@ function examplesFor(dataSpaceSlug: string) {
     "https://moonarqstudio.com",
     "https://xxxxx.supabase.co",
     "https://www.instagram.com/moonarqstudio",
+    "https://www.tiktok.com/@moonarq",
     "https://vercel.com/team/project",
     "https://your-store.myshopify.com",
   ];
@@ -115,12 +116,13 @@ function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePat
 
 function templateDetection(template: string | null, dataSpaceName: string, dataSpaceSlug: string): Detection | null {
   if (template === "tiktok") {
+    const accountName = dataSpaceSlug === "auto-lab" ? "auto_lab_cars" : "moonarq";
     return {
       sourceTypeKey: "tiktok",
       displayName: "TikTok",
       confidence: 1,
-      normalizedUrl: "https://www.tiktok.com/@auto_lab_cars",
-      accountName: "@auto_lab_cars",
+      normalizedUrl: `https://www.tiktok.com/@${accountName}`,
+      accountName: `@${accountName}`,
       requiredSetup: ["Needs TikTok Login Kit/OAuth setup. Use official encrypted credential storage only; do not paste tokens into chat."],
       possibleMetrics: ["tiktok_video_views", "tiktok_likes", "tiktok_comments", "tiktok_shares", "tiktok_engagement_rate", "tiktok_followers", "tiktok_video_count"],
       reasons: [`${dataSpaceName} TikTok scaffold selected.`],
@@ -185,6 +187,7 @@ export function AddSourceWizard({
       const isMoonArqWebsite = selected.sourceTypeKey === "website";
       const isAutoLab = dataSpaceSlug === "auto-lab";
       const isInstagram = effectiveSourceTypeKey === "instagram";
+      const isTikTok = effectiveSourceTypeKey === "tiktok";
       const response = await fetch("/api/sources", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -195,6 +198,8 @@ export function AddSourceWizard({
             ? "Auto Lab TikTok"
             : isAutoLab && effectiveSourceTypeKey === "instagram"
               ? "Auto Lab Instagram"
+              : dataSpaceSlug === "moonarq" && isTikTok
+                ? "MoonArq TikTok"
               : dataSpaceSlug === "moonarq" && isInstagram
                 ? "MoonArq Instagram"
               : isMoonArqWebsite
@@ -210,7 +215,7 @@ export function AddSourceWizard({
             ? { monitored_source: "moonarq_website", website_mode: effectiveSourceTypeKey }
             : isAutoLab
               ? { intended_use: "personal_car_content_testing", scaffoldOnly: true }
-              : isInstagram
+              : isInstagram || isTikTok
                 ? { scaffoldOnly: true }
               : undefined,
         }),
@@ -416,7 +421,7 @@ export function AddSourceWizard({
                       Connect Instagram
                     </LinkButton>
                   ) : null}
-                  {savedSource.source_type_key === "tiktok" && dataSpaceSlug === "auto-lab" ? (
+                  {savedSource.source_type_key === "tiktok" ? (
                     <LinkButton href={`/api/oauth/tiktok/start?sourceId=${encodeURIComponent(savedSource.id)}&dataSpaceSlug=${encodeURIComponent(dataSpaceSlug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${savedSource.id}`)}`} variant="primary">
                       <KeyRound className="h-4 w-4" />
                       Connect TikTok

@@ -8,7 +8,14 @@ export type TikTokOAuthConfig = {
   redirectUri: string;
   apiBaseUrl: string;
   authBaseUrl: string;
+  profileKey: TikTokAppProfileKey;
+  profileLabel: string;
+  clientKeyEnvKey: string;
+  redirectUriEnvKey: string;
+  usesDefaultFallback: boolean;
 };
+
+export type TikTokAppProfileKey = "default" | "moonarq";
 
 export type TikTokTokenResponse = {
   access_token: string;
@@ -82,6 +89,45 @@ export class TikTokApiError extends Error {
   }
 }
 
+type TikTokAppProfileDefinition = {
+  key: TikTokAppProfileKey;
+  label: string;
+  clientKeyEnvKey: string;
+  clientSecretEnvKey: string;
+  redirectUriEnvKey: string;
+  apiBaseUrlEnvKey: string;
+  authBaseUrlEnvKey: string;
+};
+
+export type TikTokOAuthDisplay = Omit<TikTokAppProfileDefinition, "clientSecretEnvKey" | "authBaseUrlEnvKey"> & {
+  clientSecretEnvKey: string;
+  clientKeyConfigured: boolean;
+  redirectUriConfigured: boolean;
+  apiBaseUrl: string;
+  usesDefaultFallback: boolean;
+};
+
+const TIKTOK_APP_PROFILES: Record<TikTokAppProfileKey, TikTokAppProfileDefinition> = {
+  default: {
+    key: "default",
+    label: "Default / Auto Lab TikTok app",
+    clientKeyEnvKey: "TIKTOK_CLIENT_KEY",
+    clientSecretEnvKey: "TIKTOK_CLIENT_SECRET",
+    redirectUriEnvKey: "TIKTOK_REDIRECT_URI",
+    apiBaseUrlEnvKey: "TIKTOK_API_BASE_URL",
+    authBaseUrlEnvKey: "TIKTOK_AUTH_BASE_URL",
+  },
+  moonarq: {
+    key: "moonarq",
+    label: "MoonArq TikTok app",
+    clientKeyEnvKey: "MOONARQ_TIKTOK_CLIENT_KEY",
+    clientSecretEnvKey: "MOONARQ_TIKTOK_CLIENT_SECRET",
+    redirectUriEnvKey: "MOONARQ_TIKTOK_REDIRECT_URI",
+    apiBaseUrlEnvKey: "MOONARQ_TIKTOK_API_BASE_URL",
+    authBaseUrlEnvKey: "MOONARQ_TIKTOK_AUTH_BASE_URL",
+  },
+};
+
 function requiredEnv(env: NodeJS.ProcessEnv, key: keyof NodeJS.ProcessEnv & string) {
   const value = env[key]?.trim();
   if (!value) throw new TikTokConfigError(`${key} is required for TikTok OAuth.`);
@@ -99,35 +145,64 @@ function optionalBaseUrl(value: string | undefined, fallback: string, envKey: st
   }
 }
 
-function validateRedirectUri(redirectUri: string) {
+function validateRedirectUri(redirectUri: string, envKey: string) {
   try {
     const parsed = new URL(redirectUri);
     if (!["https:", "http:"].includes(parsed.protocol)) throw new Error("invalid protocol");
   } catch {
-    throw new TikTokConfigError("TIKTOK_REDIRECT_URI must be a valid absolute URL.");
+    throw new TikTokConfigError(`${envKey} must be a valid absolute URL.`);
   }
 }
 
-export function getTikTokOAuthConfig(env: NodeJS.ProcessEnv = process.env): TikTokOAuthConfig {
+function moonarqTikTokProfileConfigured(env: NodeJS.ProcessEnv) {
+  return Boolean(
+    env.MOONARQ_TIKTOK_CLIENT_KEY?.trim() ||
+      env.MOONARQ_TIKTOK_CLIENT_SECRET?.trim() ||
+      env.MOONARQ_TIKTOK_REDIRECT_URI?.trim() ||
+      env.MOONARQ_TIKTOK_API_BASE_URL?.trim() ||
+      env.MOONARQ_TIKTOK_AUTH_BASE_URL?.trim(),
+  );
+}
+
+function resolveTikTokAppProfile(profileKey: TikTokAppProfileKey, env: NodeJS.ProcessEnv) {
+  const usesDefaultFallback = profileKey === "moonarq" && !moonarqTikTokProfileConfigured(env);
+  const profile = usesDefaultFallback ? TIKTOK_APP_PROFILES.default : TIKTOK_APP_PROFILES[profileKey];
+  return { profile, usesDefaultFallback };
+}
+
+export function getTikTokOAuthConfig(
+  options: { profileKey?: TikTokAppProfileKey } = {},
+  env: NodeJS.ProcessEnv = process.env,
+): TikTokOAuthConfig {
+  const { profile, usesDefaultFallback } = resolveTikTokAppProfile(options.profileKey ?? "default", env);
   const config = {
-    clientKey: requiredEnv(env, "TIKTOK_CLIENT_KEY"),
-    clientSecret: requiredEnv(env, "TIKTOK_CLIENT_SECRET"),
-    redirectUri: requiredEnv(env, "TIKTOK_REDIRECT_URI"),
-    apiBaseUrl: optionalBaseUrl(env.TIKTOK_API_BASE_URL, "https://open.tiktokapis.com", "TIKTOK_API_BASE_URL"),
-    authBaseUrl: optionalBaseUrl(env.TIKTOK_AUTH_BASE_URL, "https://www.tiktok.com", "TIKTOK_AUTH_BASE_URL"),
+    clientKey: requiredEnv(env, profile.clientKeyEnvKey),
+    clientSecret: requiredEnv(env, profile.clientSecretEnvKey),
+    redirectUri: requiredEnv(env, profile.redirectUriEnvKey),
+    apiBaseUrl: optionalBaseUrl(env[profile.apiBaseUrlEnvKey] ?? env.TIKTOK_API_BASE_URL, "https://open.tiktokapis.com", profile.apiBaseUrlEnvKey),
+    authBaseUrl: optionalBaseUrl(env[profile.authBaseUrlEnvKey] ?? env.TIKTOK_AUTH_BASE_URL, "https://www.tiktok.com", profile.authBaseUrlEnvKey),
+    profileKey: profile.key,
+    profileLabel: usesDefaultFallback ? `${profile.label} (MoonArq fallback)` : profile.label,
+    clientKeyEnvKey: profile.clientKeyEnvKey,
+    redirectUriEnvKey: profile.redirectUriEnvKey,
+    usesDefaultFallback,
   };
-  validateRedirectUri(config.redirectUri);
+  validateRedirectUri(config.redirectUri, profile.redirectUriEnvKey);
   return config;
 }
 
-export function getTikTokOAuthDisplay(env: NodeJS.ProcessEnv = process.env) {
+export function getTikTokOAuthDisplay(
+  options: { profileKey?: TikTokAppProfileKey } = {},
+  env: NodeJS.ProcessEnv = process.env,
+): TikTokOAuthDisplay {
+  const { profile, usesDefaultFallback } = resolveTikTokAppProfile(options.profileKey ?? "default", env);
   return {
-    label: "Auto Lab TikTok app",
-    clientKeyEnvKey: "TIKTOK_CLIENT_KEY",
-    redirectUriEnvKey: "TIKTOK_REDIRECT_URI",
-    clientKeyConfigured: Boolean(env.TIKTOK_CLIENT_KEY?.trim()),
-    redirectUriConfigured: Boolean(env.TIKTOK_REDIRECT_URI?.trim()),
-    apiBaseUrl: env.TIKTOK_API_BASE_URL?.trim() || "https://open.tiktokapis.com",
+    ...profile,
+    label: usesDefaultFallback ? `${profile.label} (MoonArq fallback)` : profile.label,
+    clientKeyConfigured: Boolean(env[profile.clientKeyEnvKey]?.trim()),
+    redirectUriConfigured: Boolean(env[profile.redirectUriEnvKey]?.trim()),
+    apiBaseUrl: env[profile.apiBaseUrlEnvKey]?.trim() || env.TIKTOK_API_BASE_URL?.trim() || "https://open.tiktokapis.com",
+    usesDefaultFallback,
   };
 }
 

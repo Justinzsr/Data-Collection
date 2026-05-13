@@ -106,6 +106,56 @@ describe("data space isolation", () => {
     expect(autoLabWorkbook).not.toContain("MoonArq_Supabase");
   });
 
+  it("keeps TikTok sources scoped in Daily Report and Excel source counts", async () => {
+    await createSourceRoute(
+      new Request("https://app.example.com/api/sources", {
+        method: "POST",
+        body: JSON.stringify({
+          data_space_slug: "auto-lab",
+          source_type_key: "tiktok",
+          display_name: "Auto Lab TikTok",
+          input_url: "https://www.tiktok.com/@auto_lab_cars",
+          normalized_url: "https://www.tiktok.com/@auto_lab_cars",
+          account_name: "@auto_lab_cars",
+          sync_mode: "manual",
+          metadata: { intended_use: "personal_car_content_testing", scaffoldOnly: true },
+        }),
+      }),
+    );
+    await createSourceRoute(
+      new Request("https://app.example.com/api/sources", {
+        method: "POST",
+        body: JSON.stringify({
+          data_space_slug: "moonarq",
+          source_type_key: "tiktok",
+          display_name: "MoonArq TikTok",
+          input_url: "https://www.tiktok.com/@moonarq",
+          normalized_url: "https://www.tiktok.com/@moonarq",
+          account_name: "@moonarq",
+          sync_mode: "manual",
+          metadata: { scaffoldOnly: true },
+        }),
+      }),
+    );
+    const spaces = await listDataSpaces();
+    const moonarq = spaces.find((space) => space.slug === "moonarq");
+    const autoLab = spaces.find((space) => space.slug === "auto-lab");
+    const [moonarqReport, autoLabReport, moonarqSources, autoLabSources] = await Promise.all([
+      generateDailyReport("2026-05-12", moonarq),
+      generateDailyReport("2026-05-12", autoLab),
+      listSources({ dataSpaceId: DATA_SPACE_IDS.moonarq }),
+      listSources({ dataSpaceId: DATA_SPACE_IDS.autoLab }),
+    ]);
+
+    expect(moonarqReport.run.source_count).toBe(moonarqSources.filter((source) => source.status !== "disabled").length);
+    expect(autoLabReport.run.source_count).toBe(autoLabSources.filter((source) => source.status !== "disabled").length);
+    expect(moonarqReport.run.source_count).not.toBe(autoLabReport.run.source_count);
+    const moonarqWorkbook = dailyReportToExcelXml(moonarqReport);
+    const autoLabWorkbook = dailyReportToExcelXml(autoLabReport);
+    expect(moonarqWorkbook).toContain("MoonArq_Website_Vercel");
+    expect(autoLabWorkbook).not.toContain("MoonArq_Website_Vercel");
+  });
+
   it("adds data-space columns to generic reporting views", () => {
     const migration = readFileSync("src/storage/db/migrations/0003_data_spaces.sql", "utf8");
     expect(migration).toContain("create or replace view reporting.platform_website_daily");

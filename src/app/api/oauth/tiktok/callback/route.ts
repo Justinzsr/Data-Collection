@@ -10,7 +10,7 @@ import {
   validateSignedTikTokOAuthState,
   validateTikTokOAuthState,
 } from "@/collection/connectors/tiktok/oauth-state";
-import { assertAutoLabTikTokSource, safeTikTokReturnPath } from "@/collection/connectors/tiktok/source-policy";
+import { getTikTokAppProfileKeyForSource, safeTikTokReturnPath } from "@/collection/connectors/tiktok/source-policy";
 import { saveCredential } from "@/storage/repositories/credentials-repository";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
@@ -80,14 +80,8 @@ export async function GET(request: Request) {
   const dataSpace = await getDataSpaceBySlug(state.dataSpaceSlug);
   if (!dataSpace) return jsonError("TikTok OAuth data space is unavailable.", 404);
   const source = await getSource(state.sourceId, { dataSpaceId: dataSpace.id });
-  if (!source) return jsonError("TikTok OAuth source was not found in Auto Lab.", 403);
+  if (!source) return jsonError("TikTok OAuth source was not found in the requested data space.", 403);
   if (source.source_type_key !== "tiktok") return jsonError("TikTok OAuth callback rejected for this source.", 403);
-
-  try {
-    assertAutoLabTikTokSource(source);
-  } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "TikTok OAuth callback rejected for this source.", 403);
-  }
 
   if (usedSignedStateFallback) {
     await recordConnectorEvent({
@@ -95,13 +89,16 @@ export async function GET(request: Request) {
       event_type: "tiktok_oauth_state_cookie_missing",
       severity: "warning",
       message: "TikTok OAuth callback used signed-state fallback because the state cookie was missing.",
-      metadata: { sanitized: true, dataSpaceSlug: state.dataSpaceSlug },
+      metadata: { sanitized: true, dataSpaceSlug: state.dataSpaceSlug, tiktokAppProfile: state.tiktokAppProfile ?? null },
     });
   }
 
   try {
     const connectedAt = new Date();
-    const config = getTikTokOAuthConfig();
+    const config = getTikTokOAuthConfig({ profileKey: getTikTokAppProfileKeyForSource(source) });
+    if (state.tiktokAppProfile && state.tiktokAppProfile !== config.profileKey) {
+      throw new Error(`TikTok OAuth state was issued for ${state.tiktokAppProfile} app profile, but this source now resolves to ${config.profileKey}.`);
+    }
     const token = await exchangeTikTokCodeForToken(code, config);
     const expiresAt = tokenExpiresAt(token.expires_in, connectedAt);
     const refreshExpiresAt = tokenExpiresAt(token.refresh_expires_in, connectedAt);
@@ -125,6 +122,7 @@ export async function GET(request: Request) {
       tiktok_display_name: displayName,
       scope: token.scope,
       tiktok_api_base_url: config.apiBaseUrl,
+      tiktok_app_profile: config.profileKey,
       connected_at: connectedAt.toISOString(),
     });
 
@@ -142,6 +140,9 @@ export async function GET(request: Request) {
         tiktok_display_name: displayName ?? null,
         profile_deep_link: user.profile_deep_link ?? null,
         tiktok_scopes: token.scope ?? null,
+        tiktok_app_profile: config.profileKey,
+        tiktok_app_profile_label: config.profileLabel,
+        tiktok_uses_default_app_fallback: config.usesDefaultFallback,
         connected_at: connectedAt.toISOString(),
         token_expires_at: expiresAt,
         refresh_expires_at: refreshExpiresAt,
@@ -152,7 +153,7 @@ export async function GET(request: Request) {
       event_type: "tiktok_oauth_connected",
       severity: "info",
       message: `TikTok OAuth connected${displayName ? ` for ${displayName}` : ""}.`,
-      metadata: { openId, username, displayName, scopes: token.scope ?? null },
+      metadata: { openId, username, displayName, scopes: token.scope ?? null, tiktokAppProfile: config.profileKey },
     });
     return sourceRedirect(request, returnPath, { tiktok_oauth: "connected" });
   } catch (error) {

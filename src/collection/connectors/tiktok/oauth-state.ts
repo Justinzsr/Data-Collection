@@ -6,8 +6,9 @@ export const TIKTOK_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 type TikTokOAuthStatePayload = {
   v: 1;
   sourceId: string;
-  dataSpaceSlug: "auto-lab";
+  dataSpaceSlug: string;
   returnPath: string;
+  tiktokAppProfile?: "default" | "moonarq";
   nonce: string;
   iat: number;
   exp: number;
@@ -53,9 +54,11 @@ function verifySignedState(state: string | null | undefined, env: NodeJS.Process
     payload.v !== 1 ||
     typeof payload.sourceId !== "string" ||
     !payload.sourceId ||
-    payload.dataSpaceSlug !== "auto-lab" ||
+    typeof payload.dataSpaceSlug !== "string" ||
+    !payload.dataSpaceSlug ||
     typeof payload.returnPath !== "string" ||
     !payload.returnPath.startsWith("/") ||
+    (payload.tiktokAppProfile !== undefined && payload.tiktokAppProfile !== "default" && payload.tiktokAppProfile !== "moonarq") ||
     typeof payload.nonce !== "string" ||
     !payload.nonce
   ) {
@@ -68,7 +71,7 @@ function verifySignedState(state: string | null | undefined, env: NodeJS.Process
 }
 
 export function createTikTokOAuthState(
-  input: { sourceId: string; dataSpaceSlug: "auto-lab"; returnPath: string },
+  input: { sourceId: string; dataSpaceSlug: string; returnPath: string; tiktokAppProfile?: "default" | "moonarq" },
   env: NodeJS.ProcessEnv = process.env,
   now = Date.now(),
 ) {
@@ -78,6 +81,7 @@ export function createTikTokOAuthState(
     sourceId: input.sourceId,
     dataSpaceSlug: input.dataSpaceSlug,
     returnPath: input.returnPath,
+    tiktokAppProfile: input.tiktokAppProfile,
     nonce: randomBytes(16).toString("base64url"),
     iat: issuedAt,
     exp: issuedAt + TIKTOK_OAUTH_STATE_MAX_AGE_SECONDS,

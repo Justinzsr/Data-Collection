@@ -6,7 +6,7 @@ MVP:
 - Supabase: signup/user metrics through `public.profiles` webhook mode or service-role admin fallback.
 - Website: first-party tracking through `/api/track`.
 - Instagram: official Meta Graph API OAuth and manual sync for isolated source-specific Instagram accounts.
-- TikTok: official TikTok Login Kit OAuth and API v2 sync for Auto Lab TikTok only.
+- TikTok: official TikTok Login Kit OAuth and API v2 sync for data-space-scoped TikTok sources.
 
 ## Instagram Meta app profiles
 
@@ -46,21 +46,36 @@ Create the source in `/w/moonarq/dashboard/sources/new` with display name `MoonA
 
 If the source metadata includes `expected_username` or `expected_account_id`, OAuth validates the connected account against those values. Otherwise, the connector discovers and stores the Instagram account ID and username from Meta during OAuth.
 
-## Auto Lab TikTok
+## TikTok app profiles
 
-TikTok OAuth is currently enabled only for the Auto Lab TikTok source:
+TikTok OAuth chooses a server-side app profile from the source and data space:
+
+- Auto Lab TikTok uses the default `TIKTOK_*` profile and keeps the existing source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`.
+- MoonArq TikTok uses `MOONARQ_TIKTOK_*` when those variables are configured. If they are absent, it falls back to the default `TIKTOK_*` profile.
+- Optional source metadata `tiktok_app_profile` can be set to `default` or `moonarq` if a future source needs an explicit profile.
+
+Auto Lab TikTok source:
 
 `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`
 
-The start route requires dashboard auth and accepts `sourceId` plus `dataSpaceSlug=auto-lab`. The callback validates a signed state, reloads the source inside Auto Lab, rejects MoonArq or unknown sources, exchanges the authorization code server-side, and saves tokens only as encrypted credentials for that source.
+The start route requires dashboard auth and accepts `sourceId` plus `dataSpaceSlug`. The signed OAuth state binds `sourceId`, `dataSpaceSlug`, `returnPath`, nonce, and the TikTok app profile used to build the authorization URL. The callback validates the state, reloads the source inside that data space, rejects cross-space or non-TikTok sources, exchanges the authorization code server-side, and saves tokens only as encrypted credentials for that source.
 
-Server-side environment variables:
+Default / Auto Lab server-side environment variables:
 
 ```bash
 TIKTOK_CLIENT_KEY=your-tiktok-client-key
 TIKTOK_CLIENT_SECRET=your-tiktok-client-secret
 TIKTOK_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback
 TIKTOK_API_BASE_URL=https://open.tiktokapis.com
+```
+
+Optional MoonArq server-side environment variables:
+
+```bash
+MOONARQ_TIKTOK_CLIENT_KEY=your-moonarq-tiktok-client-key
+MOONARQ_TIKTOK_CLIENT_SECRET=your-moonarq-tiktok-client-secret
+MOONARQ_TIKTOK_REDIRECT_URI=https://moonarq-data-hub.vercel.app/api/oauth/tiktok/callback
+MOONARQ_TIKTOK_API_BASE_URL=https://open.tiktokapis.com
 ```
 
 Configure this redirect URI in TikTok Developer Login Kit settings:
@@ -82,6 +97,12 @@ TikTok scope behavior:
 - `video.list` returns public video rows and statistics such as view, like, comment, and share counts.
 
 The connector normalizes official API responses into `raw_ingestions`, `content_items`, `content_metrics`, `metrics_daily`, connector events, and platform change events through the shared sync engine. It does not scrape TikTok dashboards and never returns token values to UI/API responses.
+
+## MoonArq TikTok
+
+Create the source in `/w/moonarq/dashboard/sources/new?template=tiktok` with display name `MoonArq TikTok` and `source_type_key = tiktok`. After saving, open the source detail page and choose `Connect TikTok`.
+
+If `MOONARQ_TIKTOK_*` variables are configured, the source uses the MoonArq TikTok app profile. If they are not configured, the UI shows that MoonArq is using the default profile fallback. In either case, synced records remain scoped by `source_id` and `data_space_id`, so MoonArq and Auto Lab reports, exports, dashboards, health, sync, content, and Data Explorer views stay isolated.
 
 Scaffolded:
 - Vercel project: deployment metadata later.

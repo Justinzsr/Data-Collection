@@ -226,9 +226,11 @@ order by m.date desc, m.metric_key
 limit 100;
 ```
 
-## Auto Lab TikTok
+## TikTok
 
-Auto Lab TikTok uses official TikTok Login Kit OAuth and TikTok API v2. It is scoped to `auto-lab` only and currently allows only source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`.
+TikTok uses official TikTok Login Kit OAuth and TikTok API v2. Auto Lab continues to use the default `TIKTOK_*` app profile for source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`. MoonArq TikTok can use `MOONARQ_TIKTOK_*` when those variables are configured, or the default profile fallback if they are absent.
+
+Every TikTok read should join through `sources` and `data_spaces`; never verify TikTok rows without a `data_space_slug` predicate.
 
 Verify source placement and connection status without reading credential values:
 
@@ -247,12 +249,14 @@ join data_spaces ds on ds.id = s.data_space_id
 where s.id = 'dfb2d0d1-471e-4905-9a8a-1875a39e66b5';
 ```
 
-Expected fields after OAuth:
+Expected fields after Auto Lab OAuth:
 
 - `data_space_slug = 'auto-lab'`
 - `source_type_key = 'tiktok'`
 - `status = 'healthy'`
 - `external_account_id` stores the TikTok `open_id` returned for this app.
+
+For MoonArq TikTok, filter by `ds.slug = 'moonarq'` and `s.display_name = 'MoonArq TikTok'`; do not use the Auto Lab source id.
 
 Verify stored credential field names only; never select `encrypted_value`, token values, or secrets:
 
@@ -292,6 +296,13 @@ order by m.date desc, m.metric_key
 limit 100;
 ```
 
+Verify MoonArq TikTok metrics without mixing Auto Lab rows by changing the predicate:
+
+```sql
+where ds.slug = 'moonarq'
+  and s.source_type_key = 'tiktok'
+```
+
 Expected metric keys after a successful TikTok sync:
 
 - `tiktok_video_views`
@@ -319,6 +330,8 @@ where ds.slug = 'auto-lab'
 order by c.published_at desc nulls last, c.created_at desc
 limit 100;
 ```
+
+For cross-space leakage checks, run both the Auto Lab and MoonArq queries and confirm source ids never appear in the opposite data space.
 
 ## Reporting Views
 

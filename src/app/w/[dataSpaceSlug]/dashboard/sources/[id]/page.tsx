@@ -4,7 +4,7 @@ import { getConnector } from "@/collection/connectors/registry";
 import { getInstagramMetaAppDisplay } from "@/collection/connectors/instagram/graph-api";
 import { expectedInstagramCopy } from "@/collection/connectors/instagram/source-policy";
 import { getTikTokOAuthDisplay } from "@/collection/connectors/tiktok/api";
-import { isAutoLabTikTokSource } from "@/collection/connectors/tiktok/source-policy";
+import { getTikTokAppProfileKeyForSource, isTikTokSource } from "@/collection/connectors/tiktok/source-policy";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { getWebsiteModeLabel, isWebsiteSourceKey } from "@/collection/tracking/website-sources";
 import { getPublicAppUrl, getPublicAppUrlWarning } from "@/storage/runtime/app-config";
@@ -61,9 +61,9 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const instagramConnected = source.metadata.oauth_connected === true;
   const instagramMetaApp = showInstagramOAuth ? getInstagramMetaAppDisplay(source) : null;
   const instagramOAuthHref = `/api/oauth/instagram/start?sourceId=${encodeURIComponent(source.id)}&dataSpaceSlug=${encodeURIComponent(dataSpace.slug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${source.id}`)}`;
-  const showTikTokOAuth = isAutoLabTikTokSource(source);
+  const showTikTokOAuth = isTikTokSource(source);
   const tiktokConnected = showTikTokOAuth && source.metadata.oauth_connected === true;
-  const tiktokOAuth = showTikTokOAuth ? getTikTokOAuthDisplay() : null;
+  const tiktokOAuth = showTikTokOAuth ? getTikTokOAuthDisplay({ profileKey: getTikTokAppProfileKeyForSource(source) }) : null;
   const tiktokOAuthHref = `/api/oauth/tiktok/start?sourceId=${encodeURIComponent(source.id)}&dataSpaceSlug=${encodeURIComponent(dataSpace.slug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${source.id}`)}`;
 
   return (
@@ -118,7 +118,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             {showTikTokOAuth ? (
               <>
                 <p>OAuth: <span className="text-white">{tiktokConnected ? "connected" : "not connected"}</span></p>
-                <p>TikTok app profile: <span className="text-white">{tiktokOAuth?.label ?? "Auto Lab TikTok app"}</span></p>
+                <p>TikTok app profile: <span className="text-white">{tiktokOAuth?.label ?? "Default / Auto Lab TikTok app"}</span></p>
                 <p>TikTok account: <span className="text-white">{typeof source.metadata.tiktok_username === "string" ? source.metadata.tiktok_username : typeof source.metadata.tiktok_display_name === "string" ? source.metadata.tiktok_display_name : source.account_name ?? "not resolved"}</span></p>
                 <p>Open ID: <span className="text-white">{typeof source.metadata.tiktok_open_id === "string" ? source.metadata.tiktok_open_id : source.external_account_id ?? "not resolved"}</span></p>
                 <p>Token expiry: <span className="text-white">{tokenStatus(source)}</span></p>
@@ -197,7 +197,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
                 TikTok OAuth
               </div>
               <p className="text-sm leading-6 text-slate-300">
-                Connects this Auto Lab source through TikTok Login Kit and official TikTok APIs. Tokens stay encrypted server-side and are stored only for this source.
+                Connects this {dataSpace.display_name} source through TikTok Login Kit and official TikTok APIs. Tokens stay encrypted server-side and are stored only for this source.
               </p>
             </div>
             <Badge tone={tiktokConnected ? "green" : "amber"}>{tiktokConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
@@ -205,13 +205,14 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Scope</p>
-              <p className="mt-2 text-white">Auto Lab only</p>
-              <p className="mt-1 text-xs text-slate-500">MoonArq sources are rejected for this sprint.</p>
+              <p className="mt-2 text-white">{dataSpace.display_name}</p>
+              <p className="mt-1 text-xs text-slate-500">Data stays scoped to this source and workspace.</p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">TikTok app</p>
-              <p className="mt-2 text-white">{tiktokOAuth?.label ?? "Auto Lab TikTok app"}</p>
+              <p className="mt-2 text-white">{tiktokOAuth?.label ?? "Default / Auto Lab TikTok app"}</p>
               <p className="mt-1 text-xs text-slate-500">{tiktokOAuth ? `${tiktokOAuth.clientKeyEnvKey} ${tiktokOAuth.clientKeyConfigured ? "configured" : "not configured"}` : "Server-side only"}</p>
+              {tiktokOAuth?.usesDefaultFallback ? <p className="mt-1 text-xs text-amber-100">MoonArq-specific TikTok env vars are not configured; using default profile.</p> : null}
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Granted scopes</p>
