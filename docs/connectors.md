@@ -51,8 +51,9 @@ If the source metadata includes `expected_username` or `expected_account_id`, OA
 TikTok OAuth chooses a server-side app profile from the source and data space:
 
 - Auto Lab TikTok uses the default `TIKTOK_*` profile and keeps the existing source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`.
-- MoonArq TikTok also uses the default `TIKTOK_*` profile by default so it can share the reviewed TikTok OAuth app while saving tokens and data only to the MoonArq source.
-- Optional source metadata `tiktok_app_profile` can be set to `moonarq` later if a source needs the separate `MOONARQ_TIKTOK_*` app profile after that TikTok app is ready.
+- MoonArq TikTok uses the separate `MOONARQ_TIKTOK_*` profile when those env vars are configured, including sandbox credentials while the production app is in review.
+- If `MOONARQ_TIKTOK_*` is absent, MoonArq TikTok falls back to the default `TIKTOK_*` profile. That fallback still requires the authorizing TikTok account to be allowed by the default app.
+- Optional source metadata `tiktok_app_profile` can be set to `default` or `moonarq` if a source needs an explicit profile.
 
 Auto Lab TikTok source:
 
@@ -102,7 +103,7 @@ The connector normalizes official API responses into `raw_ingestions`, `content_
 
 Create the source in `/w/moonarq/dashboard/sources/new?template=tiktok` with display name `MoonArq TikTok` and `source_type_key = tiktok`. After saving, open the source detail page and choose `Connect TikTok`.
 
-By default, MoonArq TikTok uses the same reviewed TikTok app profile as Auto Lab. Synced records remain scoped by `source_id` and `data_space_id`, so MoonArq and Auto Lab reports, exports, dashboards, health, sync, content, and Data Explorer views stay isolated. Set source metadata `tiktok_app_profile = "moonarq"` only after the separate MoonArq TikTok app profile is ready.
+MoonArq TikTok should use `MOONARQ_TIKTOK_*` when a separate MoonArq production or sandbox app profile is available. If those env vars are absent, it uses the default profile fallback. In either case, synced records remain scoped by `source_id` and `data_space_id`, so MoonArq and Auto Lab reports, exports, dashboards, health, sync, content, and Data Explorer views stay isolated.
 
 Scaffolded:
 - Vercel project: deployment metadata later.

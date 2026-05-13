@@ -317,6 +317,32 @@ describe("Auto Lab TikTok OAuth and sync", () => {
     });
   });
 
+  it("starts MoonArq TikTok OAuth with the MoonArq app profile when MoonArq env vars are configured", async () => {
+    const moonarqSource = addMoonArqTikTokSource();
+    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
+    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
+    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
+
+    const response = await tiktokOAuthStartRoute(
+      new Request(`https://app.example.com/api/oauth/tiktok/start?sourceId=${moonarqSource.id}&dataSpaceSlug=moonarq`, {
+        headers: { cookie: await dashboardCookie() },
+      }),
+    );
+    expect(response.status).toBe(307);
+    const location = response.headers.get("location") ?? "";
+    expect(location).toContain(`client_key=${MOONARQ_TIKTOK_CLIENT_KEY}`);
+    expect(location).not.toContain(MOONARQ_TIKTOK_CLIENT_SECRET);
+    expect(location).not.toContain(TIKTOK_CLIENT_SECRET);
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    const cookieValue = decodeURIComponent(setCookie.match(new RegExp(`${TIKTOK_OAUTH_STATE_COOKIE}=([^;]+)`))?.[1] ?? "");
+    const state = new URL(location).searchParams.get("state");
+    expect(validateTikTokOAuthState(state, cookieValue)).toMatchObject({
+      sourceId: moonarqSource.id,
+      dataSpaceSlug: "moonarq",
+      tiktokAppProfile: "moonarq",
+    });
+  });
+
   it("starts MoonArq TikTok OAuth with the MoonArq app profile only when the source explicitly opts in", async () => {
     const moonarqSource = addMoonArqTikTokSource({ metadata: { scaffoldOnly: true, tiktok_app_profile: "moonarq" } });
     process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;

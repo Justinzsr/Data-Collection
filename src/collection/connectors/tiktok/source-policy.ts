@@ -32,6 +32,16 @@ export function getTikTokAppProfileKeyForSource(source: Source): TikTokAppProfil
   const explicitProfile = metadataString(source, "tiktok_app_profile") ?? metadataString(source, "oauth_app_profile");
   if (explicitProfile === "default" || explicitProfile === "moonarq") return explicitProfile;
   if (explicitProfile) throw new Error(`Unsupported TikTok app profile "${explicitProfile}".`);
+  if (
+    source.data_space_id === DATA_SPACE_IDS.moonarq &&
+    (process.env.MOONARQ_TIKTOK_CLIENT_KEY?.trim() ||
+      process.env.MOONARQ_TIKTOK_CLIENT_SECRET?.trim() ||
+      process.env.MOONARQ_TIKTOK_REDIRECT_URI?.trim() ||
+      process.env.MOONARQ_TIKTOK_API_BASE_URL?.trim() ||
+      process.env.MOONARQ_TIKTOK_AUTH_BASE_URL?.trim())
+  ) {
+    return "moonarq";
+  }
   return "default";
 }
 

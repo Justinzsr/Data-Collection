@@ -228,7 +228,7 @@ limit 100;
 
 ## TikTok
 
-TikTok uses official TikTok Login Kit OAuth and TikTok API v2. Auto Lab continues to use the default `TIKTOK_*` app profile for source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`. MoonArq TikTok also uses the default reviewed TikTok app profile unless source metadata explicitly sets `tiktok_app_profile = 'moonarq'` after the separate MoonArq TikTok app is ready.
+TikTok uses official TikTok Login Kit OAuth and TikTok API v2. Auto Lab continues to use the default `TIKTOK_*` app profile for source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`. MoonArq TikTok uses `MOONARQ_TIKTOK_*` when those env vars are configured, including sandbox credentials while the production app is in review; otherwise it falls back to the default profile.
 
 Every TikTok read should join through `sources` and `data_spaces`; never verify TikTok rows without a `data_space_slug` predicate.
 
