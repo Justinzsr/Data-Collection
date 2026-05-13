@@ -32,7 +32,6 @@ export function getTikTokAppProfileKeyForSource(source: Source): TikTokAppProfil
   const explicitProfile = metadataString(source, "tiktok_app_profile") ?? metadataString(source, "oauth_app_profile");
   if (explicitProfile === "default" || explicitProfile === "moonarq") return explicitProfile;
   if (explicitProfile) throw new Error(`Unsupported TikTok app profile "${explicitProfile}".`);
-  if (source.data_space_id === DATA_SPACE_IDS.moonarq) return "moonarq";
   return "default";
 }
 

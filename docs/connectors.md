@@ -51,8 +51,8 @@ If the source metadata includes `expected_username` or `expected_account_id`, OA
 TikTok OAuth chooses a server-side app profile from the source and data space:
 
 - Auto Lab TikTok uses the default `TIKTOK_*` profile and keeps the existing source id `dfb2d0d1-471e-4905-9a8a-1875a39e66b5`.
-- MoonArq TikTok uses `MOONARQ_TIKTOK_*` when those variables are configured. If they are absent, it falls back to the default `TIKTOK_*` profile.
-- Optional source metadata `tiktok_app_profile` can be set to `default` or `moonarq` if a future source needs an explicit profile.
+- MoonArq TikTok also uses the default `TIKTOK_*` profile by default so it can share the reviewed TikTok OAuth app while saving tokens and data only to the MoonArq source.
+- Optional source metadata `tiktok_app_profile` can be set to `moonarq` later if a source needs the separate `MOONARQ_TIKTOK_*` app profile after that TikTok app is ready.
 
 Auto Lab TikTok source:
 
@@ -102,7 +102,7 @@ The connector normalizes official API responses into `raw_ingestions`, `content_
 
 Create the source in `/w/moonarq/dashboard/sources/new?template=tiktok` with display name `MoonArq TikTok` and `source_type_key = tiktok`. After saving, open the source detail page and choose `Connect TikTok`.
 
-If `MOONARQ_TIKTOK_*` variables are configured, the source uses the MoonArq TikTok app profile. If they are not configured, the UI shows that MoonArq is using the default profile fallback. In either case, synced records remain scoped by `source_id` and `data_space_id`, so MoonArq and Auto Lab reports, exports, dashboards, health, sync, content, and Data Explorer views stay isolated.
+By default, MoonArq TikTok uses the same reviewed TikTok app profile as Auto Lab. Synced records remain scoped by `source_id` and `data_space_id`, so MoonArq and Auto Lab reports, exports, dashboards, health, sync, content, and Data Explorer views stay isolated. Set source metadata `tiktok_app_profile = "moonarq"` only after the separate MoonArq TikTok app profile is ready.
 
 Scaffolded:
 - Vercel project: deployment metadata later.

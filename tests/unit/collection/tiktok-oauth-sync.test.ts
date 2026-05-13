@@ -295,8 +295,30 @@ describe("Auto Lab TikTok OAuth and sync", () => {
     expect(JSON.stringify(body)).not.toContain(TIKTOK_CLIENT_SECRET);
   });
 
-  it("starts MoonArq TikTok OAuth with the MoonArq app profile when configured", async () => {
+  it("starts MoonArq TikTok OAuth with the reviewed default app profile by default", async () => {
     const moonarqSource = addMoonArqTikTokSource();
+
+    const response = await tiktokOAuthStartRoute(
+      new Request(`https://app.example.com/api/oauth/tiktok/start?sourceId=${moonarqSource.id}&dataSpaceSlug=moonarq`, {
+        headers: { cookie: await dashboardCookie() },
+      }),
+    );
+    expect(response.status).toBe(307);
+    const location = response.headers.get("location") ?? "";
+    expect(location).toContain(`client_key=${TIKTOK_CLIENT_KEY}`);
+    expect(location).not.toContain(TIKTOK_CLIENT_SECRET);
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    const cookieValue = decodeURIComponent(setCookie.match(new RegExp(`${TIKTOK_OAUTH_STATE_COOKIE}=([^;]+)`))?.[1] ?? "");
+    const state = new URL(location).searchParams.get("state");
+    expect(validateTikTokOAuthState(state, cookieValue)).toMatchObject({
+      sourceId: moonarqSource.id,
+      dataSpaceSlug: "moonarq",
+      tiktokAppProfile: "default",
+    });
+  });
+
+  it("starts MoonArq TikTok OAuth with the MoonArq app profile only when the source explicitly opts in", async () => {
+    const moonarqSource = addMoonArqTikTokSource({ metadata: { scaffoldOnly: true, tiktok_app_profile: "moonarq" } });
     process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
     process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
     process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
@@ -414,9 +436,6 @@ describe("Auto Lab TikTok OAuth and sync", () => {
   it("stores MoonArq TikTok OAuth credentials only on the MoonArq source", async () => {
     addAutoLabTikTokSource();
     const moonarqSource = addMoonArqTikTokSource();
-    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
-    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
-    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
     const { calls } = mockTikTokApi({
       user: {
         open_id: MOONARQ_OPEN_ID,
@@ -441,7 +460,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       sourceId: moonarqSource.id,
       dataSpaceSlug: "moonarq",
       returnPath: `/w/moonarq/dashboard/sources/${moonarqSource.id}`,
-      tiktokAppProfile: "moonarq",
+      tiktokAppProfile: "default",
     });
 
     const response = await tiktokOAuthCallbackRoute(
@@ -452,7 +471,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toContain(`/w/moonarq/dashboard/sources/${moonarqSource.id}`);
-    expect(calls.find((call) => call.url.includes("/v2/oauth/token/"))?.body).toContain(`client_key=${MOONARQ_TIKTOK_CLIENT_KEY}`);
+    expect(calls.find((call) => call.url.includes("/v2/oauth/token/"))?.body).toContain(`client_key=${TIKTOK_CLIENT_KEY}`);
     const source = await getSource(moonarqSource.id, { dataSpaceId: DATA_SPACE_IDS.moonarq });
     expect(source).toMatchObject({
       data_space_id: DATA_SPACE_IDS.moonarq,
@@ -466,7 +485,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       tiktok_open_id: MOONARQ_OPEN_ID,
       tiktok_username: "moonarq",
       tiktok_display_name: "MoonArq Studio",
-      tiktok_app_profile: "moonarq",
+      tiktok_app_profile: "default",
     });
     expect(await listCredentialHints(AUTO_LAB_TIKTOK_SOURCE_ID)).toHaveLength(0);
     const moonarqHints = await listCredentialHints(moonarqSource.id);
@@ -474,7 +493,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
     const credentialStore = JSON.stringify(getDemoStore().credentials);
     expect(credentialStore).not.toContain(ACCESS_TOKEN);
     expect(credentialStore).not.toContain(REFRESH_TOKEN);
-    expect(credentialStore).not.toContain(MOONARQ_TIKTOK_CLIENT_SECRET);
+    expect(credentialStore).not.toContain(TIKTOK_CLIENT_SECRET);
   });
 
   it("runs a real mocked Test Connection and reports missing video scope", async () => {
@@ -498,10 +517,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
 
   it("runs Test Connection for MoonArq TikTok without touching Auto Lab", async () => {
     addAutoLabTikTokSource();
-    const moonarqSource = addMoonArqTikTokSource({ status: "healthy", metadata: { oauth_connected: true, tiktok_app_profile: "moonarq" } });
-    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
-    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
-    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
+    const moonarqSource = addMoonArqTikTokSource({ status: "healthy", metadata: { oauth_connected: true } });
     await saveTikTokCredentials(moonarqSource.id);
     mockTikTokApi({
       user: {
@@ -526,7 +542,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
       details: {
         openId: MOONARQ_OPEN_ID,
         username: "moonarq",
-        tiktokAppProfile: "moonarq",
+        tiktokAppProfile: "default",
       },
     });
     expect(await listCredentialHints(AUTO_LAB_TIKTOK_SOURCE_ID)).toHaveLength(0);
@@ -571,10 +587,7 @@ describe("Auto Lab TikTok OAuth and sync", () => {
 
   it("syncs MoonArq TikTok through the same connector without leaking into Auto Lab reports or exports", async () => {
     addAutoLabTikTokSource();
-    const moonarqSource = addMoonArqTikTokSource({ status: "healthy", metadata: { oauth_connected: true, tiktok_app_profile: "moonarq" } });
-    process.env.MOONARQ_TIKTOK_CLIENT_KEY = MOONARQ_TIKTOK_CLIENT_KEY;
-    process.env.MOONARQ_TIKTOK_CLIENT_SECRET = MOONARQ_TIKTOK_CLIENT_SECRET;
-    process.env.MOONARQ_TIKTOK_REDIRECT_URI = MOONARQ_TIKTOK_REDIRECT_URI;
+    const moonarqSource = addMoonArqTikTokSource({ status: "healthy", metadata: { oauth_connected: true } });
     await saveTikTokCredentials(moonarqSource.id);
     mockTikTokApi({
       user: {
