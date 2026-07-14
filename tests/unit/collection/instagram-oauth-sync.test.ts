@@ -437,11 +437,14 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       status: "healthy",
       external_account_id: AUTO_LAB_INSTAGRAM_ACCOUNT_ID,
       account_name: AUTO_LAB_INSTAGRAM_USERNAME,
+      input_url: `https://www.instagram.com/${AUTO_LAB_INSTAGRAM_USERNAME}/`,
+      normalized_url: `https://www.instagram.com/${AUTO_LAB_INSTAGRAM_USERNAME}/`,
     });
     expect(source?.metadata).toMatchObject({
       oauth_connected: true,
       instagram_account_id: AUTO_LAB_INSTAGRAM_ACCOUNT_ID,
       instagram_username: AUTO_LAB_INSTAGRAM_USERNAME,
+      profile_url: `https://www.instagram.com/${AUTO_LAB_INSTAGRAM_USERNAME}/`,
       page_id: AUTO_LAB_FACEBOOK_PAGE_ID,
       graph_api_version: "v25.0",
       meta_app_profile: "default",
@@ -497,12 +500,15 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       status: "healthy",
       external_account_id: MOONARQ_INSTAGRAM_ACCOUNT_ID,
       account_name: MOONARQ_INSTAGRAM_USERNAME,
+      input_url: `https://www.instagram.com/${MOONARQ_INSTAGRAM_USERNAME}/`,
+      normalized_url: `https://www.instagram.com/${MOONARQ_INSTAGRAM_USERNAME}/`,
     });
     expect(source?.metadata).toMatchObject({
       scaffoldOnly: false,
       oauth_connected: true,
       instagram_account_id: MOONARQ_INSTAGRAM_ACCOUNT_ID,
       instagram_username: MOONARQ_INSTAGRAM_USERNAME,
+      profile_url: `https://www.instagram.com/${MOONARQ_INSTAGRAM_USERNAME}/`,
       page_id: MOONARQ_FACEBOOK_PAGE_ID,
       graph_api_version: "v25.0",
       meta_app_profile: "moonarq",

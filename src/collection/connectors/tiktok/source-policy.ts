@@ -8,6 +8,62 @@ function metadataString(source: Source, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function normalizedTikTokUsername(value: string | null | undefined) {
+  const normalized = value?.trim().replace(/^@+/, "");
+  return normalized ? normalized.toLocaleLowerCase("en-US") : null;
+}
+
+export type TikTokOAuthIdentity = {
+  openId: string | null | undefined;
+  username: string | null | undefined;
+};
+
+export type TikTokOAuthIdentityCheck =
+  | { ok: true }
+  | { ok: false; reason: "open_id_mismatch" | "open_id_missing" | "username_mismatch" | "username_missing" };
+
+/**
+ * Protect an already-connected source from being silently rebound to another
+ * TikTok account. open_id is stable across username changes, so a matching
+ * open_id deliberately permits a rename and lets the callback refresh labels.
+ */
+export function checkTikTokOAuthIdentity(source: Source, candidate: TikTokOAuthIdentity): TikTokOAuthIdentityCheck {
+  const expectedOpenId = source.external_account_id?.trim() || metadataString(source, "tiktok_open_id");
+  const candidateOpenId = candidate.openId?.trim() || null;
+  if (expectedOpenId) {
+    if (!candidateOpenId) return { ok: false, reason: "open_id_missing" };
+    return candidateOpenId === expectedOpenId ? { ok: true } : { ok: false, reason: "open_id_mismatch" };
+  }
+
+  const wasConnected = source.metadata.oauth_connected === true;
+  if (!wasConnected) return { ok: true };
+
+  const expectedUsername = normalizedTikTokUsername(
+    metadataString(source, "tiktok_username") ?? source.account_name,
+  );
+  if (!expectedUsername) return { ok: true };
+  const candidateUsername = normalizedTikTokUsername(candidate.username);
+  if (!candidateUsername) return { ok: false, reason: "username_missing" };
+  return candidateUsername === expectedUsername
+    ? { ok: true }
+    : { ok: false, reason: "username_mismatch" };
+}
+
+export function canonicalTikTokProfileUrl(username: string | null | undefined, profileDeepLink?: string | null) {
+  const normalizedUsername = username?.trim().replace(/^@+/, "");
+  if (normalizedUsername) return `https://www.tiktok.com/@${encodeURIComponent(normalizedUsername)}`;
+  if (!profileDeepLink) return null;
+  try {
+    const parsed = new URL(profileDeepLink);
+    const isTikTokHost = parsed.hostname === "tiktok.com" || parsed.hostname.endsWith(".tiktok.com");
+    const profileSegment = parsed.pathname.split("/").filter(Boolean)[0];
+    if (!isTikTokHost || !profileSegment?.startsWith("@")) return null;
+    return `https://www.tiktok.com/${encodeURIComponent(profileSegment).replace("%40", "@")}`;
+  } catch {
+    return null;
+  }
+}
+
 export function isAutoLabTikTokSource(source: Source) {
   return source.source_type_key === "tiktok" && source.data_space_id === DATA_SPACE_IDS.autoLab && source.id === AUTO_LAB_TIKTOK_SOURCE_ID;
 }

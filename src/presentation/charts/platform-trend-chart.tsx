@@ -3,12 +3,35 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { GlassPanel } from "@/presentation/components/ui/panel";
 
-type Series = {
+export type PlatformTrendSeries = {
   key: string;
   label: string;
   color: string;
   data: { date: string; value: number }[];
 };
+
+type IndexedSeries = PlatformTrendSeries;
+
+export function buildIndexedTrendData(series: PlatformTrendSeries[]) {
+  const indexedSeries: IndexedSeries[] = series.map((item) => {
+    const baseline = item.data.find((point) => point.value > 0)?.value ?? 0;
+    return {
+      ...item,
+      data: item.data.map((point) => ({
+        ...point,
+        value: baseline > 0 ? (point.value / baseline) * 100 : 0,
+      })),
+    };
+  });
+  const dates = [...new Set(indexedSeries.flatMap((item) => item.data.map((point) => point.date)))].sort();
+  const valuesBySeries = new Map(indexedSeries.map((item) => [item.key, new Map(item.data.map((point) => [point.date, point.value]))]));
+  const chartData = dates.map((date) => {
+    const row: Record<string, string | number | null> = { date: date.slice(5) };
+    for (const item of indexedSeries) row[item.key] = valuesBySeries.get(item.key)?.get(date) ?? null;
+    return row;
+  });
+  return { indexedSeries, chartData };
+}
 
 const chartMargin = { top: 8, right: 8, bottom: 0, left: -18 } as const;
 const initialChartDimension = { width: 960, height: 240 } as const;
@@ -23,23 +46,8 @@ const tooltipContentStyle = {
 const tooltipLabelStyle = { color: "#94a3b8", marginBottom: "4px" } as const;
 const activeDot = { r: 4, strokeWidth: 0 } as const;
 
-export function PlatformTrendChart({ series }: { series: Series[] }) {
-  const indexedSeries = series.map((item) => {
-    const baseline = item.data.find((point) => point.value > 0)?.value ?? 0;
-    return {
-      ...item,
-      data: item.data.map((point) => ({
-        ...point,
-        value: baseline > 0 ? (point.value / baseline) * 100 : 0,
-      })),
-    };
-  });
-  const dates = series[0]?.data ?? [];
-  const chartData = dates.map((point, index) => {
-    const row: Record<string, string | number> = { date: point.date.slice(5) };
-    for (const item of indexedSeries) row[item.key] = item.data[index]?.value ?? 0;
-    return row;
-  });
+export function PlatformTrendChart({ series }: { series: PlatformTrendSeries[] }) {
+  const { indexedSeries, chartData } = buildIndexedTrendData(series);
   const labels = new Map(indexedSeries.map((item) => [item.key, item.label]));
 
   return (
@@ -49,7 +57,7 @@ export function PlatformTrendChart({ series }: { series: Series[] }) {
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/65">Cross-platform graph</p>
           <h2 className="mt-0.5 text-base font-semibold text-white">Indexed source momentum</h2>
         </div>
-        <p className="max-w-xl text-xs leading-5 text-slate-500">Every line begins at 100, making unlike platform signals directly comparable.</p>
+        <p className="max-w-xl text-xs leading-5 text-slate-500">Each measured series is indexed to its first non-zero point for a comparable view.</p>
       </div>
 
       <div

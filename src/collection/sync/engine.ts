@@ -185,8 +185,8 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       finished_at: finishedAt.toISOString(),
       duration_ms: finishedAt.getTime() - startedAt.getTime(),
       records_fetched: syncResult.recordsFetched,
-      records_inserted: raw.inserted + webEventsInserted + content.itemsUpserted + content.metricsUpserted + (syncResult.recordsInserted ?? 0),
-      records_updated: syncResult.recordsUpdated ?? 0,
+      records_inserted: raw.inserted + webEventsInserted + content.itemsInserted + (syncResult.recordsInserted ?? 0),
+      records_updated: content.itemsUpdated + (syncResult.recordsUpdated ?? 0),
       metrics_upserted: metrics.upserted + content.metricsUpserted,
       cursor_after: syncResult.cursorAfter ?? null,
     })) as SyncRun;

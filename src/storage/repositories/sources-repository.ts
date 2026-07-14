@@ -116,6 +116,12 @@ async function ensureSourceTypeRow(sourceTypeKey: SourceTypeKey) {
   );
 }
 
+export function nextAlignedSyncAt(now: Date, frequencyMinutes: number) {
+  const intervalMs = Math.max(1, frequencyMinutes) * 60_000;
+  const nextBoundaryMs = (Math.floor(now.getTime() / intervalMs) + 1) * intervalMs;
+  return new Date(nextBoundaryMs).toISOString();
+}
+
 export async function listSources(scope: SourceScope = {}): Promise<Source[]> {
   if (!isRuntimeDatabaseConfigured()) {
     return [...getDemoStore().sources]
@@ -140,11 +146,14 @@ export async function getSource(sourceId: string, scope: SourceScope = {}): Prom
 
 export async function createSource(input: CreateSourceInput): Promise<Source> {
   const now = new Date().toISOString();
+  const sourceType = listSourceTypes().find((item) => item.key === input.source_type_key);
+  if (!sourceType) throw new Error(`Unknown source type: ${input.source_type_key}`);
   const metadata: JsonRecord = {
     demo: !isRuntimeDatabaseConfigured(),
     ...input.metadata,
   };
-  const supportsWebhook = input.supports_webhook ?? false;
+  const supportsWebhook = input.supports_webhook ?? sourceType.capabilities.supportsWebhook;
+  const syncFrequencyMinutes = input.sync_frequency_minutes ?? sourceType.capabilities.recommendedSyncFrequencyMinutes;
   const source: Source = {
     id: randomUUID(),
     data_space_id: input.data_space_id ?? DATA_SPACE_IDS.moonarq,
@@ -155,8 +164,8 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
     external_account_id: input.external_account_id ?? null,
     account_name: input.account_name ?? null,
     status: input.status ?? "needs_credentials",
-    sync_mode: input.sync_mode ?? "hybrid",
-    sync_frequency_minutes: input.sync_frequency_minutes ?? 60,
+    sync_mode: input.sync_mode ?? sourceType.default_sync_mode,
+    sync_frequency_minutes: syncFrequencyMinutes,
     supports_webhook: supportsWebhook,
     webhook_url: supportsWebhook ? `/api/webhooks/${input.source_type_key}/${input.source_type_key === "website" ? "pending" : "pending"}` : null,
     webhook_secret_hint: null,
@@ -166,7 +175,7 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
     last_success_at: null,
     last_error_at: null,
     last_error: null,
-    next_sync_at: new Date(Date.now() + (input.sync_frequency_minutes ?? 60) * 60_000).toISOString(),
+    next_sync_at: nextAlignedSyncAt(new Date(), syncFrequencyMinutes),
     metadata,
     created_at: now,
     updated_at: now,
@@ -341,7 +350,7 @@ export async function markSourceSyncState(
   const now = new Date();
   const patch: Partial<Source> = {
     updated_at: now.toISOString(),
-    next_sync_at: new Date(now.getTime() + source.sync_frequency_minutes * 60_000).toISOString(),
+    next_sync_at: nextAlignedSyncAt(now, source.sync_frequency_minutes),
   };
   if (trigger === "manual") patch.last_manual_sync_at = now.toISOString();
   if (trigger === "cron") patch.last_cron_sync_at = now.toISOString();

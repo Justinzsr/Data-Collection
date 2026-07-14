@@ -213,21 +213,18 @@ async function listLatestSnapshots(dataSpaceId: string | undefined, sourceIds: S
   }
   const rows = await queryRows<RawIngestion>(
     `
-      select r.*
+      select distinct on (r.source_id) r.*
       from raw_ingestions r
       join sources s on s.id = r.source_id
       where ${where.join(" and ")}
-      order by r.fetched_at desc
-      limit 50
+      order by r.source_id, r.fetched_at desc
     `,
     values,
   );
-  const seen = new Set<string>();
   return rows.flatMap((row) => {
-    if (!row.source_id || seen.has(row.source_id)) return [];
+    if (!row.source_id) return [];
     const snapshot = parseSnapshotPayload(row.source_id, row);
     if (!snapshot) return [];
-    seen.add(row.source_id);
     return [snapshot];
   });
 }
@@ -320,8 +317,12 @@ export async function getTikTokDashboardSummary(options: { dataSpaceId?: string 
   const sourcesWithInsights = tiktokSources.map((source) => {
     const snapshot = snapshotBySourceId.get(source.id);
     const contentVideos = videosFromContent(contentItems, contentMetrics, source.id);
-    const hasTikTokContentMetrics = contentMetrics.some((metric) => metric.source_id === source.id && VIDEO_METRIC_KEYS.includes(metric.metric_key as (typeof VIDEO_METRIC_KEYS)[number]));
-    const videos = hasTikTokContentMetrics ? contentVideos : videosFromSnapshot(snapshot, source.id);
+    // A sync snapshot is the authoritative current account state. Persisted
+    // content rows are intentionally retained as history, so merging them into
+    // a current snapshot would resurrect videos that the latest API response no
+    // longer contains. Only fall back to content storage for legacy sources
+    // that have never written a snapshot.
+    const videos = snapshot ? videosFromSnapshot(snapshot, source.id) : contentVideos;
     const videoStats = statsFromVideos(videos, accountMetrics, source.id);
     const tokenExpiresAt = metadataText(source, "token_expires_at");
     const scopes = snapshot?.scopes.length ? snapshot.scopes : metadataScopes(source);
@@ -351,7 +352,6 @@ export async function getTikTokDashboardSummary(options: { dataSpaceId?: string 
     return leftRank - rightRank || left.displayName.localeCompare(right.displayName);
   });
 
-  const aggregateVideos = sourcesWithInsights.flatMap((source) => source.videos);
   const videoViews = sumNullable(sourcesWithInsights.map((source) => source.stats.videoViews));
   const likes = sumNullable(sourcesWithInsights.map((source) => source.stats.likes));
   const comments = sumNullable(sourcesWithInsights.map((source) => source.stats.comments));
@@ -360,7 +360,7 @@ export async function getTikTokDashboardSummary(options: { dataSpaceId?: string 
     sources: sourcesWithInsights,
     totals: {
       sourceCount: sourcesWithInsights.length,
-      fetchedVideoCount: aggregateVideos.length,
+      fetchedVideoCount: sourcesWithInsights.reduce((sum, source) => sum + source.stats.fetchedVideoCount, 0),
       videoViews,
       likes,
       comments,

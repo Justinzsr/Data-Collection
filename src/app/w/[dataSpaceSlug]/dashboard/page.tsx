@@ -210,11 +210,9 @@ function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashb
   );
 }
 
-function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSummary; basePath: string }) {
-  if (summary.sources.length === 0) return null;
-  const primary = summary.sources[0];
-  const videos = primary.videos;
-  const accountLabel = primary.username ? `@${primary.username.replace(/^@/, "")}` : primary.displayNameOnPlatform ?? primary.displayName;
+function TikTokSourceInsightsPanel({ source, basePath }: { source: TikTokDashboardSummary["sources"][number]; basePath: string }) {
+  const videos = source.videos;
+  const accountLabel = source.username ? `@${source.username.replace(/^@/, "")}` : source.displayNameOnPlatform ?? source.displayName;
 
   return (
     <details className="overview-social-card group glass min-w-0 overflow-hidden rounded-xl">
@@ -227,42 +225,47 @@ function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSu
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-200/75">TikTok official API</p>
               <h2 className="mt-0.5 truncate text-sm font-semibold text-white">{accountLabel}</h2>
-              <p className="mt-0.5 truncate text-xs text-slate-500">{displayWaitingCount(primary.stats.videoViews)} views · {displayWaitingCount(primary.stats.followers)} followers · {videos.length} videos</p>
+              <p className="mt-0.5 truncate text-xs text-slate-500">{displayWaitingCount(source.stats.videoViews)} views · {displayWaitingCount(source.stats.followers)} followers · {source.stats.fetchedVideoCount} fetched videos</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Badge tone={primary.status === "healthy" ? "green" : primary.status === "error" ? "rose" : "amber"}>{statusLabel(primary.status)}</Badge>
+            <Badge tone={source.status === "healthy" ? "green" : source.status === "error" ? "rose" : "amber"}>{statusLabel(source.status)}</Badge>
             <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
           </div>
         </div>
       </summary>
 
       <div className="grid gap-4 border-t border-white/10 p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <Badge tone="rose">Current snapshot</Badge>
+          <span>Cumulative account and fetched-video totals from the latest TikTok sync; not affected by the dashboard date range.</span>
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <TikTokMetricTile label="Video views" value={displayWaitingCount(primary.stats.videoViews)} detail="Synced video total" />
-          <TikTokMetricTile label="Likes" value={displayWaitingCount(primary.stats.likes)} />
-          <TikTokMetricTile label="Comments" value={displayWaitingCount(primary.stats.comments)} />
-          <TikTokMetricTile label="Shares" value={displayWaitingCount(primary.stats.shares)} />
-          <TikTokMetricTile label="Engagement rate" value={displayWaitingPercent(primary.stats.engagementRate)} detail="Likes + comments + shares / views" />
-          <TikTokMetricTile label="Followers" value={displayWaitingCount(primary.stats.followers)} detail="Requires stats scope" />
-          <TikTokMetricTile label="Video count" value={displayWaitingCount(primary.stats.videoCount)} detail={`${displayWaitingCount(primary.stats.fetchedVideoCount)} fetched`} />
-          <TikTokMetricTile label="Profile likes" value={displayWaitingCount(primary.stats.profileLikes)} detail="Requires stats scope" />
+          <TikTokMetricTile label="Video views" value={displayWaitingCount(source.stats.videoViews)} detail="Latest fetched-video total" />
+          <TikTokMetricTile label="Likes" value={displayWaitingCount(source.stats.likes)} />
+          <TikTokMetricTile label="Comments" value={displayWaitingCount(source.stats.comments)} />
+          <TikTokMetricTile label="Shares" value={displayWaitingCount(source.stats.shares)} />
+          <TikTokMetricTile label="Engagement rate" value={displayWaitingPercent(source.stats.engagementRate)} detail="Likes + comments + shares / views" />
+          <TikTokMetricTile label="Followers" value={displayWaitingCount(source.stats.followers)} detail="Current account snapshot" />
+          <TikTokMetricTile label="Video count" value={displayWaitingCount(source.stats.videoCount)} detail={`${displayWaitingCount(source.stats.fetchedVideoCount)} fetched now`} />
+          <TikTokMetricTile label="Profile likes" value={displayWaitingCount(source.stats.profileLikes)} detail="Current account snapshot" />
         </div>
 
         <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/15 p-3 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <span>Last sync: <span className="text-slate-200">{primary.lastSyncedAt ? formatAppDateTime(primary.lastSyncedAt) : "No sync yet"}</span></span>
-            <span>Token: <span className={primary.tokenExpiresAt ? "text-slate-200" : "text-amber-100"}>{primary.tokenExpiresAt ? `expires ${formatAppDateTime(primary.tokenExpiresAt)}` : "expiry pending"}</span></span>
-            {primary.openId ? <span>Open ID: <span className="text-slate-200">{primary.openId}</span></span> : <span>Open ID: <span className="text-amber-100">Waiting for scope/data</span></span>}
-            <span>Scopes: <span className="text-slate-200">{primary.scopes.length ? primary.scopes.join(", ") : "Waiting for granted scopes"}</span></span>
-            {primary.lastError ? <span>Last error: <span className="text-rose-200">{primary.lastError}</span></span> : null}
+            <span>Last sync: <span className="text-slate-200">{source.lastSyncedAt ? formatAppDateTime(source.lastSyncedAt) : "No sync yet"}</span></span>
+            <span>Token: <span className={source.tokenExpiresAt ? "text-slate-200" : "text-amber-100"}>{source.tokenExpiresAt ? `expires ${formatAppDateTime(source.tokenExpiresAt)}` : "expiry pending"}</span></span>
+            {source.openId ? <span>Open ID: <span className="text-slate-200">{source.openId}</span></span> : <span>Open ID: <span className="text-amber-100">Waiting for scope/data</span></span>}
+            <span>Scopes: <span className="text-slate-200">{source.scopes.length ? source.scopes.join(", ") : "Waiting for granted scopes"}</span></span>
+            {source.lastError ? <span>Last error: <span className="text-rose-200">{source.lastError}</span></span> : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            <LinkButton href={`${basePath}/sources/${primary.sourceId}`} variant="secondary" className="min-h-9 px-3 text-xs">
+            <LinkButton href={`${basePath}/sources/${source.sourceId}`} variant="secondary" className="min-h-9 px-3 text-xs">
               Source
               <ArrowRight className="h-3.5 w-3.5" />
             </LinkButton>
-            <LinkButton href={`${basePath}/data?tab=raw_ingestions&sourceId=${primary.sourceId}`} variant="ghost" className="min-h-9 px-3 text-xs">
+            <LinkButton href={`${basePath}/data?tab=raw_ingestions&sourceId=${source.sourceId}`} variant="ghost" className="min-h-9 px-3 text-xs">
               Raw sync
               <ArrowRight className="h-3.5 w-3.5" />
             </LinkButton>
@@ -273,7 +276,7 @@ function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSu
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-200/75">Video performance</p>
-              <h3 className="mt-1 text-base font-semibold text-white">Latest synced TikTok videos</h3>
+              <h3 className="mt-1 text-base font-semibold text-white">Videos in the latest TikTok snapshot</h3>
             </div>
             <Badge tone="slate">{videos.length} visible video rows</Badge>
           </div>
@@ -333,6 +336,12 @@ function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSu
       </div>
     </details>
   );
+}
+
+function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSummary; basePath: string }) {
+  if (summary.sources.length === 0) return null;
+
+  return summary.sources.map((source) => <TikTokSourceInsightsPanel key={source.sourceId} source={source} basePath={basePath} />);
 }
 
 function AutoLabEmptyState({ dataSpaceSlug }: { dataSpaceSlug: string }) {

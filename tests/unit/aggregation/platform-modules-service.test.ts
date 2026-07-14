@@ -39,6 +39,18 @@ function autoLabTikTokSource(): Source {
   };
 }
 
+function tiktokSnapshot(date: string, sourceId: string, metricKey: string, metricValue: number) {
+  return {
+    date,
+    sourceId,
+    sourceTypeKey: "tiktok" as const,
+    metricKey,
+    metricValue,
+    unit: "count",
+    dimensions: { rollup: "video_sync_total" },
+  };
+}
+
 describe("platform modules service", () => {
   beforeEach(() => {
     if (ORIGINAL_DEMO_NOW) process.env.DEMO_NOW = ORIGINAL_DEMO_NOW;
@@ -179,6 +191,103 @@ describe("platform modules service", () => {
       expect.objectContaining({ key: "tiktok_shares", value: 3 }),
     ]));
     expect(moonarqTikTok?.sourceId).not.toBe(AUTO_LAB_TIKTOK_SOURCE_ID);
+  });
+
+  it("uses the latest TikTok snapshots for Auto Lab and MoonArq instead of summing cumulative totals", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    const store = getDemoStore();
+    store.sources.push(autoLabTikTokSource());
+    store.metricsDaily = store.metricsDaily.filter(
+      (metric) => metric.source_id !== AUTO_LAB_TIKTOK_SOURCE_ID && metric.source_id !== DEMO_SOURCE_IDS.tiktok,
+    );
+
+    await upsertMetrics([
+      tiktokSnapshot("2026-07-10", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_video_views", 210_000),
+      tiktokSnapshot("2026-07-12", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_video_views", 215_000),
+      tiktokSnapshot("2026-07-14", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_video_views", 219_396),
+      tiktokSnapshot("2026-07-10", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_likes", 14_800),
+      tiktokSnapshot("2026-07-14", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_likes", 15_068),
+      tiktokSnapshot("2026-07-10", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_comments", 180),
+      tiktokSnapshot("2026-07-14", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_comments", 187),
+      tiktokSnapshot("2026-07-10", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_shares", 900),
+      tiktokSnapshot("2026-07-14", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_shares", 928),
+      tiktokSnapshot("2026-07-04", DEMO_SOURCE_IDS.tiktok, "tiktok_video_views", 67),
+      tiktokSnapshot("2026-07-08", DEMO_SOURCE_IDS.tiktok, "tiktok_video_views", 67),
+      tiktokSnapshot("2026-07-14", DEMO_SOURCE_IDS.tiktok, "tiktok_video_views", 67),
+    ]);
+
+    const autoLabModules = await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.autoLab, dataSpaceName: "Auto Lab" });
+    const moonarqModules = await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq, dataSpaceName: "MoonArq" });
+    const autoLabTikTok = autoLabModules.find((module) => module.sourceTypeKey === "tiktok");
+    const moonarqTikTok = moonarqModules.find((module) => module.sourceTypeKey === "tiktok");
+
+    expect(autoLabTikTok?.primaryMetric.value).toBe(219_396);
+    expect(autoLabTikTok?.secondaryMetrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "tiktok_likes", value: 15_068 }),
+      expect.objectContaining({ key: "tiktok_comments", value: 187 }),
+      expect.objectContaining({ key: "tiktok_shares", value: 928 }),
+    ]));
+    expect(autoLabTikTok?.sparkline).toEqual([
+      { date: "2026-07-10", value: 210_000 },
+      { date: "2026-07-11", value: 210_000 },
+      { date: "2026-07-12", value: 215_000 },
+      { date: "2026-07-13", value: 215_000 },
+      { date: "2026-07-14", value: 219_396 },
+    ]);
+    expect(moonarqTikTok?.primaryMetric.value).toBe(67);
+    expect(moonarqTikTok?.sparkline.every((point) => point.value === 67)).toBe(true);
+  });
+
+  it("compares TikTok end-minus-start growth against the previous period", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    const store = getDemoStore();
+    store.sources.push(autoLabTikTokSource());
+    store.metricsDaily = store.metricsDaily.filter((metric) => metric.source_id !== AUTO_LAB_TIKTOK_SOURCE_ID);
+
+    await upsertMetrics([
+      tiktokSnapshot("2026-07-01", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_video_views", 100),
+      tiktokSnapshot("2026-07-07", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_video_views", 140),
+      tiktokSnapshot("2026-07-08", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_video_views", 200),
+      tiktokSnapshot("2026-07-14", AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_video_views", 260),
+    ]);
+
+    const modules = await getPlatformModules("7d", { dataSpaceId: DATA_SPACE_IDS.autoLab, dataSpaceName: "Auto Lab" });
+    const tiktok = modules.find((module) => module.sourceTypeKey === "tiktok");
+
+    expect(tiktok?.primaryMetric).toMatchObject({ value: 260, deltaPercent: 50, deltaLabel: "+50.0% vs previous period" });
+    expect(tiktok?.sparkline.map((point) => point.value)).toEqual([200, 200, 200, 200, 200, 200, 260]);
+  });
+
+  it("keeps additive platform metrics summed across the selected period", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    const store = getDemoStore();
+    store.metricsDaily = store.metricsDaily.filter(
+      (metric) => !(metric.source_id === DEMO_SOURCE_IDS.website && metric.metric_key === "unique_visitors"),
+    );
+
+    await upsertMetrics([
+      {
+        date: "2026-07-10",
+        sourceId: DEMO_SOURCE_IDS.website,
+        sourceTypeKey: "website",
+        metricKey: "unique_visitors",
+        metricValue: 10,
+        unit: "count",
+        dimensions: { rollup: "daily" },
+      },
+      {
+        date: "2026-07-14",
+        sourceId: DEMO_SOURCE_IDS.website,
+        sourceTypeKey: "website",
+        metricKey: "unique_visitors",
+        metricValue: 20,
+        unit: "count",
+        dimensions: { rollup: "daily" },
+      },
+    ]);
+
+    const modules = await getPlatformModules("7d", { dataSpaceId: DATA_SPACE_IDS.moonarq, dataSpaceName: "MoonArq" });
+    expect(modules.find((module) => module.sourceTypeKey === "website")?.primaryMetric.value).toBe(30);
   });
 
   it("uses concise global freshness copy", async () => {

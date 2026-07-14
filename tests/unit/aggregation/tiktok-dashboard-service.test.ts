@@ -224,6 +224,57 @@ describe("tiktok dashboard service", () => {
     expect(body).not.toContain("secret-token-that-must-not-leak");
   });
 
+  it("uses the latest raw snapshot as current truth and excludes stale persisted videos", async () => {
+    const store = getDemoStore();
+    const currentVideo = makeVideoItem(AUTO_LAB_TIKTOK_SOURCE_ID, {
+      id: "video-1",
+      title: "Persisted current video",
+      caption: "This stored copy has older counters.",
+      url: "https://www.tiktok.com/@just_4is/video/1",
+    });
+    const staleVideo = makeVideoItem(AUTO_LAB_TIKTOK_SOURCE_ID, {
+      id: "stale-video",
+      title: "Historical video",
+      caption: "This video is absent from the latest API snapshot.",
+      url: "https://www.tiktok.com/@just_4is/video/stale",
+    });
+    store.sources.push(
+      makeSource({ id: AUTO_LAB_TIKTOK_SOURCE_ID, dataSpaceId: DATA_SPACE_IDS.autoLab, displayName: "Auto Lab TikTok", accountName: "just_4is" }),
+    );
+    store.rawIngestions.push(
+      makeSnapshot(AUTO_LAB_TIKTOK_SOURCE_ID, { username: "just_4is", views: 100, likes: 10, comments: 2, shares: 1, followers: 423, videoCount: 1, profileLikes: 15070 }),
+    );
+    store.contentItems.push(currentVideo, staleVideo);
+    store.contentMetrics.push(
+      makeContentMetric(currentVideo, "tiktok_video_views", 900),
+      makeContentMetric(currentVideo, "tiktok_likes", 90),
+      makeContentMetric(staleVideo, "tiktok_video_views", 5000),
+      makeContentMetric(staleVideo, "tiktok_likes", 500),
+    );
+
+    const summary = await getTikTokDashboardSummary({ dataSpaceId: DATA_SPACE_IDS.autoLab });
+
+    expect(summary.sources[0].videos).toHaveLength(1);
+    expect(summary.sources[0].videos[0]).toMatchObject({
+      externalContentId: "video-1",
+      title: "IS350 shakedown",
+      views: 100,
+      likes: 10,
+      comments: 2,
+      shares: 1,
+      engagementRate: 13,
+    });
+    expect(summary.sources[0].stats).toMatchObject({
+      fetchedVideoCount: 1,
+      videoViews: 100,
+      likes: 10,
+      comments: 2,
+      shares: 1,
+      engagementRate: 13,
+    });
+    expect(summary.totals).toMatchObject({ fetchedVideoCount: 1, videoViews: 100, likes: 10, comments: 2, shares: 1, engagementRate: 13 });
+  });
+
   it("keeps the Auto Lab TikTok source visible with waiting values when scopes or video data are missing", async () => {
     const store = getDemoStore();
     store.sources.push(
