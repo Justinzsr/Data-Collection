@@ -8,7 +8,7 @@ import {
   type InstagramTokenResponse,
 } from "@/collection/connectors/instagram/graph-api";
 import {
-  INSTAGRAM_OAUTH_STATE_COOKIE,
+  getInstagramOAuthStateCookieName,
   validateSignedInstagramOAuthState,
   validateInstagramOAuthState,
 } from "@/collection/connectors/instagram/oauth-state";
@@ -42,8 +42,11 @@ function sourceRedirect(request: Request, returnPath: string, params: Record<str
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   const response = NextResponse.redirect(url, { status: 303 });
   response.cookies.set({
-    name: INSTAGRAM_OAUTH_STATE_COOKIE,
+    name: getInstagramOAuthStateCookieName(),
     value: "",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
     path: "/",
     maxAge: 0,
   });
@@ -69,7 +72,7 @@ export async function GET(request: Request) {
   let usedSignedStateFallback = false;
   try {
     const stateParam = requestUrl.searchParams.get("state");
-    const stateCookie = parseCookies(request)[INSTAGRAM_OAUTH_STATE_COOKIE];
+    const stateCookie = parseCookies(request)[getInstagramOAuthStateCookieName()];
     state = stateCookie
       ? validateInstagramOAuthState(stateParam, stateCookie)
       : validateSignedInstagramOAuthState(stateParam);

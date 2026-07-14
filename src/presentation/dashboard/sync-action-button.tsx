@@ -58,7 +58,7 @@ export function SyncActionButton({ sourceId, compact = false, dataSpaceSlug }: {
   );
 }
 
-export function RunAllDueButton({ dataSpaceSlug }: { dataSpaceSlug?: string }) {
+export function RunAllDueButton({ dataSpaceSlug, compact = false }: { dataSpaceSlug?: string; compact?: boolean }) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   async function run() {
@@ -78,7 +78,7 @@ export function RunAllDueButton({ dataSpaceSlug }: { dataSpaceSlug?: string }) {
     }
   }
   return (
-    <Button type="button" onClick={run} disabled={loading} variant="secondary">
+    <Button type="button" onClick={run} disabled={loading} variant="secondary" className={compact ? "min-h-9 px-3 text-xs" : undefined}>
       {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
       Run All Due Sources
     </Button>

@@ -1,6 +1,7 @@
 import { GlassPanel } from "@/presentation/components/ui/panel";
 
 function areaPath(data: { value: number }[]) {
+  if (data.length === 0) return { line: "", area: "" };
   const max = Math.max(...data.map((point) => point.value), 1);
   const last = Math.max(data.length - 1, 1);
   const points = data.map((point, index) => {
@@ -22,42 +23,52 @@ export function MetricTrendChart({
   title?: string;
   description?: string;
 }) {
-  const paths = areaPath(data);
-  const first = data[0]?.date.slice(5) ?? "";
-  const last = data.at(-1)?.date.slice(5) ?? "";
+  const chartData = data.filter((point) => Number.isFinite(point.value));
+  const paths = areaPath(chartData);
+  const first = chartData[0]?.date.slice(5) ?? "";
+  const last = chartData.at(-1)?.date.slice(5) ?? "";
   return (
     <GlassPanel className="min-h-[22rem] p-4 sm:p-5">
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4">
         <div>
           <h2 className="text-base font-semibold text-white">{title}</h2>
           <p className="text-sm text-slate-400">{description}</p>
         </div>
-        <select className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-200">
-          <option>Page views</option>
-          <option>Unique visitors</option>
-          <option>Signups</option>
-          <option>Custom events</option>
-        </select>
       </div>
       <div className="h-72 min-w-0 rounded-lg border border-white/10 bg-black/20 p-3">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label={`${title} chart`}>
-          <defs>
-            <linearGradient id="moonTrendSvg" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.42" />
-              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.04" />
-            </linearGradient>
-          </defs>
-          {[20, 40, 60, 80].map((y) => (
-            <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="rgba(148,163,184,0.13)" strokeWidth="0.25" />
-          ))}
-          <path d={paths.area} fill="url(#moonTrendSvg)" />
-          <path d={paths.line} fill="none" stroke="#38bdf8" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
-        </svg>
+        {chartData.length > 0 ? (
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label={`${title} chart`}>
+            <defs>
+              <linearGradient id="moonTrendSvg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.42" />
+                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.04" />
+              </linearGradient>
+            </defs>
+            {[20, 40, 60, 80].map((y) => (
+              <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="rgba(148,163,184,0.13)" strokeWidth="0.25" />
+            ))}
+            {paths.line ? (
+              <>
+                <path d={paths.area} fill="url(#moonTrendSvg)" />
+                <path d={paths.line} fill="none" stroke="#38bdf8" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+              </>
+            ) : null}
+          </svg>
+        ) : (
+          <div className="grid h-full place-items-center px-4 text-center" role="status">
+            <div>
+              <p className="text-sm font-medium text-slate-200">No trend data yet</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Connect or sync this source to populate the chart.</p>
+            </div>
+          </div>
+        )}
       </div>
-      <div className="mt-2 flex justify-between text-xs text-slate-500">
-        <span>{first}</span>
-        <span>{last}</span>
-      </div>
+      {chartData.length > 0 ? (
+        <div className="mt-2 flex justify-between text-xs text-slate-500">
+          <span>{first}</span>
+          <span>{last}</span>
+        </div>
+      ) : null}
     </GlassPanel>
   );
 }

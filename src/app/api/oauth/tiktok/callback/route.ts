@@ -6,7 +6,7 @@ import {
   tokenExpiresAt,
 } from "@/collection/connectors/tiktok/api";
 import {
-  TIKTOK_OAUTH_STATE_COOKIE,
+  getTikTokOAuthStateCookieName,
   validateSignedTikTokOAuthState,
   validateTikTokOAuthState,
 } from "@/collection/connectors/tiktok/oauth-state";
@@ -36,8 +36,11 @@ function sourceRedirect(request: Request, returnPath: string, params: Record<str
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   const response = NextResponse.redirect(url, { status: 303 });
   response.cookies.set({
-    name: TIKTOK_OAUTH_STATE_COOKIE,
+    name: getTikTokOAuthStateCookieName(),
     value: "",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
     path: "/",
     maxAge: 0,
   });
@@ -60,7 +63,7 @@ export async function GET(request: Request) {
   let usedSignedStateFallback = false;
   try {
     const stateParam = requestUrl.searchParams.get("state");
-    const stateCookie = parseCookies(request)[TIKTOK_OAUTH_STATE_COOKIE];
+    const stateCookie = parseCookies(request)[getTikTokOAuthStateCookieName()];
     state = stateCookie
       ? validateTikTokOAuthState(stateParam, stateCookie)
       : validateSignedTikTokOAuthState(stateParam);

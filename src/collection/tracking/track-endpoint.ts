@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { getSourceOperationBlockReason } from "@/collection/connectors/registry";
 import { ingestWebsiteEvent } from "@/collection/tracking/website-event-ingestion";
 import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import type { JsonRecord, Source } from "@/storage/db/schema";
@@ -92,6 +93,10 @@ export async function ingestTrackEvent(input: unknown, meta: { origin?: string |
   const source = findTrackingSource(parsed, sources);
   if (!source) {
     throw new TrackingIngestionError("Website tracker source was not found.", 404);
+  }
+  const blocked = getSourceOperationBlockReason(source);
+  if (blocked) {
+    throw new TrackingIngestionError(blocked, 409);
   }
   if (source.source_type_key !== "website") {
     throw new TrackingIngestionError("The selected source does not accept website tracker events.", 404);

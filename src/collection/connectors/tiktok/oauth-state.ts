@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-export const TIKTOK_OAUTH_STATE_COOKIE = "__Host-moonarq_tiktok_oauth";
+export const TIKTOK_OAUTH_STATE_COOKIE = "moonarq_tiktok_oauth";
+export const SECURE_TIKTOK_OAUTH_STATE_COOKIE = "__Host-moonarq_tiktok_oauth";
 export const TIKTOK_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 
 type TikTokOAuthStatePayload = {
@@ -19,6 +20,10 @@ export class TikTokOAuthStateError extends Error {
     super(message);
     this.name = "TikTokOAuthStateError";
   }
+}
+
+export function getTikTokOAuthStateCookieName(env: NodeJS.ProcessEnv = process.env) {
+  return env.NODE_ENV === "production" ? SECURE_TIKTOK_OAUTH_STATE_COOKIE : TIKTOK_OAUTH_STATE_COOKIE;
 }
 
 function base64UrlEncode(value: string | Buffer) {

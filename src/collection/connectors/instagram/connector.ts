@@ -88,6 +88,9 @@ export const instagramConnector: ConnectorDefinition = {
   description: "Meta/Instagram Graph API connector for source-specific Instagram account, media, and insight metrics.",
   category: "Content",
   icon: "Instagram",
+  availability: "live",
+  setupKind: "oauth",
+  defaultSyncMode: "hourly",
   urlPatterns: [/^https:\/\/(www\.)?instagram\.com\/[^/?#]+/i],
   authType: "meta_graph_api_oauth",
   docsUrl: "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/",
@@ -141,6 +144,8 @@ export const instagramConnector: ConnectorDefinition = {
     return {
       sourceTypeKey: "instagram",
       displayName: account === AUTO_LAB_INSTAGRAM_USERNAME ? "Auto Lab Instagram" : "Instagram",
+      availability: "live",
+      setupKind: "oauth",
       confidence: 0.94,
       normalizedUrl: `https://www.instagram.com/${account}`,
       accountName: account,

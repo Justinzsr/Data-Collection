@@ -4,23 +4,69 @@ import { dashboardAuthCookie, loginDashboard } from "./auth";
 test("dashboard shows platform modules and sparklines", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard");
-  await expect(page.getByRole("heading", { name: "MoonArq Data Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "MoonArq command center" })).toBeVisible();
   await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" }).first()).toBeVisible();
   await expect(page.locator("article").filter({ hasText: "MoonArq Supabase" }).first()).toBeVisible();
-  await expect(page.getByText("MoonArq TikTok").first()).toBeVisible();
-  await expect(page.getByText("MoonArq Instagram").first()).toBeVisible();
-  await expect(page.getByText("MoonArq Commerce").first()).toBeVisible();
+  await expect(page.locator("summary").filter({ hasText: "TikTok official API" })).toBeVisible();
+  await expect(page.locator("summary").filter({ hasText: "Instagram Graph API" })).toBeVisible();
+  await expect(page.getByText("Planned and custom sources")).toBeVisible();
   await expect(page.getByTestId("platform-sparkline").first()).toBeVisible();
+});
+
+test("dashboard puts graphs, platform summaries, and health metrics above the fold", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard");
+
+  const placement = await page.evaluate(() => ({
+    scrollY: window.scrollY,
+    stageTop: document.querySelector<HTMLElement>("[data-testid='dashboard-data-stage']")?.getBoundingClientRect().top ?? Infinity,
+    chartBottom: document.querySelector<HTMLElement>("[data-testid='overview-chart']")?.getBoundingClientRect().bottom ?? Infinity,
+    summaryBottoms: ["website", "supabase", "tiktok", "instagram"].map((type) =>
+      document.querySelector<HTMLElement>(`[data-testid='overview-module-summary-${type}']`)?.getBoundingClientRect().bottom ?? Infinity,
+    ),
+    kpiBottoms: Array.from(document.querySelectorAll<HTMLElement>("[data-testid='overview-kpi']")).map((element) => element.getBoundingClientRect().bottom),
+    viewportHeight: window.innerHeight,
+  }));
+
+  expect(placement.scrollY).toBe(0);
+  expect(placement.stageTop).toBeLessThan(220);
+  expect(placement.chartBottom).toBeLessThan(placement.viewportHeight);
+  expect(placement.summaryBottoms).toHaveLength(4);
+  expect(placement.summaryBottoms.every((bottom) => bottom < placement.viewportHeight)).toBe(true);
+  expect(placement.kpiBottoms).toHaveLength(4);
+  expect(placement.kpiBottoms.every((bottom) => bottom < placement.viewportHeight)).toBe(true);
+});
+
+test("platform modules keep the overview visible and disclose detail on demand", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard");
+
+  for (const type of ["website", "supabase", "tiktok", "instagram"]) {
+    await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", false);
+    await expect(page.getByTestId(`overview-module-summary-${type}`)).toBeVisible();
+    await expect(page.getByTestId(`overview-module-detail-${type}`)).toBeHidden();
+  }
+
+  const website = page.getByTestId("overview-module-website");
+  await page.getByTestId("overview-module-summary-website").click();
+  await expect(website).toHaveJSProperty("open", true);
+  await expect(page.getByTestId("overview-module-detail-website")).toBeVisible();
+  await expect(page.getByText("Page views", { exact: true }).first()).toBeVisible();
+  await page.getByTestId("overview-module-summary-website").click();
+  await expect(website).toHaveJSProperty("open", false);
 });
 
 test("add source wizard detects Supabase and Website and shows credentials after save", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard/sources/new");
   await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
-  await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://xxxxx.supabase.co");
-  await page.getByRole("button", { name: "Detect" }).click();
-  await expect(page.getByText("Supabase").first()).toBeVisible();
-  await page.getByRole("button", { name: "Save Source" }).click();
+  await page.getByRole("button", { name: /Supabase/ }).click();
+  await page.getByLabel("Public source URL").fill("https://xxxxx.supabase.co");
+  await page.getByRole("button", { name: "Check URL" }).click();
+  await page.getByRole("button", { name: "Review connection" }).click();
+  await page.getByRole("button", { name: "Save source" }).click();
+  await page.getByText("Additional encrypted settings").click();
   await expect(page.getByLabel("Service role key")).toBeVisible();
   await expect(page.getByLabel("Anon key")).toHaveCount(0);
   await page.getByLabel("Service role key").fill("fake-service-role-value");
@@ -29,32 +75,33 @@ test("add source wizard detects Supabase and Website and shows credentials after
 
   await page.goto("/w/moonarq/dashboard/sources/new");
   await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
-  await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://moonarqstudio.com");
-  await page.getByRole("button", { name: "Detect" }).click();
-  await expect(page.getByText("MoonArq Website / Vercel").first()).toBeVisible();
-  await page.getByRole("button", { name: /Website Tracker fallback/ }).click();
-  await page.getByRole("button", { name: "Save Source" }).click();
-  await expect(page.getByText("Website Tracker fallback / helper")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Source Snippet" })).toBeVisible();
+  await page.getByRole("button", { name: /Website Tracker/ }).click();
+  await page.getByRole("button", { name: /First-party Website Tracker/ }).click();
+  await page.getByRole("button", { name: "Check URL" }).click();
+  await page.getByRole("button", { name: "Review connection" }).click();
+  await page.getByRole("button", { name: "Save source" }).click();
+  await expect(page.getByText("First-party tracker").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open tracker snippet" })).toBeVisible();
 });
 
 test("add source wizard prepares MoonArq Instagram OAuth", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard/sources/new");
   await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
-  await page.getByLabel("Paste a MoonArq source link or identifier").fill("https://www.instagram.com/moonarqstudio");
-  await page.getByRole("button", { name: "Detect" }).click();
-  await expect(page.getByText("Instagram").first()).toBeVisible();
-  await page.getByRole("button", { name: "Save Source" }).click();
+  await page.getByRole("button", { name: /Instagram/ }).click();
+  await page.getByRole("button", { name: "Check URL" }).click();
+  await page.getByRole("button", { name: "Review connection" }).click();
+  await page.getByRole("button", { name: "Save source" }).click();
   const connect = page.getByRole("link", { name: "Connect Instagram" });
   await expect(connect).toBeVisible();
   await expect(connect).toHaveAttribute("href", /dataSpaceSlug=moonarq/);
-  await expect(page.getByLabel("Instagram account ID")).toBeVisible();
+  await expect(page.getByLabel("Instagram account ID")).toHaveCount(0);
 });
 
 test("events page shows non-empty JavaScript tracking snippet", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard/events");
+  await page.getByText("Endpoints, tracking snippets, and setup").click();
   await expect(page.getByText("Lightweight JavaScript snippet")).toBeVisible();
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
   await expect(page.getByText("moonarq_anonymous_id").first()).toBeVisible();
@@ -103,13 +150,16 @@ test("source detail pages show setup, credentials, actions, and website snippets
   await page.goto("/w/moonarq/dashboard/sources/22222222-2222-4222-8222-222222222222");
   await expect(page.getByRole("heading", { name: "MoonArq Supabase" })).toBeVisible();
   await expect(page.getByText("Connection state")).toBeVisible();
+  await page.getByText("Credentials and connection settings").click();
   await expect(page.getByLabel("Service role key")).toBeVisible();
   await expect(page.getByRole("button", { name: "Test Connection" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Run Sync Now" })).toBeVisible();
-  await expect(page.getByText("MoonArq public.profiles setup")).toBeVisible();
+  await page.getByText("Instructions, endpoints, and code snippets").click();
+  await expect(page.getByText(/public\.profiles/).first()).toBeVisible();
 
   await page.goto("/w/moonarq/dashboard/sources/11111111-1111-4111-8111-111111111111");
-  await expect(page.getByRole("heading", { name: "MoonArq Website" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "MoonArq Website / Vercel" })).toBeVisible();
+  await page.getByText("Instructions, endpoints, and code snippets").click();
   await expect(page.getByText("Lightweight JavaScript snippet")).toBeVisible();
   await expect(page.getByText("window.moonarqTrack").first()).toBeVisible();
 });
@@ -118,9 +168,13 @@ test("sources page supports sync controls", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard/sources");
   await expect(page.getByRole("heading", { name: "MoonArq Source management" })).toBeVisible();
-  const supabaseCard = page.locator("article").filter({ hasText: "MoonArq Supabase" }).first();
+  const sourceContainer = page.getByTestId(
+    (await page.getByTestId("source-row-22222222-2222-4222-8222-222222222222").isVisible())
+      ? "source-row-22222222-2222-4222-8222-222222222222"
+      : "source-card-22222222-2222-4222-8222-222222222222",
+  );
   const responsePromise = page.waitForResponse((response) => response.url().includes("/api/sources/") && response.url().includes("/sync"));
-  await supabaseCard.getByRole("button", { name: /^Sync$/ }).click();
+  await sourceContainer.getByRole("button", { name: /^Sync$/ }).click();
   const response = await responsePromise;
   expect(response.status()).toBeLessThan(500);
   await expect(page.getByRole("main").getByText(/Sync (success|failed)/)).toBeVisible();

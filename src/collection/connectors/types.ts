@@ -3,13 +3,28 @@ import type {
   JsonRecord,
   MetricDefinition,
   Source,
+  SourceTypeDefinition,
   SourceTypeKey,
+  SyncMode,
   SyncTrigger,
 } from "@/storage/db/schema";
+import type { WebsiteEventIngestionInput } from "@/collection/tracking/website-event-ingestion";
+
+export type ConnectorAvailability = "live" | "planned";
+
+export type ConnectorSetupKind =
+  | "oauth"
+  | "credentials"
+  | "webhook"
+  | "tracker"
+  | "hybrid"
+  | "planned";
 
 export interface DetectionResult {
   sourceTypeKey: SourceTypeKey;
   displayName: string;
+  availability: ConnectorAvailability;
+  setupKind: ConnectorSetupKind;
   confidence: number;
   normalizedUrl: string | null;
   externalAccountId?: string | null;
@@ -38,6 +53,7 @@ export interface ConnectorContext {
 export interface SyncContext extends ConnectorContext {
   trigger: SyncTrigger;
   cursor?: JsonRecord | null;
+  webhookPayload?: JsonRecord | null;
 }
 
 export interface RawPayload {
@@ -83,6 +99,8 @@ export interface NormalizedMetricBundle {
 
 export interface SyncResult {
   rawPayloads: RawPayload[];
+  webEvents?: WebsiteEventIngestionInput[];
+  skippedReason?: string;
   cursorAfter?: JsonRecord | null;
   recordsFetched: number;
   recordsInserted?: number;
@@ -103,6 +121,9 @@ export interface ConnectorDefinition {
   description: string;
   category: string;
   icon: string;
+  availability: ConnectorAvailability;
+  setupKind: ConnectorSetupKind;
+  defaultSyncMode: SyncMode;
   urlPatterns: RegExp[];
   requiredFields: CredentialField[];
   optionalFields: CredentialField[];
@@ -115,4 +136,12 @@ export interface ConnectorDefinition {
   normalize(rawPayloads: RawPayload[], source: Source): Promise<NormalizedMetricBundle>;
   getMetricDefinitions(): MetricDefinition[];
   getSetupInstructions(source?: Source): string[];
+}
+
+export interface ConnectorSourceTypeDefinition extends SourceTypeDefinition {
+  availability: ConnectorAvailability;
+  setup_kind: ConnectorSetupKind;
+  default_sync_mode: SyncMode;
+  capabilities: ConnectorCapabilities;
+  setup_instructions: string[];
 }

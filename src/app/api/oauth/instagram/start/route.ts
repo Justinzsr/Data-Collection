@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { buildInstagramAuthorizationUrl, getInstagramOAuthConfigForSource } from "@/collection/connectors/instagram/graph-api";
 import {
   createInstagramOAuthState,
-  INSTAGRAM_OAUTH_STATE_COOKIE,
+  getInstagramOAuthStateCookieName,
   INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,
 } from "@/collection/connectors/instagram/oauth-state";
 import { safeInstagramReturnPath } from "@/collection/connectors/instagram/source-policy";
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
     const state = createInstagramOAuthState({ sourceId: source.id, dataSpaceSlug: dataSpace.slug, returnPath, metaAppProfile: config.profileKey });
     const response = NextResponse.redirect(buildInstagramAuthorizationUrl(config, state));
     response.cookies.set({
-      name: INSTAGRAM_OAUTH_STATE_COOKIE,
+      name: getInstagramOAuthStateCookieName(),
       value: state,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

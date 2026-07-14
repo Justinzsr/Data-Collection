@@ -1,9 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { ingestWebsiteEvent } from "@/collection/tracking/website-event-ingestion";
-import { recordChangeEventsForRawPayloads } from "@/storage/repositories/platform-change-events-repository";
-import { storeRawPayloads } from "@/storage/repositories/raw-ingestions-repository";
-import { markSourceSyncState } from "@/storage/repositories/sources-repository";
+import type { RawPayload } from "@/collection/connectors/types";
+import type { WebsiteEventIngestionInput } from "@/collection/tracking/website-event-ingestion";
 import type { JsonRecord, Source } from "@/storage/db/schema";
+
+export const VERCEL_DRAIN_WEBHOOK_PAYLOAD_KIND = "vercel_analytics_drain";
 
 type VercelDrainEvent = {
   schema?: string;
@@ -61,14 +61,103 @@ function parseBody(rawBody: string) {
     .map((line) => JSON.parse(line) as VercelDrainEvent);
 }
 
-function verifySignature(rawBody: string, signature: string | null, secret: string | undefined) {
-  if (!secret) return true;
+function verifySignature(rawBody: string, signature: string | null, secret: string) {
   if (!signature) return false;
   const expected = createHmac("sha1", secret).update(Buffer.from(rawBody, "utf8")).digest("hex");
   const expectedBuffer = Buffer.from(expected);
   const signatureBuffer = Buffer.from(signature);
   if (expectedBuffer.length !== signatureBuffer.length) return false;
   return timingSafeEqual(expectedBuffer, signatureBuffer);
+}
+
+export class VercelDrainIngestionError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = "VercelDrainIngestionError";
+  }
+}
+
+function assertVercelDrainPayload(rawBody: string) {
+  let events: VercelDrainEvent[];
+  try {
+    events = parseBody(rawBody);
+  } catch {
+    throw new VercelDrainIngestionError("Vercel Drain payload is not valid JSON or NDJSON.", 400);
+  }
+  if (events.length === 0) {
+    throw new VercelDrainIngestionError("Vercel Drain payload does not contain any events.", 400);
+  }
+  for (const event of events) {
+    if (typeof event !== "object" || event === null || Array.isArray(event)) {
+      throw new VercelDrainIngestionError("Vercel Drain events must be JSON objects.", 400);
+    }
+    if (event.eventType !== "pageview" && event.eventType !== "event") {
+      throw new VercelDrainIngestionError("Vercel Drain eventType must be pageview or event.", 400);
+    }
+    if (typeof event.timestamp !== "number" || !Number.isFinite(event.timestamp) || Number.isNaN(new Date(event.timestamp).getTime())) {
+      throw new VercelDrainIngestionError("Vercel Drain event timestamp is invalid.", 400);
+    }
+    if (event.path !== undefined && typeof event.path !== "string") {
+      throw new VercelDrainIngestionError("Vercel Drain event path is invalid.", 400);
+    }
+    if (event.origin !== undefined && typeof event.origin !== "string") {
+      throw new VercelDrainIngestionError("Vercel Drain event origin is invalid.", 400);
+    }
+    if (event.eventData !== undefined && typeof event.eventData !== "string") {
+      throw new VercelDrainIngestionError("Vercel Drain eventData must be a JSON string.", 400);
+    }
+  }
+}
+
+export function assertVercelDrainRequestCanIngest(input: {
+  source: Source;
+  rawBody: string;
+  signature: string | null;
+  signatureSecret?: string;
+}) {
+  if (input.source.source_type_key !== "vercel_web_analytics_drain") {
+    throw new VercelDrainIngestionError("Source does not accept Vercel Analytics Drain events.", 404);
+  }
+
+  if (input.source.status === "disabled") {
+    throw new VercelDrainIngestionError("This source is disabled and cannot receive webhook events.", 409);
+  }
+
+  const secret = input.signatureSecret?.trim();
+  if (!secret) {
+    throw new VercelDrainIngestionError(
+      "Vercel Drain signature verification is not configured for this source.",
+      503,
+    );
+  }
+
+  if (!verifySignature(input.rawBody, input.signature, secret)) {
+    throw new VercelDrainIngestionError("Invalid Vercel drain signature.", 403);
+  }
+  assertVercelDrainPayload(input.rawBody);
+}
+
+export function createVercelDrainWebhookPayload(rawBody: string, signature: string): JsonRecord {
+  return {
+    kind: VERCEL_DRAIN_WEBHOOK_PAYLOAD_KIND,
+    rawBody,
+    signature,
+  };
+}
+
+export function readVercelDrainWebhookPayload(payload: JsonRecord | null | undefined) {
+  if (
+    payload?.kind !== VERCEL_DRAIN_WEBHOOK_PAYLOAD_KIND ||
+    typeof payload.rawBody !== "string" ||
+    typeof payload.signature !== "string" ||
+    !payload.signature
+  ) {
+    throw new Error("Verified Vercel Drain webhook payload is missing or invalid.");
+  }
+  return { rawBody: payload.rawBody, signature: payload.signature };
 }
 
 function resolvedUrl(event: VercelDrainEvent, source: Source) {
@@ -117,53 +206,48 @@ function eventProperties(event: VercelDrainEvent) {
   } as JsonRecord;
 }
 
-export async function ingestVercelAnalyticsDrain(input: {
+export function prepareVercelAnalyticsDrain(input: {
   source: Source;
   rawBody: string;
   signature: string | null;
   signatureSecret?: string;
 }) {
-  if (!verifySignature(input.rawBody, input.signature, input.signatureSecret)) {
-    throw new Error("Invalid Vercel drain signature.");
-  }
+  assertVercelDrainRequestCanIngest(input);
 
   const events = parseBody(input.rawBody);
-  const rawPayloads = events.map((event) => ({
-    externalId: `${event.eventType ?? "event"}:${event.timestamp ?? Date.now()}:${event.deviceId ?? "unknown"}:${event.sessionId ?? "unknown"}`,
-    fetchedAt: new Date().toISOString(),
+  const fetchedAt = new Date().toISOString();
+  const rawPayloads: RawPayload[] = events.map((event, index) => ({
+    externalId: `${event.eventType ?? "event"}:${event.timestamp ?? "missing"}:${event.deviceId ?? "unknown"}:${event.sessionId ?? "unknown"}:${index}`,
+    fetchedAt,
     payload: event as JsonRecord,
     cursor: { timestamp: event.timestamp ?? null },
   }));
-  await storeRawPayloads(input.source, rawPayloads);
-  await recordChangeEventsForRawPayloads(input.source, rawPayloads);
 
-  const stored = [];
-  for (const event of events) {
+  const webEvents: WebsiteEventIngestionInput[] = events.map((event) => {
     const occurredAt =
       typeof event.timestamp === "number" ? new Date(event.timestamp).toISOString() : new Date().toISOString();
-    stored.push(
-      await ingestWebsiteEvent({
-        sourceTypeKey: "vercel_web_analytics_drain",
-        sourceId: input.source.id,
-        publicTrackingKey: null,
-        anonymousId: String(event.deviceId ?? "vercel-device"),
-        sessionId: String(event.sessionId ?? "vercel-session"),
-        eventName: eventName(event),
-        path: event.path ?? "/",
-        url: resolvedUrl(event, input.source),
-        referrer: event.referrer ?? null,
-        userAgent: event.clientName ? `${event.clientName}${event.clientVersion ? ` ${event.clientVersion}` : ""}` : null,
-        country: event.country ?? null,
-        deviceType: event.deviceType ?? null,
-        properties: eventProperties(event),
-        occurredAt,
-      }),
-    );
-  }
+    return {
+      sourceTypeKey: "vercel_web_analytics_drain",
+      sourceId: input.source.id,
+      publicTrackingKey: null,
+      anonymousId: String(event.deviceId ?? "vercel-device"),
+      sessionId: String(event.sessionId ?? "vercel-session"),
+      eventName: eventName(event),
+      path: event.path ?? "/",
+      url: resolvedUrl(event, input.source),
+      referrer: event.referrer ?? null,
+      userAgent: event.clientName ? `${event.clientName}${event.clientVersion ? ` ${event.clientVersion}` : ""}` : null,
+      country: event.country ?? null,
+      deviceType: event.deviceType ?? null,
+      properties: eventProperties(event),
+      occurredAt,
+    };
+  });
 
-  await markSourceSyncState(input.source.id, "webhook", { ok: true });
   return {
-    count: stored.length,
-    events: stored,
+    count: webEvents.length,
+    webEvents,
+    rawPayloads,
+    cursorAfter: { fetchedAt, eventCount: webEvents.length } satisfies JsonRecord,
   };
 }

@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ConnectorDefinition, RawPayload } from "@/collection/connectors/types";
+import {
+  prepareVercelAnalyticsDrain,
+  readVercelDrainWebhookPayload,
+} from "@/collection/tracking/vercel-drain-endpoint";
 import type { MetricDefinition, Source } from "@/storage/db/schema";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 
@@ -13,18 +17,22 @@ export const vercelWebAnalyticsDrainConnector: ConnectorDefinition = {
   description: "Official Vercel Web Analytics Drain endpoint for MoonArq's existing Vercel-hosted website analytics.",
   category: "Website",
   icon: "Orbit",
+  availability: "live",
+  setupKind: "webhook",
+  defaultSyncMode: "webhook",
   urlPatterns: [],
-  requiredFields: [],
-  optionalFields: [
+  requiredFields: [
     {
       key: "drain_signature_secret",
       label: "Drain signature secret",
-      description: "Optional but recommended. Used to verify the x-vercel-signature header server-side.",
-      required: false,
+      description: "Required. Used to verify every x-vercel-signature header server-side before ingestion.",
+      required: true,
       secret: true,
       type: "password",
       placeholder: "Generated in Vercel Drains",
     },
+  ],
+  optionalFields: [
     {
       key: "vercel_project_id",
       label: "Vercel project id",
@@ -49,12 +57,21 @@ export const vercelWebAnalyticsDrainConnector: ConnectorDefinition = {
     return null;
   },
   async testConnection(ctx) {
+    if (!ctx.credentials.drain_signature_secret?.trim()) {
+      return {
+        ok: false,
+        status: "needs_credentials",
+        message: "A Vercel Drain signature secret is required before this endpoint can accept events.",
+        details: {
+          webhookUrl: ctx.source.webhook_url,
+          sourceMode: "vercel_web_analytics_drain",
+        },
+      };
+    }
     return {
       ok: true,
       status: ctx.source.status === "demo" ? "demo" : "connected",
-      message: ctx.credentials.drain_signature_secret
-        ? "Drain endpoint is configured with signature verification."
-        : "Drain endpoint is ready. Add the optional signature secret in Vercel for request verification.",
+      message: "Drain endpoint is configured with required signature verification.",
       details: {
         webhookUrl: ctx.source.webhook_url,
         sourceMode: "vercel_web_analytics_drain",
@@ -62,6 +79,23 @@ export const vercelWebAnalyticsDrainConnector: ConnectorDefinition = {
     };
   },
   async sync(ctx) {
+    if (ctx.trigger === "webhook") {
+      const payload = readVercelDrainWebhookPayload(ctx.webhookPayload);
+      const result = prepareVercelAnalyticsDrain({
+        source: ctx.source,
+        rawBody: payload.rawBody,
+        signature: payload.signature,
+        signatureSecret: ctx.credentials.drain_signature_secret,
+      });
+      return {
+        rawPayloads: result.rawPayloads,
+        webEvents: result.webEvents,
+        cursorAfter: result.cursorAfter,
+        recordsFetched: result.count,
+        message: `Processed ${result.count} verified Vercel drain event(s).`,
+      };
+    }
+
     const fetchedAt = new Date().toISOString();
     const payload = {
       type: "vercel_web_analytics_drain_health",
@@ -86,8 +120,11 @@ export const vercelWebAnalyticsDrainConnector: ConnectorDefinition = {
   },
   async normalize(rawPayloads: RawPayload[], source: Source) {
     const today = new Date().toISOString().slice(0, 10);
+    const healthPayloads = rawPayloads.filter(
+      (rawPayload) => rawPayload.payload.type === "vercel_web_analytics_drain_health",
+    );
     return {
-      metrics: rawPayloads.map(() => ({
+      metrics: healthPayloads.map(() => ({
         date: today,
         sourceId: source.id,
         sourceTypeKey: "vercel_web_analytics_drain" as const,
@@ -106,7 +143,7 @@ export const vercelWebAnalyticsDrainConnector: ConnectorDefinition = {
       "Use this mode when the existing MoonArq Vercel project has Web Analytics Drains available on Pro or Enterprise.",
       `Drain endpoint: ${source?.webhook_url ?? "/api/webhooks/vercel/analytics-drain/{sourceId}"}`,
       "In Vercel, add a Web Analytics Drain with JSON or NDJSON delivery and point it at the endpoint above.",
-      "Set a Signature Verification Secret in Vercel and save the same secret here as an encrypted per-source credential if you want request verification.",
+      "Set a Signature Verification Secret in Vercel and save the same secret here as a required encrypted per-source credential. Unsigned requests are rejected.",
       "If Vercel Drain mode is active, keep the Website Tracker fallback disabled for this monitored source to avoid double counting.",
     ];
   },

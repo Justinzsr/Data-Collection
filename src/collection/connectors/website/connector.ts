@@ -20,6 +20,9 @@ export const websiteConnector: ConnectorDefinition = {
   description: "First-party tracker fallback/helper for MoonArq's website when Vercel Drain is unavailable or when custom event helpers are needed.",
   category: "Website",
   icon: "Globe2",
+  availability: "live",
+  setupKind: "tracker",
+  defaultSyncMode: "webhook",
   urlPatterns: [/^https?:\/\/.+/i],
   requiredFields: [],
   optionalFields: [
@@ -50,6 +53,8 @@ export const websiteConnector: ConnectorDefinition = {
     return {
       sourceTypeKey: "website",
       displayName: "MoonArq Website / Vercel",
+      availability: "live",
+      setupKind: "tracker",
       confidence: isMoonArq ? 0.99 : 0.6,
       normalizedUrl: normalized,
       reasons: isMoonArq ? ["MoonArq website URL detected."] : ["HTTP(S) URL can be instrumented with MoonArq first-party tracking."],

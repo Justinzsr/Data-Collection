@@ -26,49 +26,47 @@ export function CommandCenterHeader({
   const active = modules.filter((module) => module.sourceId && module.status !== "disabled").length;
   const warnings = modules.filter((module) => ["needs_credentials", "warning", "error"].includes(module.status)).length;
   return (
-    <header className="grid gap-5 rounded-lg border border-cyan-200/15 bg-[linear-gradient(135deg,rgba(8,47,73,0.65),rgba(15,23,42,0.7)_48%,rgba(20,83,45,0.24))] p-4 shadow-[0_24px_90px_rgba(8,145,178,0.16)] sm:p-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <header
+      className="glass flex flex-col gap-3 overflow-hidden rounded-xl p-3 lg:flex-row lg:items-center lg:justify-between"
+      data-testid="dashboard-overview"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-3 lg:justify-start">
         <div className="min-w-0">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100/75">{dataSpaceName} monitored sources</p>
-          <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">{dataSpaceName} Data Command Center</h1>
-          <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-300">
-            This dashboard monitors sources assigned to {dataSpaceName}. The Data Hub app has its own runtime and storage behind the scenes, while each module shown here is server-scoped to the selected data space.
-          </p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-100/65">Live performance</p>
+          <h1 className="mt-0.5 truncate text-lg font-semibold tracking-[-0.025em] text-white sm:text-xl">{dataSpaceName} command center</h1>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <RunAllDueButton dataSpaceSlug={dataSpaceSlug} />
-          <LinkButton href={`${basePath}/sources/new`} variant="primary">
-            <Plus className="h-4 w-4" />
-            Add Source
-          </LinkButton>
-        </div>
+        <p className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[11px] text-slate-400 lg:hidden">
+          <RadioTower className="h-3.5 w-3.5 text-cyan-200" />
+          <span><span className="text-slate-100">{active}</span> live · <span className={warnings ? "text-amber-200" : "text-slate-100"}>{warnings}</span> alerts</span>
+        </p>
       </div>
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap gap-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 lg:justify-center">
+        <nav className="flex rounded-lg border border-white/10 bg-black/20 p-1" aria-label="Dashboard date range">
           {ranges.map((item) => (
-            <LinkButton key={item.key} href={`${basePath}?range=${item.key}`} variant={range === item.key ? "primary" : "secondary"} className="px-3">
+            <LinkButton
+              key={item.key}
+              href={`${basePath}?range=${item.key}`}
+              variant={range === item.key ? "primary" : "ghost"}
+              className="min-h-8 rounded-md border-0 px-2.5 py-1 text-xs"
+              aria-current={range === item.key ? "page" : undefined}
+            >
               {item.label}
             </LinkButton>
           ))}
-          <button className="inline-flex min-h-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-400" disabled>
-            Custom
-          </button>
-        </div>
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-          <select className="min-h-10 min-w-0 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-slate-200">
-            <option>All sources</option>
-            {modules
-              .filter((module) => module.sourceId)
-              .map((module) => (
-                <option key={module.sourceId ?? module.sourceTypeKey}>{module.displayName}</option>
-              ))}
-          </select>
-          <p className="flex items-center gap-2 text-sm text-slate-400">
-            <RadioTower className="h-4 w-4 text-cyan-200" />
-            {active} active monitored source{active === 1 ? "" : "s"} · {warnings} setup signal{warnings === 1 ? "" : "s"}
-          </p>
-        </div>
+        </nav>
+        <p className="hidden items-center gap-1.5 text-xs text-slate-400 lg:flex">
+          <RadioTower className="h-3.5 w-3.5 text-cyan-200" />
+          <span><span className="text-slate-100">{active}</span> live · <span className={warnings ? "text-amber-200" : "text-slate-100"}>{warnings}</span> alerts</span>
+        </p>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap gap-2">
+        <RunAllDueButton dataSpaceSlug={dataSpaceSlug} compact />
+        <LinkButton href={`${basePath}/sources/new`} variant="primary" className="min-h-9 px-3 text-xs">
+          <Plus className="h-3.5 w-3.5" />
+          Add Source
+        </LinkButton>
       </div>
     </header>
   );

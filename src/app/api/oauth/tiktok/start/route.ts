@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { buildTikTokAuthorizationUrl, getTikTokOAuthConfig } from "@/collection/connectors/tiktok/api";
 import {
   createTikTokOAuthState,
-  TIKTOK_OAUTH_STATE_COOKIE,
+  getTikTokOAuthStateCookieName,
   TIKTOK_OAUTH_STATE_MAX_AGE_SECONDS,
 } from "@/collection/connectors/tiktok/oauth-state";
 import { assertTikTokSource, getTikTokAppProfileKeyForSource, safeTikTokReturnPath } from "@/collection/connectors/tiktok/source-policy";
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     const state = createTikTokOAuthState({ sourceId: source.id, dataSpaceSlug: dataSpace.slug, returnPath, tiktokAppProfile: config.profileKey });
     const response = NextResponse.redirect(buildTikTokAuthorizationUrl(config, state));
     response.cookies.set({
-      name: TIKTOK_OAUTH_STATE_COOKIE,
+      name: getTikTokOAuthStateCookieName(),
       value: state,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

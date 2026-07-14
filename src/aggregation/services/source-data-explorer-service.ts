@@ -1,6 +1,7 @@
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
+import { getDemoNow } from "@/storage/seed/demo-data";
 import { endOfAppDateUtc, formatAppDateTime, getAppDateRange, startOfAppDateUtc, type AppDateRangeKey } from "@/storage/runtime/app-time";
 
 export type ExplorerTab = "website" | "supabase" | "sync_runs" | "raw_ingestions" | "metrics_daily" | "connector_events" | "platform_change_events";
@@ -42,8 +43,8 @@ function selectedSource(sourceId?: string) {
   return sourceId && sourceId !== "all" ? sourceId : undefined;
 }
 
-function rangeFor(range: AppDateRangeKey) {
-  return getAppDateRange(range);
+function rangeFor(range: AppDateRangeKey, now?: Date) {
+  return getAppDateRange(range, now);
 }
 
 function paginate<T>(rows: T[], page: number, pageSize: number) {
@@ -138,7 +139,7 @@ function demoRows(tab: ExplorerTab, options: { range: AppDateRangeKey; sourceId?
   const scopedSources = options.dataSpaceId ? store.sources.filter((source) => source.data_space_id === options.dataSpaceId) : store.sources;
   const scopedSourceIds = new Set(scopedSources.map((source) => source.id));
   const names = sourceNames(scopedSources);
-  const range = rangeFor(options.range);
+  const range = rangeFor(options.range, getDemoNow());
   const sourceId = selectedSource(options.sourceId);
   if (tab === "website") return paginate(store.webEvents.filter((event) => event.source_id && scopedSourceIds.has(event.source_id) && (!sourceId || event.source_id === sourceId) && event.occurred_at >= startOfAppDateUtc(range.startDate) && event.occurred_at <= endOfAppDateUtc(range.endDate)).map((event) => ({ id: event.id, occurred_at_pt: formatAppDateTime(event.occurred_at), event_name: event.event_name, path: event.path, referrer: event.referrer ?? "direct", country: event.country ?? "Unknown", device_type: event.device_type ?? "Unknown", browser_client: event.user_agent ?? "Unknown", source_mode: "Website Tracker", payload_hash: null, json: event.properties })), options.page, options.pageSize + 1);
   if (tab === "supabase" || tab === "metrics_daily") return paginate(store.metricsDaily.filter((metric) => metric.source_id && scopedSourceIds.has(metric.source_id) && (!sourceId || metric.source_id === sourceId) && metric.date >= range.startDate && metric.date <= range.endDate).filter((metric) => tab === "supabase" ? metric.source_type_key === "supabase" : true).map((metric) => ({ id: metric.id, date_pt: metric.date, source: names.get(metric.source_id ?? "") ?? metric.source_type_key, metric_key: metric.metric_key, metric_value: metric.metric_value, provider: typeof metric.dimensions.provider === "string" ? metric.dimensions.provider : "", users_total: metric.metric_key === "users_total" ? metric.metric_value : null, confirmed_users: metric.metric_key === "confirmed_users" ? metric.metric_value : null, sync_run_id: "", dimensions: preview(metric.dimensions), json: metric.dimensions })), options.page, options.pageSize + 1);

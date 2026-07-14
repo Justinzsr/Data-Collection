@@ -122,7 +122,7 @@ function makeSources(): Source[] {
         public_tracking_key: "mq_demo_public_website",
         website_mode: "website",
         monitored_source: "moonarq_website",
-        allowed_origins: ["https://moonarqstudio.com", "http://127.0.0.1:3100", "http://localhost:3100"],
+        allowed_origins: ["https://moonarqstudio.com", "http://127.0.0.1:4000", "http://localhost:4000"],
       },
     }),
     source({
@@ -231,8 +231,12 @@ function makeMetrics(): MetricDaily[] {
 }
 
 function makeSyncRuns(sources: Source[]): SyncRun[] {
+  const runnableSources = sources.filter(
+    (sourceItem) => sourceItem.status !== "disabled" && sourceItem.metadata.future !== true,
+  );
+  if (runnableSources.length === 0) return [];
   return Array.from({ length: 20 }, (_, index) => {
-    const sourceItem = sources[index % sources.length];
+    const sourceItem = runnableSources[index % runnableSources.length];
     const started = new Date(getDemoNow().getTime() - (index + 1) * 38 * 60_000);
     const failed = index === 6;
     return {

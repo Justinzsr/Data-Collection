@@ -1,11 +1,12 @@
 import {
   Braces,
+  BookOpen,
   Camera,
+  ChevronDown,
   DatabaseZap,
   ExternalLink,
   FileSpreadsheet,
   Globe2,
-  Play,
   Rocket,
   ShoppingBag,
   Video,
@@ -24,6 +25,7 @@ const icons = {
   shopify: ShoppingBag,
   tiktok: Video,
   instagram: Camera,
+  xiaohongshu: BookOpen,
   custom_api: Braces,
   custom_csv: FileSpreadsheet,
 };
@@ -35,6 +37,7 @@ const tones = {
   shopify: "amber",
   tiktok: "rose",
   instagram: "indigo",
+  xiaohongshu: "rose",
   custom_api: "cyan",
   custom_csv: "teal",
 } as const;
@@ -55,91 +58,109 @@ function formatTime(value: string | null) {
 export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", dataSpaceSlug }: { module: PlatformModule; basePath?: string; dataSpaceSlug?: string }) {
   const Icon = icons[module.sourceTypeKey];
   const tone = tones[module.sourceTypeKey];
+  const detailCount = module.secondaryMetrics.length + module.insights.length;
+
   return (
-    <article className="glass group grid min-h-[27rem] min-w-0 gap-4 rounded-lg p-4 transition duration-200 hover:-translate-y-0.5 hover:border-cyan-200/30 hover:shadow-[0_24px_90px_rgba(8,145,178,0.18)]">
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] shadow-[inset_0_0_24px_rgba(255,255,255,0.04)]">
-            <Icon className="h-5 w-5 text-cyan-100" />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">{module.platformLabel}</p>
-            <p className="truncate text-xs text-slate-500">{module.displayName}</p>
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          <Badge tone={statusTone(module.status)}>{module.status}</Badge>
-          <Badge tone="slate">{module.sourceModeLabel}</Badge>
-        </div>
-      </div>
-
-      <div className="min-w-0">
-        <div className="flex items-end justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-500">{module.primaryMetric.label}</p>
-            <p className="mt-1 truncate text-3xl font-semibold text-white">{formatMetric(module.primaryMetric.value, module.primaryMetric.unit)}</p>
-          </div>
-          <Badge tone={module.primaryMetric.deltaPercent === null ? "slate" : module.primaryMetric.deltaPercent >= 0 ? "green" : "rose"}>
-            {module.primaryMetric.deltaLabel}
-          </Badge>
-        </div>
-      </div>
-
-      <SparklineChart data={module.sparkline} tone={tone} label={module.platformLabel} />
-
-      <div className="grid grid-cols-2 gap-2">
-        {module.secondaryMetrics.map((metric) => (
-          <div key={metric.key} className="min-w-0 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-            <p className="truncate text-[11px] uppercase tracking-[0.12em] text-slate-500">{metric.label}</p>
-            <p className="mt-1 truncate text-sm font-semibold text-slate-100">{formatMetric(metric.value, metric.unit)}</p>
-          </div>
-        ))}
-      </div>
-
-      {module.insights.length > 0 ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          {module.insights.slice(0, 4).map((insight) => (
-            <div key={`${insight.label}-${insight.value}`} className="min-w-0 rounded-lg border border-white/10 bg-black/25 px-3 py-2">
-              <p className="truncate text-[11px] uppercase tracking-[0.12em] text-slate-500">{insight.label}</p>
-              <p className="mt-1 truncate text-sm text-slate-200">{insight.value}</p>
+    <article
+      className="overview-module-card glass min-w-0 overflow-hidden rounded-xl transition duration-200 hover:border-cyan-200/20"
+      data-platform-type={module.sourceTypeKey}
+    >
+      <details className="group" data-testid={`overview-module-${module.sourceTypeKey}`}>
+        <summary
+          className="cursor-pointer p-3 transition hover:bg-white/[0.025]"
+          data-testid={`overview-module-summary-${module.sourceTypeKey}`}
+        >
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.05]">
+                <Icon className="h-4 w-4 text-cyan-100" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold text-white">{module.platformLabel}</h2>
+                <p className="truncate text-[11px] text-slate-500">{module.displayName}</p>
+              </div>
             </div>
-          ))}
+            <Badge tone={statusTone(module.status)}>{module.status.replaceAll("_", " ")}</Badge>
+          </div>
+
+          <div className="mt-2.5 flex min-w-0 items-end justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-[10px] uppercase tracking-[0.14em] text-slate-500">{module.primaryMetric.label}</p>
+              <p className="mt-0.5 truncate text-2xl font-semibold tracking-[-0.03em] text-white">{formatMetric(module.primaryMetric.value, module.primaryMetric.unit)}</p>
+            </div>
+            <span className={module.primaryMetric.deltaPercent !== null && module.primaryMetric.deltaPercent < 0 ? "truncate text-[10px] text-rose-200" : "truncate text-[10px] text-emerald-200"}>
+              {module.primaryMetric.deltaLabel}
+            </span>
+          </div>
+
+          <div className="mt-1.5">
+            <SparklineChart data={module.sparkline} tone={tone} label={module.platformLabel} compact />
+          </div>
+
+          <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-white/[0.07] pt-2 text-[10px] text-slate-500">
+            <span className="truncate">{detailCount} detail signals · {module.sourceModeLabel}</span>
+            <span className="inline-flex shrink-0 items-center gap-1 text-slate-400">
+              Details
+              <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" aria-hidden="true" />
+            </span>
+          </div>
+        </summary>
+
+        <div
+          className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 border-t border-white/10 p-3 sm:p-4"
+          data-testid={`overview-module-detail-${module.sourceTypeKey}`}
+        >
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {module.secondaryMetrics.map((metric) => (
+              <div key={metric.key} className="min-w-0 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2">
+                <p className="truncate text-[10px] uppercase tracking-[0.12em] text-slate-500">{metric.label}</p>
+                <p className="mt-1 truncate text-sm font-semibold text-slate-100">{formatMetric(metric.value, metric.unit)}</p>
+              </div>
+            ))}
+          </div>
+
+          {module.insights.length > 0 ? (
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {module.insights.map((insight) => (
+                <div key={`${insight.label}-${insight.value}`} className="min-w-0 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                  <p className="truncate text-[10px] uppercase tracking-[0.12em] text-slate-500">{insight.label}</p>
+                  <p className="mt-1 break-words text-xs leading-5 text-slate-200">{insight.value}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div className="min-w-0 rounded-lg border border-white/10 bg-black/20 p-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Badge tone={module.setupState.severity === "ok" ? "green" : module.setupState.severity === "error" ? "rose" : module.setupState.severity === "warning" ? "amber" : "cyan"}>
+                  {module.setupState.label}
+                </Badge>
+                <span className="text-xs capitalize text-slate-500">{module.syncMode} sync</span>
+              </div>
+              <p className="text-xs leading-5 text-slate-400">{module.setupState.message}</p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                <span>Last: <span className="text-slate-300">{formatTime(module.lastSyncAt)}</span></span>
+                <span>Next: <span className="text-slate-300">{formatTime(module.nextSyncAt)}</span></span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {module.sourceId && module.actions.canRunSync ? <SyncActionButton sourceId={module.sourceId} dataSpaceSlug={dataSpaceSlug} compact /> : null}
+              {module.sourceId && module.actions.canViewDetails ? (
+                <LinkButton href={`${basePath}/sources/${module.sourceId}`} variant="secondary" className="min-h-9 px-3 text-xs">
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Source
+                </LinkButton>
+              ) : (
+                <LinkButton href={`${basePath}/sources/new`} variant="ghost" className="min-h-9 px-3 text-xs">
+                  Configure
+                </LinkButton>
+              )}
+            </div>
+          </div>
         </div>
-      ) : null}
-
-      <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Badge tone={module.setupState.severity === "ok" ? "green" : module.setupState.severity === "error" ? "rose" : module.setupState.severity === "warning" ? "amber" : "cyan"}>
-            {module.setupState.label}
-          </Badge>
-          <span className="text-xs capitalize text-slate-500">{module.syncMode} sync</span>
-        </div>
-        <p className="line-clamp-2 text-xs leading-5 text-slate-400">{module.setupState.message}</p>
-      </div>
-
-      <div className="grid gap-1 text-xs text-slate-500">
-        <p>Last sync: <span className="text-slate-300">{formatTime(module.lastSyncAt)}</span></p>
-        <p>Next sync: <span className="text-slate-300">{formatTime(module.nextSyncAt)}</span></p>
-      </div>
-
-      <div className="mt-auto flex flex-wrap gap-2">
-        {module.sourceId && module.actions.canRunSync ? <SyncActionButton sourceId={module.sourceId} dataSpaceSlug={dataSpaceSlug} compact /> : (
-          <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300/15 bg-slate-900/50 px-3 py-2 text-sm text-slate-500" disabled>
-            <Play className="h-4 w-4" />
-            Sync
-          </button>
-        )}
-        {module.sourceId && module.actions.canViewDetails ? (
-          <LinkButton href={`${basePath}/sources/${module.sourceId}`} variant="secondary" className="px-3">
-            <ExternalLink className="h-4 w-4" />
-            Details
-          </LinkButton>
-        ) : (
-          <LinkButton href={`${basePath}/sources/new`} variant="ghost" className="px-3">
-            Configure
-          </LinkButton>
-        )}
-      </div>
+      </details>
     </article>
   );
 }

@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto";
-import type { ConnectorDefinition, RawPayload } from "@/collection/connectors/types";
+import type { ConnectorDefinition } from "@/collection/connectors/types";
 import type { MetricDefinition, SourceTypeKey } from "@/storage/db/schema";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 
-interface FutureConnectorOptions {
+interface PlannedConnectorOptions {
   key: SourceTypeKey;
   displayName: string;
   description: string;
@@ -11,32 +10,33 @@ interface FutureConnectorOptions {
   icon: string;
   urlPatterns: RegExp[];
   authType: string;
-  requiredFields?: ConnectorDefinition["requiredFields"];
-  optionalFields?: ConnectorDefinition["optionalFields"];
   supportedMetrics: string[];
   detect: (inputUrl: string) => { confidence: number; normalizedUrl: string; reasons: string[]; accountName?: string | null } | null;
   setup: string[];
 }
 
-export function createFutureConnector(options: FutureConnectorOptions): ConnectorDefinition {
+export function createPlannedConnector(options: PlannedConnectorOptions): ConnectorDefinition {
   return {
     key: options.key,
     displayName: options.displayName,
     description: options.description,
     category: options.category,
     icon: options.icon,
+    availability: "planned",
+    setupKind: "planned",
+    defaultSyncMode: "manual",
     urlPatterns: options.urlPatterns,
-    requiredFields: options.requiredFields ?? [],
-    optionalFields: options.optionalFields ?? [],
+    requiredFields: [],
+    optionalFields: [],
     authType: options.authType,
     docsUrl: null,
     capabilities: {
       supportsWebhook: false,
-      supportsPolling: true,
-      supportsManualSync: true,
-      recommendedSyncFrequencyMinutes: 60,
+      supportsPolling: false,
+      supportsManualSync: false,
+      recommendedSyncFrequencyMinutes: 0,
       canBackfill: false,
-      canTestConnection: true,
+      canTestConnection: false,
     },
     detect(inputUrl) {
       const detected = options.detect(inputUrl);
@@ -44,62 +44,30 @@ export function createFutureConnector(options: FutureConnectorOptions): Connecto
       return {
         sourceTypeKey: options.key,
         displayName: options.displayName,
+        availability: "planned",
+        setupKind: "planned",
         confidence: detected.confidence,
         normalizedUrl: detected.normalizedUrl,
         accountName: detected.accountName,
         reasons: detected.reasons,
         requiredSetup: options.setup,
         possibleMetrics: options.supportedMetrics,
-        demoAvailable: true,
+        demoAvailable: false,
       };
     },
-    async testConnection(ctx) {
-      const hasRequired = options.requiredFields?.every((field) => !field.required || ctx.credentials[field.key]);
+    async testConnection() {
       return {
-        ok: true,
-        status: hasRequired ? "demo" : "needs_credentials",
-        message: `${options.displayName} is scaffolded for future official API work. Demo mode is available now.`,
-        details: { scaffoldOnly: true },
+        ok: false,
+        status: "unsupported",
+        message: `${options.displayName} is planned and is not available for connection testing or data collection yet.`,
+        details: { availability: "planned", collectsData: false },
       };
     },
-    async sync(ctx) {
-      const fetchedAt = new Date().toISOString();
-      const payload = {
-        connector: options.key,
-        mode: "scaffold_demo",
-        trigger: ctx.trigger,
-        message: `${options.displayName} connector scaffold is ready for official API implementation.`,
-      };
-      return {
-        rawPayloads: [
-          {
-            externalId: `${options.key}-scaffold-${ctx.source.id}`,
-            fetchedAt,
-            payload,
-            payloadHash: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
-            cursor: { fetchedAt, scaffoldOnly: true },
-          },
-        ],
-        cursorAfter: { fetchedAt, scaffoldOnly: true },
-        recordsFetched: 1,
-        message: `${options.displayName} scaffold sync recorded.`,
-      };
+    async sync() {
+      throw new Error(`${options.displayName} is planned and cannot sync data yet.`);
     },
-    async normalize(rawPayloads: RawPayload[], source) {
-      const today = new Date().toISOString().slice(0, 10);
-      return {
-        metrics: rawPayloads.flatMap(() =>
-          options.supportedMetrics.slice(0, 2).map((metricKey, index) => ({
-            date: today,
-            sourceId: source.id,
-            sourceTypeKey: options.key,
-            metricKey,
-            metricValue: index === 0 ? 0 : 0,
-            unit: metricKey.includes("rate") ? "percent" : "count",
-            dimensions: { demo: true, scaffoldOnly: true },
-          })),
-        ),
-      };
+    async normalize() {
+      return { metrics: [] };
     },
     getMetricDefinitions(): MetricDefinition[] {
       return metricDefinitions.filter((metric) => metric.source_type_key === options.key);
@@ -118,7 +86,7 @@ function validUrl(inputUrl: string) {
   }
 }
 
-export const vercelProjectConnector = createFutureConnector({
+export const vercelProjectConnector = createPlannedConnector({
   key: "vercel_project",
   displayName: "Vercel project",
   description: "Future connector for deployment metadata, build status, deployment counts, and project health.",
@@ -126,16 +94,6 @@ export const vercelProjectConnector = createFutureConnector({
   icon: "Rocket",
   urlPatterns: [/^https:\/\/vercel\.com\/[^/]+\/[^/?#]+/i],
   authType: "vercel_api_token",
-  optionalFields: [
-    {
-      key: "vercel_api_token",
-      label: "Vercel API token",
-      description: "Future server-only token for deployment metadata.",
-      required: false,
-      secret: true,
-      type: "password",
-    },
-  ],
   supportedMetrics: ["deployment_count", "latest_deployment_status"],
   detect(inputUrl) {
     const url = validUrl(inputUrl);
@@ -151,7 +109,7 @@ export const vercelProjectConnector = createFutureConnector({
   ],
 });
 
-export const shopifyConnector = createFutureConnector({
+export const shopifyConnector = createPlannedConnector({
   key: "shopify",
   displayName: "Shopify",
   description: "Future Shopify Admin API connector for orders, sales, refunds, and products.",
@@ -159,27 +117,6 @@ export const shopifyConnector = createFutureConnector({
   icon: "ShoppingBag",
   urlPatterns: [/\.myshopify\.com/i, /^https:\/\/admin\.shopify\.com\/store\//i],
   authType: "shopify_admin_api_token",
-  requiredFields: [
-    {
-      key: "admin_access_token",
-      label: "Admin API access token",
-      description: "Shopify Admin API token with the minimum read scopes needed.",
-      required: true,
-      secret: true,
-      type: "password",
-    },
-  ],
-  optionalFields: [
-    {
-      key: "shop_domain",
-      label: "Shop domain",
-      description: "Optional shop domain override, for example your-store.myshopify.com.",
-      required: false,
-      secret: false,
-      type: "text",
-      placeholder: "your-store.myshopify.com",
-    },
-  ],
   supportedMetrics: ["orders", "gross_sales", "current_total", "net_payment", "refunds", "top_products"],
   detect(inputUrl) {
     const url = validUrl(inputUrl);
@@ -200,92 +137,7 @@ export const shopifyConnector = createFutureConnector({
   ],
 });
 
-export const tiktokConnector = createFutureConnector({
-  key: "tiktok",
-  displayName: "TikTok",
-  description: "Future official TikTok API connector with demo fallback for social content metrics.",
-  category: "Content",
-  icon: "Video",
-  urlPatterns: [/^https:\/\/(www\.)?tiktok\.com\/@/i],
-  authType: "tiktok_oauth",
-  requiredFields: [
-    {
-      key: "oauth_access_token",
-      label: "TikTok OAuth access token",
-      description: "Future encrypted server-only OAuth token for the official TikTok API.",
-      required: true,
-      secret: true,
-      type: "password",
-    },
-  ],
-  optionalFields: [
-    {
-      key: "creator_account_id",
-      label: "Creator account ID",
-      description: "Optional TikTok account identifier after OAuth setup.",
-      required: false,
-      secret: false,
-      type: "text",
-    },
-  ],
-  supportedMetrics: ["video_views", "likes", "comments", "shares", "engagement_rate"],
-  detect(inputUrl) {
-    const url = validUrl(inputUrl);
-    if (!url || !url.hostname.includes("tiktok.com") || !url.pathname.startsWith("/@")) return null;
-    return { confidence: 0.96, normalizedUrl: `${url.origin}${url.pathname.split("/").slice(0, 2).join("/")}`, reasons: ["TikTok profile URL detected."], accountName: url.pathname.split("/")[1] };
-  },
-  setup: [
-    "Needs TikTok API/OAuth setup before real collection.",
-    "Use the official TikTok API/OAuth path. Do not scrape dashboards.",
-    "Future metrics: video_views, likes, comments, shares, and engagement_rate.",
-  ],
-});
-
-export const instagramConnector = createFutureConnector({
-  key: "instagram",
-  displayName: "Instagram",
-  description: "Future Meta/Instagram Graph API connector with demo fallback.",
-  category: "Content",
-  icon: "Instagram",
-  urlPatterns: [/^https:\/\/(www\.)?instagram\.com\/[^/?#]+/i],
-  authType: "meta_graph_api",
-  requiredFields: [
-    {
-      key: "graph_api_access_token",
-      label: "Instagram Graph API access token",
-      description: "Future encrypted server-only token for the Meta/Instagram Graph API.",
-      required: true,
-      secret: true,
-      type: "password",
-    },
-  ],
-  optionalFields: [
-    {
-      key: "instagram_business_account_id",
-      label: "Business account ID",
-      description: "Optional Instagram Business or Creator account id for insights.",
-      required: false,
-      secret: false,
-      type: "text",
-    },
-  ],
-  supportedMetrics: ["reach", "impressions", "followers", "profile_views", "media_likes", "media_comments", "engagement_rate"],
-  detect(inputUrl) {
-    const url = validUrl(inputUrl);
-    if (!url || !url.hostname.includes("instagram.com")) return null;
-    const account = url.pathname.split("/").filter(Boolean)[0];
-    if (!account || ["p", "reel", "stories"].includes(account)) return null;
-    return { confidence: 0.94, normalizedUrl: `https://www.instagram.com/${account}`, reasons: ["Instagram profile URL detected."], accountName: account };
-  },
-  setup: [
-    "Needs Instagram Graph API setup before real collection.",
-    "Insights may require an Instagram Business or Creator account connected through Meta.",
-    "Use the official Meta/Instagram Graph API path. Do not scrape dashboards.",
-    "Future metrics: reach, impressions, followers, profile_views, media_likes, media_comments, and engagement_rate.",
-  ],
-});
-
-export const customApiConnector = createFutureConnector({
+export const customApiConnector = createPlannedConnector({
   key: "custom_api",
   displayName: "Custom API",
   description: "Future connector for generic JSON APIs.",
@@ -300,7 +152,7 @@ export const customApiConnector = createFutureConnector({
   setup: ["Custom API support is scaffolded for future JSON API ingestion and mapping."],
 });
 
-export const customCsvConnector = createFutureConnector({
+export const customCsvConnector = createPlannedConnector({
   key: "custom_csv",
   displayName: "Custom CSV",
   description: "Future connector for manually uploaded CSV data.",

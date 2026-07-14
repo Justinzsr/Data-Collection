@@ -1,4 +1,4 @@
-import { ArrowRight, Bookmark, Camera, Car, DatabaseZap, ExternalLink, Eye, FileText, Heart, MessageCircle, Plus, Share2, TableProperties, Video } from "lucide-react";
+import { ArrowRight, Bookmark, Camera, Car, ChevronDown, ExternalLink, Eye, FileText, Heart, MessageCircle, Plus, Share2, TableProperties, Video } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getDailyReport } from "@/aggregation/services/daily-report-service";
 import { getInstagramDashboardSummary, type InstagramDashboardSummary } from "@/aggregation/services/instagram-dashboard-service";
@@ -40,13 +40,6 @@ function moduleSeries(modules: Awaited<ReturnType<typeof getPlatformModules>>) {
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
 }
 
-function compactMetric(value: number | string, unit: string) {
-  if (typeof value === "string") return value;
-  if (unit === "percent") return `${value.toFixed(1)}%`;
-  if (unit === "usd") return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
 function displayCount(value: number | null | undefined) {
   if (value === null || value === undefined) return "Waiting";
   return new Intl.NumberFormat("en-US").format(value);
@@ -65,6 +58,10 @@ function displayWaitingCount(value: number | null | undefined) {
 function displayWaitingPercent(value: number | null | undefined) {
   if (value === null || value === undefined) return "Waiting for scope/data";
   return `${value.toFixed(1)}%`;
+}
+
+function statusLabel(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function InstagramMetricTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
@@ -94,32 +91,29 @@ function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashb
   const media = primary.media;
 
   return (
-    <GlassPanel className="overflow-hidden">
-      <div className="border-b border-white/10 bg-white/[0.02] p-4 sm:p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-fuchsia-300/20 bg-fuchsia-300/10">
-              <Camera className="h-5 w-5 text-fuchsia-100" />
+    <details className="overview-social-card group glass min-w-0 overflow-hidden rounded-xl">
+      <summary className="cursor-pointer p-3 transition hover:bg-white/[0.025]">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-fuchsia-300/20 bg-fuchsia-300/10">
+              <Camera className="h-4 w-4 text-fuchsia-100" />
             </span>
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-200/80">Instagram Graph API</p>
-              <h2 className="mt-1 break-words text-xl font-semibold text-white">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fuchsia-200/75">Instagram Graph API</p>
+              <h2 className="mt-0.5 truncate text-sm font-semibold text-white">
                 {primary.username ? `@${primary.username}` : primary.displayName}
               </h2>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                Direct view of the latest synced account profile, media totals, and per-post insights for this data space only.
-              </p>
+              <p className="mt-0.5 truncate text-xs text-slate-500">{displayCount(primary.stats.followers)} followers · {displayCount(primary.stats.reach)} reach · {media.length} posts</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge tone={primary.status === "healthy" ? "green" : primary.status === "error" ? "rose" : "amber"}>{primary.status}</Badge>
-            {primary.graphApiVersion ? <Badge tone="indigo">{primary.graphApiVersion}</Badge> : null}
-            {primary.lastSyncedAt ? <Badge tone="slate">Synced {formatAppDateTime(primary.lastSyncedAt)}</Badge> : <Badge tone="amber">No sync yet</Badge>}
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge tone={primary.status === "healthy" ? "green" : primary.status === "error" ? "rose" : "amber"}>{statusLabel(primary.status)}</Badge>
+            <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
           </div>
         </div>
-      </div>
+      </summary>
 
-      <div className="grid gap-4 p-4 sm:p-5">
+      <div className="grid gap-4 border-t border-white/10 p-3 sm:p-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <InstagramMetricTile label="Followers" value={displayCount(primary.stats.followers)} detail="Account snapshot" />
           <InstagramMetricTile label="Account media" value={displayCount(primary.stats.accountMediaCount)} detail={`${displayCount(primary.stats.fetchedMediaCount)} fetched`} />
@@ -133,6 +127,8 @@ function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashb
 
         <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/15 p-3 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <span>Last sync: <span className="text-slate-200">{primary.lastSyncedAt ? formatAppDateTime(primary.lastSyncedAt) : "No sync yet"}</span></span>
+            {primary.graphApiVersion ? <span>Graph API: <span className="text-slate-200">{primary.graphApiVersion}</span></span> : null}
             {primary.accountId ? <span>IG account: <span className="text-slate-200">{primary.accountId}</span></span> : null}
             {primary.pageId ? <span>Page: <span className="text-slate-200">{primary.pageId}</span></span> : null}
             {primary.tokenExpiresAt ? <span>Token expires: <span className="text-slate-200">{formatAppDateTime(primary.tokenExpiresAt)}</span></span> : null}
@@ -210,7 +206,7 @@ function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashb
           )}
         </div>
       </div>
-    </GlassPanel>
+    </details>
   );
 }
 
@@ -221,30 +217,27 @@ function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSu
   const accountLabel = primary.username ? `@${primary.username.replace(/^@/, "")}` : primary.displayNameOnPlatform ?? primary.displayName;
 
   return (
-    <GlassPanel className="overflow-hidden">
-      <div className="border-b border-white/10 bg-white/[0.02] p-4 sm:p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-rose-300/20 bg-rose-300/10">
-              <Video className="h-5 w-5 text-rose-100" />
+    <details className="overview-social-card group glass min-w-0 overflow-hidden rounded-xl">
+      <summary className="cursor-pointer p-3 transition hover:bg-white/[0.025]">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-rose-300/20 bg-rose-300/10">
+              <Video className="h-4 w-4 text-rose-100" />
             </span>
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-200/80">TikTok official API</p>
-              <h2 className="mt-1 break-words text-xl font-semibold text-white">{accountLabel}</h2>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                Direct view of this TikTok profile, video totals, and per-video performance from official OAuth/API syncs.
-              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-200/75">TikTok official API</p>
+              <h2 className="mt-0.5 truncate text-sm font-semibold text-white">{accountLabel}</h2>
+              <p className="mt-0.5 truncate text-xs text-slate-500">{displayWaitingCount(primary.stats.videoViews)} views · {displayWaitingCount(primary.stats.followers)} followers · {videos.length} videos</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge tone={primary.status === "healthy" ? "green" : primary.status === "error" ? "rose" : "amber"}>{primary.status}</Badge>
-            {primary.lastSyncedAt ? <Badge tone="slate">Synced {formatAppDateTime(primary.lastSyncedAt)}</Badge> : <Badge tone="amber">No sync yet</Badge>}
-            {primary.tokenExpiresAt ? <Badge tone="cyan">Token expires {formatAppDateTime(primary.tokenExpiresAt)}</Badge> : <Badge tone="amber">Token expiry pending</Badge>}
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge tone={primary.status === "healthy" ? "green" : primary.status === "error" ? "rose" : "amber"}>{statusLabel(primary.status)}</Badge>
+            <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
           </div>
         </div>
-      </div>
+      </summary>
 
-      <div className="grid gap-4 p-4 sm:p-5">
+      <div className="grid gap-4 border-t border-white/10 p-3 sm:p-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <TikTokMetricTile label="Video views" value={displayWaitingCount(primary.stats.videoViews)} detail="Synced video total" />
           <TikTokMetricTile label="Likes" value={displayWaitingCount(primary.stats.likes)} />
@@ -258,6 +251,8 @@ function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSu
 
         <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/15 p-3 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <span>Last sync: <span className="text-slate-200">{primary.lastSyncedAt ? formatAppDateTime(primary.lastSyncedAt) : "No sync yet"}</span></span>
+            <span>Token: <span className={primary.tokenExpiresAt ? "text-slate-200" : "text-amber-100"}>{primary.tokenExpiresAt ? `expires ${formatAppDateTime(primary.tokenExpiresAt)}` : "expiry pending"}</span></span>
             {primary.openId ? <span>Open ID: <span className="text-slate-200">{primary.openId}</span></span> : <span>Open ID: <span className="text-amber-100">Waiting for scope/data</span></span>}
             <span>Scopes: <span className="text-slate-200">{primary.scopes.length ? primary.scopes.join(", ") : "Waiting for granted scopes"}</span></span>
             {primary.lastError ? <span>Last error: <span className="text-rose-200">{primary.lastError}</span></span> : null}
@@ -336,7 +331,7 @@ function TikTokInsightsPanel({ summary, basePath }: { summary: TikTokDashboardSu
           )}
         </div>
       </div>
-    </GlassPanel>
+    </details>
   );
 }
 
@@ -391,176 +386,102 @@ export default async function DataSpaceDashboardPage({
     getInstagramDashboardSummary({ dataSpaceId: dataSpace.id }),
     getTikTokDashboardSummary({ dataSpaceId: dataSpace.id }),
   ]);
-  const websiteModule = modules.find((platformModule) => platformModule.sourceTypeKey === "website");
-  const supabaseModule = modules.find((platformModule) => platformModule.sourceTypeKey === "supabase");
-  const socialModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "tiktok" || platformModule.sourceTypeKey === "instagram");
   const futureModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "shopify" || platformModule.sourceTypeKey === "custom_api" || platformModule.sourceTypeKey === "custom_csv");
   const autoLabEmpty = isAutoLabDataSpace(dataSpace) && sources.length === 0;
-  const primaryModules = [websiteModule, supabaseModule].filter((module): module is NonNullable<typeof module> => Boolean(module?.sourceId || dataSpace.slug === "moonarq"));
+  const overviewTypes = new Set(["website", "supabase", "tiktok", "instagram"]);
+  const overviewModules = modules.filter((module) => overviewTypes.has(module.sourceTypeKey) && Boolean(module.sourceId || dataSpace.slug === "moonarq"));
   const hasDirectInstagramPanel = instagramSummary.sources.length > 0;
   const hasDirectTikTokPanel = tiktokSummary.sources.length > 0;
-  const readinessModules = socialModules.filter((module) => !((hasDirectInstagramPanel && module.sourceTypeKey === "instagram") || (hasDirectTikTokPanel && module.sourceTypeKey === "tiktok")));
-  const postureModules = [websiteModule, supabaseModule, ...readinessModules].filter((module): module is NonNullable<typeof module> => Boolean(module && (module.sourceId || dataSpace.slug === "moonarq")));
-  const showOperationsOverview = dataSpace.slug === "moonarq" || postureModules.length > 0;
 
   return (
-    <div className="mx-auto grid max-w-[1600px] gap-6">
+    <div className="mx-auto grid w-full min-w-0 max-w-[1600px] grid-cols-[minmax(0,1fr)] gap-4">
       <CommandCenterHeader modules={modules} range={range} dataSpaceName={dataSpace.display_name} dataSpaceSlug={dataSpace.slug} basePath={basePath} />
-      <GlobalHealthStrip health={health} />
 
       {autoLabEmpty ? <AutoLabEmptyState dataSpaceSlug={dataSpace.slug} /> : null}
 
       {!autoLabEmpty ? (
-        <GlassPanel className="p-4 sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-3">
-              <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10">
-                <FileText className="h-5 w-5 text-cyan-100" />
-              </span>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/75">Daily Morning Report</p>
-                <h2 className="mt-1 text-lg font-semibold text-white">
-                  {yesterdayReport ? "Yesterday's report is ready" : "Yesterday's report has not been generated"}
-                </h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  {yesterdayReport ? `Generated ${yesterdayReport.run.generated_at_pt}.` : "Generate a safe PT daily snapshot from this data space when you are ready."}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <LinkButton href={`${basePath}/reports/daily`} variant="primary">
-                <FileText className="h-4 w-4" />
-                Open Report
-              </LinkButton>
-              <LinkButton href={`${basePath}/data`} variant="secondary">
-                <TableProperties className="h-4 w-4" />
-                Explore Data
-              </LinkButton>
-            </div>
-          </div>
-        </GlassPanel>
-      ) : null}
-
-      {!autoLabEmpty && hasDirectInstagramPanel ? <InstagramInsightsPanel summary={instagramSummary} basePath={basePath} /> : null}
-
-      {!autoLabEmpty && hasDirectTikTokPanel ? <TikTokInsightsPanel summary={tiktokSummary} basePath={basePath} /> : null}
-
-      {!autoLabEmpty && primaryModules.length > 0 ? (
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-          {websiteModule && primaryModules.includes(websiteModule) ? (
-            <div className="grid gap-3">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Primary source</p>
-                  <h2 className="mt-1 text-xl font-semibold text-white">{websiteModule.platformLabel}</h2>
-                </div>
-                <Badge tone="cyan">{websiteModule.sourceModeLabel}</Badge>
-              </div>
-              <PlatformModuleCard module={websiteModule} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
-            </div>
-          ) : null}
-          {supabaseModule && primaryModules.includes(supabaseModule) ? (
-            <div className="grid gap-3">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-200/80">Second source</p>
-                  <h2 className="mt-1 text-xl font-semibold text-white">{supabaseModule.platformLabel}</h2>
-                </div>
-                <Badge tone="green">{supabaseModule.sourceModeLabel}</Badge>
-              </div>
-              <PlatformModuleCard module={supabaseModule} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {!autoLabEmpty && showOperationsOverview ? (
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.75fr)]">
+        <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3" data-testid="dashboard-data-stage" aria-label="Performance graphs and platform summaries">
           <PlatformTrendChart series={moduleSeries(modules)} />
-          <GlassPanel className="p-4 sm:p-5">
-            <div className="mb-5 flex items-center gap-2">
-              <DatabaseZap className="h-4 w-4 text-cyan-200" />
-              <h2 className="text-base font-semibold text-white">{dataSpace.display_name} source posture</h2>
-            </div>
-            <div className="grid gap-3">
-              {postureModules.map((platformModule) => (
-                <div key={platformModule.sourceId ?? platformModule.sourceTypeKey} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-medium text-white">{platformModule.platformLabel}</p>
-                    <Badge tone={platformModule.status === "healthy" ? "green" : platformModule.status === "error" ? "rose" : platformModule.status === "needs_credentials" ? "amber" : "cyan"}>
-                      {platformModule.status}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500">{platformModule.primaryMetric.label}</p>
-                  <p className="text-lg font-semibold text-slate-100">{compactMetric(platformModule.primaryMetric.value, platformModule.primaryMetric.unit)}</p>
-                  <p className="mt-2 text-xs text-slate-500">{platformModule.sourceModeLabel}</p>
-                </div>
-              ))}
-            </div>
-          </GlassPanel>
-        </div>
-      ) : null}
-
-      {readinessModules.length > 0 ? (
-        <section className="grid gap-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Social accounts</p>
-              <h2 className="mt-1 text-xl font-semibold text-white">{dataSpace.display_name} social account readiness</h2>
-            </div>
-            <LinkButton href={`${basePath}/content`} variant="secondary">
-              Content dashboard
-              <ArrowRight className="h-4 w-4" />
-            </LinkButton>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {readinessModules.map((platformModule) => (
-              <GlassPanel key={platformModule.sourceTypeKey} className="p-4 sm:p-5">
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06]">
-                      <Video className="h-5 w-5 text-cyan-100" />
-                    </span>
-                    <div>
-                      <h3 className="font-semibold text-white">{platformModule.platformLabel}</h3>
-                      <p className="text-xs text-slate-500">{platformModule.displayName}</p>
-                    </div>
-                  </div>
-                  <Badge tone="cyan">{platformModule.setupState.label}</Badge>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <div className="rounded-lg border border-white/10 bg-black/20 p-3 sm:col-span-1">
-                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">{platformModule.primaryMetric.label}</p>
-                    <p className="mt-1 text-xl font-semibold text-white">{compactMetric(platformModule.primaryMetric.value, platformModule.primaryMetric.unit)}</p>
-                  </div>
-                  <div className="rounded-lg border border-white/10 bg-black/20 p-3 text-sm leading-6 text-slate-300 sm:col-span-2">
-                    {platformModule.setupState.message}
-                  </div>
-                </div>
-              </GlassPanel>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {!autoLabEmpty ? (
-        <section className="grid gap-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Other future sources</p>
-              <h2 className="mt-1 text-xl font-semibold text-white">Custom sources stay visible without taking over the command center</h2>
-            </div>
-            <LinkButton href={`${basePath}/sources`} variant="secondary">
-              Source management
-              <ArrowRight className="h-4 w-4" />
-            </LinkButton>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {futureModules.map((module) => (
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="overview-module-grid">
+            {overviewModules.map((module) => (
               <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
             ))}
           </div>
         </section>
+      ) : null}
+
+      {!autoLabEmpty ? <GlobalHealthStrip health={health} /> : null}
+
+      {!autoLabEmpty && (hasDirectInstagramPanel || hasDirectTikTokPanel) ? (
+        <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 xl:grid-cols-2" aria-label="Social platform detail modules">
+          {hasDirectInstagramPanel ? <InstagramInsightsPanel summary={instagramSummary} basePath={basePath} /> : null}
+          {hasDirectTikTokPanel ? <TikTokInsightsPanel summary={tiktokSummary} basePath={basePath} /> : null}
+        </section>
+      ) : null}
+
+      {!autoLabEmpty ? (
+        <details className="group glass rounded-xl" data-testid="daily-report-module">
+          <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 transition hover:bg-white/[0.025]">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10">
+                <FileText className="h-4 w-4 text-cyan-100" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/70">Daily Morning Report</p>
+                <h2 className="truncate text-sm font-semibold text-white">
+                  {yesterdayReport ? "Yesterday's report is ready" : "Yesterday's report has not been generated"}
+                </h2>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge tone={yesterdayReport ? "green" : "amber"}>{yesterdayReport ? "Ready" : "Action"}</Badge>
+              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            </div>
+          </summary>
+          <div className="flex flex-col gap-3 border-t border-white/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-400">
+              {yesterdayReport ? `Generated ${yesterdayReport.run.generated_at_pt}.` : "Generate a safe PT daily snapshot from this data space when you are ready."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <LinkButton href={`${basePath}/reports/daily`} variant="primary" className="min-h-9 px-3 text-xs">
+                <FileText className="h-3.5 w-3.5" />
+                Open Report
+              </LinkButton>
+              <LinkButton href={`${basePath}/data`} variant="secondary" className="min-h-9 px-3 text-xs">
+                <TableProperties className="h-3.5 w-3.5" />
+                Explore Data
+              </LinkButton>
+            </div>
+          </div>
+        </details>
+      ) : null}
+
+      {!autoLabEmpty ? (
+        <details className="group glass rounded-xl">
+          <summary className="flex cursor-pointer items-center justify-between gap-4 p-3 transition hover:bg-white/[0.025]">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">More integrations</p>
+              <h2 className="mt-0.5 text-sm font-semibold text-white">Planned and custom sources</h2>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span>{futureModules.length} modules</span>
+              <ChevronDown className="h-4 w-4 shrink-0 transition group-open:rotate-180" aria-hidden="true" />
+            </div>
+          </summary>
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 border-t border-white/10 p-3 sm:p-4">
+            <div className="flex justify-end">
+              <LinkButton href={`${basePath}/sources`} variant="secondary" className="min-h-9 px-3 text-xs">
+                Source management
+                <ArrowRight className="h-3.5 w-3.5" />
+              </LinkButton>
+            </div>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2">
+              {futureModules.map((module) => (
+                <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
+              ))}
+            </div>
+          </div>
+        </details>
       ) : null}
     </div>
   );

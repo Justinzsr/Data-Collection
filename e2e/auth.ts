@@ -13,7 +13,8 @@ export async function loginDashboard(page: Page) {
     await page.getByRole("button", { name: "Enter command center" }).click();
   }
 
-  await expect(page.getByRole("heading", { name: "MoonArq Data Command Center" })).toBeVisible();
+  await expect(page).toHaveURL(/\/w\/moonarq\/dashboard(?:\?.*)?$/);
+  await expect(page.getByTestId("dashboard-overview")).toBeVisible();
 }
 
 export async function dashboardAuthCookie(request: APIRequestContext) {

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { getConnector } from "@/collection/connectors/registry";
 import { enqueueSyncRun, runDueSources } from "@/collection/sync/engine";
 import { acquireSourceLock, releaseSourceLock } from "@/collection/sync/locks";
 import { POST as syncSourceRoute } from "@/app/api/sources/[id]/sync/route";
 import { DEMO_SOURCE_IDS } from "@/storage/seed/demo-data";
-import { resetDemoStore } from "@/storage/repositories/demo-store";
+import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store";
 
 describe("sync engine", () => {
   beforeEach(() => resetDemoStore());
@@ -22,9 +23,61 @@ describe("sync engine", () => {
     expect(second.idempotency_key).toBeNull();
   });
 
+  it("skips connectors whose required credentials have not been saved", async () => {
+    const store = getDemoStore();
+    const rawBefore = store.rawIngestions.length;
+    const run = await enqueueSyncRun({ sourceId: DEMO_SOURCE_IDS.instagram, trigger: "manual" });
+
+    expect(run.status).toBe("skipped");
+    expect(run.error_message).toContain("required credentials");
+    expect(store.rawIngestions).toHaveLength(rawBefore);
+  });
+
+  it("does not mark a source healthy when its connector skips the sync", async () => {
+    const store = getDemoStore();
+    const source = store.sources.find((item) => item.id === DEMO_SOURCE_IDS.website);
+    if (!source) throw new Error("Missing website source");
+    source.status = "warning";
+
+    const connector = getConnector("website");
+    const originalSync = connector.sync;
+    connector.sync = async () => ({
+      rawPayloads: [],
+      recordsFetched: 0,
+      skippedReason: "Waiting for webhook delivery.",
+      message: "Waiting for webhook delivery.",
+    });
+
+    try {
+      const run = await enqueueSyncRun({ sourceId: source.id, trigger: "manual" });
+      expect(run).toMatchObject({
+        status: "skipped",
+        error_message: "Waiting for webhook delivery.",
+      });
+      expect(source.status).toBe("warning");
+    } finally {
+      connector.sync = originalSync;
+    }
+  });
+
   it("keeps cron sync idempotent within the current hour", async () => {
-    const run = await enqueueSyncRun({ sourceId: DEMO_SOURCE_IDS.supabase, trigger: "cron" });
-    expect(run.idempotency_key).toContain(`${DEMO_SOURCE_IDS.supabase}:cron:`);
+    const first = await enqueueSyncRun({ sourceId: DEMO_SOURCE_IDS.supabase, trigger: "cron" });
+    const store = getDemoStore();
+    const countsAfterFirst = {
+      runs: store.syncRuns.length,
+      raw: store.rawIngestions.length,
+      metrics: store.metricsDaily.length,
+    };
+    const second = await enqueueSyncRun({ sourceId: DEMO_SOURCE_IDS.supabase, trigger: "cron" });
+
+    expect(first.idempotency_key).toContain(`${DEMO_SOURCE_IDS.supabase}:cron:`);
+    expect(second.id).toBe(first.id);
+    expect(store.syncRuns.filter((run) => run.idempotency_key === first.idempotency_key)).toHaveLength(1);
+    expect({
+      runs: store.syncRuns.length,
+      raw: store.rawIngestions.length,
+      metrics: store.metricsDaily.length,
+    }).toEqual(countsAfterFirst);
   });
 
   it("cron only syncs due enabled sources", async () => {

@@ -140,6 +140,9 @@ export const tiktokConnector: ConnectorDefinition = {
   description: "Official TikTok Login Kit and Display API connector for data-space-scoped video/account metrics.",
   category: "Content",
   icon: "Video",
+  availability: "live",
+  setupKind: "oauth",
+  defaultSyncMode: "hourly",
   urlPatterns: [/^https:\/\/(www\.)?tiktok\.com\/@/i],
   authType: "tiktok_oauth",
   docsUrl: "https://developers.tiktok.com/doc/login-kit-web",
@@ -179,6 +182,8 @@ export const tiktokConnector: ConnectorDefinition = {
     return {
       sourceTypeKey: "tiktok",
       displayName: "TikTok",
+      availability: "live",
+      setupKind: "oauth",
       confidence: 0.96,
       normalizedUrl: `${url.origin}/${accountName}`,
       accountName,

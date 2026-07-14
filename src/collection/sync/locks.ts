@@ -3,7 +3,14 @@ import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { SourceLock } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
 
-export async function acquireSourceLock(sourceId: string, syncRunId: string, leaseMs = 5 * 60_000): Promise<SourceLock | null> {
+export const SOURCE_LOCK_LEASE_MS = 5 * 60_000;
+export const SOURCE_LOCK_RENEW_INTERVAL_MS = Math.floor(SOURCE_LOCK_LEASE_MS / 3);
+
+export async function acquireSourceLock(
+  sourceId: string,
+  syncRunId: string,
+  leaseMs = SOURCE_LOCK_LEASE_MS,
+): Promise<SourceLock | null> {
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();
     const now = new Date();
@@ -61,19 +68,65 @@ export async function acquireSourceLock(sourceId: string, syncRunId: string, lea
   return rows[0] ?? null;
 }
 
-export async function releaseSourceLock(sourceId: string, syncRunId: string): Promise<void> {
+export async function renewSourceLock(
+  sourceId: string,
+  syncRunId: string,
+  lockKey: string,
+  leaseMs = SOURCE_LOCK_LEASE_MS,
+): Promise<SourceLock | null> {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + leaseMs).toISOString();
+
+  if (!isRuntimeDatabaseConfigured()) {
+    const lock = getDemoStore().sourceLocks.find(
+      (candidate) =>
+        candidate.source_id === sourceId &&
+        candidate.locked_by_sync_run_id === syncRunId &&
+        candidate.lock_key === lockKey,
+    );
+    if (!lock || new Date(lock.expires_at).getTime() <= now.getTime()) {
+      return null;
+    }
+    lock.expires_at = expiresAt;
+    lock.updated_at = now.toISOString();
+    return lock;
+  }
+
+  const rows = await queryRows<SourceLock>(
+    `
+      update source_locks
+      set expires_at = $5, updated_at = $4
+      where source_id = $1
+        and locked_by_sync_run_id = $2
+        and lock_key = $3
+        and expires_at > $4
+      returning *
+    `,
+    [sourceId, syncRunId, lockKey, now.toISOString(), expiresAt],
+  );
+  return rows[0] ?? null;
+}
+
+export async function releaseSourceLock(sourceId: string, syncRunId: string, lockKey?: string): Promise<void> {
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();
     store.sourceLocks = store.sourceLocks.filter(
-      (lock) => !(lock.source_id === sourceId && lock.locked_by_sync_run_id === syncRunId),
+      (lock) =>
+        !(
+          lock.source_id === sourceId &&
+          lock.locked_by_sync_run_id === syncRunId &&
+          (!lockKey || lock.lock_key === lockKey)
+        ),
     );
     return;
   }
   await queryRows(
     `
       delete from source_locks
-      where source_id = $1 and locked_by_sync_run_id = $2
+      where source_id = $1
+        and locked_by_sync_run_id = $2
+        and ($3::text is null or lock_key = $3)
     `,
-    [sourceId, syncRunId],
+    [sourceId, syncRunId, lockKey ?? null],
   );
 }

@@ -1,6 +1,10 @@
-import { ArrowLeft, Camera, Clipboard, RadioTower, ShieldAlert, Video, Webhook } from "lucide-react";
+import { ArrowLeft, Camera, ChevronDown, Clipboard, RadioTower, ShieldAlert, Video, Webhook } from "lucide-react";
 import { notFound } from "next/navigation";
-import { getConnector } from "@/collection/connectors/registry";
+import {
+  getConnector,
+  getCredentialSetupBlockReason,
+  getSourceOperationBlockReason,
+} from "@/collection/connectors/registry";
 import { getInstagramMetaAppDisplay } from "@/collection/connectors/instagram/graph-api";
 import { expectedInstagramCopy } from "@/collection/connectors/instagram/source-policy";
 import { getTikTokOAuthDisplay } from "@/collection/connectors/tiktok/api";
@@ -55,8 +59,9 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const trackingKey = String(source.metadata.public_tracking_key ?? "mq_demo_public_website");
   const publicAppUrl = getPublicAppUrl();
   const publicAppUrlWarning = getPublicAppUrlWarning();
-  const endpoint = `${publicAppUrl ?? "http://127.0.0.1:3100"}/api/track`;
+  const endpoint = `${publicAppUrl ?? "http://localhost:4000"}/api/track`;
   const setup = connector.getSetupInstructions(source);
+  const metricDefinitions = connector.getMetricDefinitions();
   const showInstagramOAuth = source.source_type_key === "instagram";
   const instagramConnected = source.metadata.oauth_connected === true;
   const instagramMetaApp = showInstagramOAuth ? getInstagramMetaAppDisplay(source) : null;
@@ -65,6 +70,15 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const tiktokConnected = showTikTokOAuth && source.metadata.oauth_connected === true;
   const tiktokOAuth = showTikTokOAuth ? getTikTokOAuthDisplay({ profileKey: getTikTokAppProfileKeyForSource(source) }) : null;
   const tiktokOAuthHref = `/api/oauth/tiktok/start?sourceId=${encodeURIComponent(source.id)}&dataSpaceSlug=${encodeURIComponent(dataSpace.slug)}&returnPath=${encodeURIComponent(`${basePath}/sources/${source.id}`)}`;
+  const operationBlockReason = getSourceOperationBlockReason(source);
+  const credentialBlockReason = getCredentialSetupBlockReason(
+    connector,
+    credentials.map((credential) => credential.field_key),
+  );
+  const actionBlockReason = operationBlockReason ?? credentialBlockReason;
+  const isOAuthSource = connector.setupKind === "oauth";
+  const canTest = !actionBlockReason && connector.capabilities.canTestConnection;
+  const canSync = !actionBlockReason && connector.capabilities.supportsManualSync;
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6">
@@ -78,35 +92,23 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
               <ArrowLeft className="h-4 w-4" />
               Sources
             </LinkButton>
-            <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
-            <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
-            {showInstagramOAuth ? (
-              <LinkButton href={instagramOAuthHref} variant="primary">
-                <Camera className="h-4 w-4" />
-                Connect Instagram
-              </LinkButton>
-            ) : null}
-            {showTikTokOAuth ? (
-              <LinkButton href={tiktokOAuthHref} variant="primary">
-                <Video className="h-4 w-4" />
-                Connect TikTok
-              </LinkButton>
-            ) : null}
+            {!isOAuthSource && canTest ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
+            {!isOAuthSource && canSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
           </>
         }
       />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+      <div className={`grid gap-5 ${isOAuthSource ? "" : "lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]"}`}>
         <GlassPanel className="p-4 sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-white">Connection state</h2>
-            <Badge tone={statusTone(source.status)}>{source.status}</Badge>
+            <Badge tone={statusTone(source.status)}>{source.status.replaceAll("_", " ")}</Badge>
           </div>
           <div className="grid gap-3 text-sm text-slate-300">
             <p>Data space: <span className="text-white">{dataSpace.display_name}</span></p>
             <p>Platform: <span className="text-white">{connector.displayName}</span></p>
             <p>Monitored mode: <span className="text-white">{source.source_type_key === "supabase" ? `${dataSpace.display_name} Supabase` : isWebsiteSourceKey(source.source_type_key) ? getWebsiteModeLabel(source) : connector.displayName}</span></p>
-            <p>Sync mode: <span className="text-white">{source.sync_mode}</span></p>
+            <p>Sync mode: <span className="text-white">{source.sync_mode.replaceAll("_", " ")}</span></p>
             {showInstagramOAuth ? (
               <>
                 <p>OAuth: <span className="text-white">{instagramConnected ? "connected" : "not connected"}</span></p>
@@ -128,20 +130,39 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             <p>Next sync: <span className="text-white">{formatAppDateTime(source.next_sync_at, "manual only")}</span></p>
             <p>Last error: <span className="text-white">{source.last_error ?? "none"}</span></p>
             {source.webhook_url ? <p className="break-all">Webhook URL: <span className="text-cyan-100">{source.webhook_url}</span></p> : null}
+            {actionBlockReason ? <p className="text-amber-100">{actionBlockReason}</p> : null}
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {connector.getMetricDefinitions().map((metric) => (
-              <Badge key={metric.key} tone="indigo">{metric.key}</Badge>
-            ))}
-          </div>
+          <details className="group mt-4 rounded-xl border border-white/10 bg-black/15">
+            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 text-sm font-medium text-slate-300">
+              <span>Supported metrics <span className="text-slate-500">({metricDefinitions.length})</span></span>
+              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <div className="flex flex-wrap gap-2 border-t border-white/10 p-3">
+              {metricDefinitions.map((metric) => (
+                <Badge key={metric.key} tone="indigo">{metric.key}</Badge>
+              ))}
+            </div>
+          </details>
+          {operationBlockReason ? <p className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.07] p-3 text-sm leading-6 text-amber-100">{operationBlockReason}</p> : null}
         </GlassPanel>
 
-        <GlassPanel className="p-4 sm:p-5">
-          <CredentialForm sourceId={source.id} title="Encrypted credentials" dataSpaceSlug={dataSpace.slug} />
-          {credentials.length > 0 ? (
-            <p className="mt-4 text-xs text-slate-500">Saved hints: {credentials.map((item) => `${item.field_key} ${item.value_hint ?? "saved"}`).join(", ")}</p>
-          ) : null}
-        </GlassPanel>
+        {!isOAuthSource && connector.availability === "live" ? (
+          <details className="group glass rounded-2xl">
+            <summary className="flex cursor-pointer items-center justify-between gap-4 p-4 transition hover:bg-white/[0.025] sm:p-5">
+              <div>
+                <h2 className="text-base font-semibold text-white">Credentials and connection settings</h2>
+                <p className="mt-1 text-sm text-slate-500">Encrypted server-side. Expand only when changing this connection.</p>
+              </div>
+              <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <div className="border-t border-white/10 p-4 sm:p-5">
+              <CredentialForm sourceId={source.id} title="Encrypted credentials" dataSpaceSlug={dataSpace.slug} />
+              {credentials.length > 0 ? (
+                <p className="mt-4 text-xs text-slate-500">Saved hints: {credentials.map((item) => `${item.field_key} ${item.value_hint ?? "saved"}`).join(", ")}</p>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
       </div>
 
       {showInstagramOAuth ? (
@@ -158,7 +179,12 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             </div>
             <Badge tone={instagramConnected ? "green" : "amber"}>{instagramConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
           </div>
-          <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
+          <details className="group mt-4 rounded-xl border border-white/10 bg-black/15">
+            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 text-sm font-medium text-slate-300">
+              OAuth account and app details
+              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            </summary>
+          <div className="grid gap-3 border-t border-white/10 p-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Expected account</p>
               <p className="mt-2 text-white">{expectedInstagramCopy(source)}</p>
@@ -177,13 +203,16 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
               <p className="mt-2 text-white">{tokenStatus(source)}</p>
             </div>
           </div>
+          </details>
           <div className="mt-4 flex flex-wrap gap-2">
-            <LinkButton href={instagramOAuthHref} variant="primary">
-              <Camera className="h-4 w-4" />
-              {instagramConnected ? "Reconnect Instagram" : "Connect Instagram"}
-            </LinkButton>
-            <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
-            <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
+            {!operationBlockReason ? (
+              <LinkButton href={instagramOAuthHref} variant="primary">
+                <Camera className="h-4 w-4" />
+                {instagramConnected ? "Reconnect Instagram" : "Connect Instagram"}
+              </LinkButton>
+            ) : null}
+            {canTest ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
+            {canSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
           </div>
         </GlassPanel>
       ) : null}
@@ -202,7 +231,12 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             </div>
             <Badge tone={tiktokConnected ? "green" : "amber"}>{tiktokConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
           </div>
-          <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
+          <details className="group mt-4 rounded-xl border border-white/10 bg-black/15">
+            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 text-sm font-medium text-slate-300">
+              OAuth account and app details
+              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            </summary>
+          <div className="grid gap-3 border-t border-white/10 p-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Scope</p>
               <p className="mt-2 text-white">{dataSpace.display_name}</p>
@@ -223,20 +257,33 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
               <p className="mt-2 text-white">{tokenStatus(source)}</p>
             </div>
           </div>
+          </details>
           <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm leading-6 text-amber-50/85">
             TikTok data must come through official OAuth/API permissions. Do not enter TikTok passwords, do not scrape dashboards, and do not paste tokens in chat.
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <LinkButton href={tiktokOAuthHref} variant="primary">
-              <Video className="h-4 w-4" />
-              {tiktokConnected ? "Reconnect TikTok" : "Connect TikTok"}
-            </LinkButton>
-            <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
-            <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
+            {!operationBlockReason ? (
+              <LinkButton href={tiktokOAuthHref} variant="primary">
+                <Video className="h-4 w-4" />
+                {tiktokConnected ? "Reconnect TikTok" : "Connect TikTok"}
+              </LinkButton>
+            ) : null}
+            {canTest ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
+            {canSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
           </div>
         </GlassPanel>
       ) : null}
 
+      <details className="group glass rounded-2xl">
+        <summary className="flex cursor-pointer items-center justify-between gap-4 p-4 transition hover:bg-white/[0.025] sm:p-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/70">Technical setup</p>
+            <h2 className="mt-1 text-base font-semibold text-white">Instructions, endpoints, and code snippets</h2>
+            <p className="mt-1 text-sm text-slate-500">Expand when installing or troubleshooting this source.</p>
+          </div>
+          <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+        </summary>
+        <div className="grid gap-5 border-t border-white/10 p-4 sm:p-5">
       <GlassPanel className="p-4 sm:p-5">
         <div className="mb-4 flex items-center gap-2">
           <RadioTower className="h-4 w-4 text-cyan-200" />
@@ -273,7 +320,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           </div>
           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
             <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Vercel drain URL</p>
-            <p className="mt-2 break-all font-mono text-xs text-cyan-50">{`${publicAppUrl ?? "http://127.0.0.1:3100"}${source.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${source.id}`}`}</p>
+            <p className="mt-2 break-all font-mono text-xs text-cyan-50">{`${publicAppUrl ?? "http://localhost:4000"}${source.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${source.id}`}`}</p>
           </div>
         </GlassPanel>
       ) : (
@@ -284,6 +331,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           </div>
         </GlassPanel>
       )}
+        </div>
+      </details>
     </div>
   );
 }

@@ -25,6 +25,33 @@ export interface SourceScope {
   dataSpaceId?: string;
 }
 
+export type SourceUpdatePatch = Partial<
+  Omit<Source, "id" | "data_space_id" | "source_type_key" | "created_at">
+>;
+
+const SOURCE_UPDATE_COLUMNS = new Set<keyof SourceUpdatePatch>([
+  "display_name",
+  "input_url",
+  "normalized_url",
+  "external_account_id",
+  "account_name",
+  "status",
+  "sync_mode",
+  "sync_frequency_minutes",
+  "supports_webhook",
+  "webhook_url",
+  "webhook_secret_hint",
+  "last_manual_sync_at",
+  "last_cron_sync_at",
+  "last_webhook_sync_at",
+  "last_success_at",
+  "last_error_at",
+  "last_error",
+  "next_sync_at",
+  "metadata",
+  "updated_at",
+]);
+
 function sourceMatchesScope(source: Source, scope: SourceScope = {}) {
   return !scope.dataSpaceId || source.data_space_id === scope.dataSpaceId;
 }
@@ -230,10 +257,26 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
   return rows[0];
 }
 
-export async function updateSource(sourceId: string, patch: Partial<Source>): Promise<Source | null> {
+function assertSafeSourceUpdatePatch(patch: SourceUpdatePatch) {
+  const invalidColumns = Object.keys(patch).filter(
+    (column) => !SOURCE_UPDATE_COLUMNS.has(column as keyof SourceUpdatePatch),
+  );
+  if (invalidColumns.length > 0) {
+    throw new Error(`Source update contains immutable or unknown field(s): ${invalidColumns.join(", ")}`);
+  }
+}
+
+export async function updateSource(
+  sourceId: string,
+  patch: SourceUpdatePatch,
+  scope: SourceScope = {},
+): Promise<Source | null> {
+  assertSafeSourceUpdatePatch(patch);
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();
-    const index = store.sources.findIndex((source) => source.id === sourceId);
+    const index = store.sources.findIndex(
+      (source) => source.id === sourceId && sourceMatchesScope(source, scope),
+    );
     if (index < 0) return null;
     store.sources[index] = { ...store.sources[index], ...patch, id: sourceId, updated_at: new Date().toISOString() };
     return store.sources[index];
@@ -244,9 +287,13 @@ export async function updateSource(sourceId: string, patch: Partial<Source>): Pr
     metadata: patch.metadata ? JSON.stringify(patch.metadata) : undefined,
     updated_at: new Date().toISOString(),
   };
-  const { clause, values } = buildUpdateClause(nextPatch, 2);
-  if (!clause) return getSource(sourceId);
-  const rows = await queryRows<Source>(`update sources set ${clause} where id = $1 returning *`, [sourceId, ...values]);
+  const scoped = Boolean(scope.dataSpaceId);
+  const { clause, values } = buildUpdateClause(nextPatch, scoped ? 3 : 2);
+  if (!clause) return getSource(sourceId, scope);
+  const rows = await queryRows<Source>(
+    `update sources set ${clause} where id = $1${scoped ? " and data_space_id = $2" : ""} returning *`,
+    scoped ? [sourceId, scope.dataSpaceId, ...values] : [sourceId, ...values],
+  );
   return rows[0] ?? null;
 }
 

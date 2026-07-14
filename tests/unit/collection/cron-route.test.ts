@@ -20,6 +20,6 @@ describe("cron route authorization", () => {
       CRON_SECRET: "secret",
     } as NodeJS.ProcessEnv;
 
-    expect(isCronRequestAuthorized(new Request("http://localhost:3100/api/cron/sync?secret=secret"), env)).toBe(true);
+    expect(isCronRequestAuthorized(new Request("http://localhost:4000/api/cron/sync?secret=secret"), env)).toBe(true);
   });
 });

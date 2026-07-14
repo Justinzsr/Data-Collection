@@ -10,6 +10,7 @@ export type SourceTypeKey =
   | "shopify"
   | "tiktok"
   | "instagram"
+  | "xiaohongshu"
   | "custom_api"
   | "custom_csv";
 

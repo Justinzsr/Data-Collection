@@ -12,7 +12,17 @@ function buildPath(data: { value: number }[]) {
     .join(" ");
 }
 
-export function SparklineChart({ data, tone = "cyan", label }: { data: { date: string; value: number }[]; tone?: "cyan" | "teal" | "indigo" | "amber" | "rose"; label: string }) {
+export function SparklineChart({
+  data,
+  tone = "cyan",
+  label,
+  compact = false,
+}: {
+  data: { date: string; value: number }[];
+  tone?: "cyan" | "teal" | "indigo" | "amber" | "rose";
+  label: string;
+  compact?: boolean;
+}) {
   const stroke = {
     cyan: "#38bdf8",
     teal: "#2dd4bf",
@@ -22,9 +32,13 @@ export function SparklineChart({ data, tone = "cyan", label }: { data: { date: s
   }[tone];
   const path = buildPath(data);
   return (
-    <div className="h-20 min-w-0 rounded-lg border border-white/10 bg-black/20 px-2 py-2" data-testid="platform-sparkline">
+    <div
+      className={compact ? "h-11 min-w-0" : "h-20 min-w-0 rounded-lg border border-white/10 bg-black/20 px-2 py-2"}
+      data-testid="platform-sparkline"
+      data-overview-chart={compact ? "true" : undefined}
+    >
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label={`${label} sparkline`}>
-        {[28, 52, 76].map((y) => (
+        {(compact ? [50] : [28, 52, 76]).map((y) => (
           <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="rgba(148,163,184,0.12)" strokeWidth="0.3" />
         ))}
         <path d={path} fill="none" stroke={stroke} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />

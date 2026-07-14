@@ -39,6 +39,66 @@ describe("website tracker validation", () => {
     ).rejects.toThrow(/not found/i);
   });
 
+  it("rejects disabled website sources before storing an event", async () => {
+    const source = await createSource({
+      source_type_key: "website",
+      display_name: "Disabled Website Tracker",
+      input_url: "https://disabled.example",
+      normalized_url: "https://disabled.example",
+      status: "disabled",
+      sync_mode: "webhook",
+      supports_webhook: true,
+      metadata: { public_tracking_key: "mq_disabled_tracker", allowed_origins: ["https://disabled.example"] },
+    });
+    const before = (await listWebEvents(100)).length;
+
+    await expect(
+      ingestTrackEvent(
+        { ...baseEvent, source_id: source.id, public_tracking_key: undefined, url: "https://disabled.example/" },
+        { origin: "https://disabled.example" },
+      ),
+    ).rejects.toThrow(/disabled/i);
+
+    expect((await listWebEvents(100)).length).toBe(before);
+  });
+
+  it("rejects planned and non-website sources before storing an event", async () => {
+    const [plannedSource, nonWebsiteSource] = await Promise.all([
+      createSource({
+        source_type_key: "xiaohongshu",
+        display_name: "Planned Xiaohongshu",
+        input_url: "https://www.xiaohongshu.com/user/profile/test",
+        normalized_url: "https://www.xiaohongshu.com/user/profile/test",
+        status: "demo",
+        sync_mode: "manual",
+      }),
+      createSource({
+        source_type_key: "supabase",
+        display_name: "Not a website tracker",
+        input_url: "https://project.supabase.co",
+        normalized_url: "https://project.supabase.co",
+        status: "healthy",
+        sync_mode: "webhook",
+      }),
+    ]);
+    const before = (await listWebEvents(100)).length;
+
+    await expect(
+      ingestTrackEvent(
+        { ...baseEvent, source_id: plannedSource.id, public_tracking_key: undefined },
+        { origin: "https://moonarqstudio.com" },
+      ),
+    ).rejects.toThrow(/planned/i);
+    await expect(
+      ingestTrackEvent(
+        { ...baseEvent, source_id: nonWebsiteSource.id, public_tracking_key: undefined },
+        { origin: "https://moonarqstudio.com" },
+      ),
+    ).rejects.toThrow(/does not accept website tracker events/i);
+
+    expect((await listWebEvents(100)).length).toBe(before);
+  });
+
   it("rejects disallowed origins", async () => {
     await expect(ingestTrackEvent(baseEvent, { origin: "https://evil.example" })).rejects.toThrow(/origin/i);
   });

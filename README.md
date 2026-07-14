@@ -32,10 +32,17 @@ pnpm install
 cp .env.example .env.local
 pnpm db:migrate
 pnpm db:seed
-pnpm dev -- --port 3100 --hostname 127.0.0.1
+pnpm dev # http://localhost:4000
 ```
 
-Open `http://127.0.0.1:3100`.
+All local startup scripts are pinned to port `4000`; do not silently switch ports. Open `http://localhost:4000`.
+
+To verify the production server locally, use the same port:
+
+```bash
+pnpm build
+pnpm start # http://localhost:4000
+```
 
 Demo mode works without real credentials when `DATABASE_URL` is missing. When `DATABASE_URL` is configured, repositories switch to real Postgres-backed persistence automatically.
 
@@ -223,20 +230,11 @@ As of Vercel’s 2026 docs, cron jobs are available on all plans, but Hobby has 
 ## Open From Phone On Same Wi-Fi
 
 ```bash
-pnpm dev:lan
+pnpm dev:lan # http://0.0.0.0:4000
 ipconfig getifaddr en0
 ```
 
-Open `http://MAC_LOCAL_IP:3000` only if you launch a dev server on 3000 yourself.
-
-For this repo's default local workflow:
-
-```bash
-pnpm dev -- --port 3100 --hostname 0.0.0.0
-ipconfig getifaddr en0
-```
-
-Then open `http://MAC_LOCAL_IP:3100` on your phone.
+Then open `http://MAC_LOCAL_IP:4000` on your phone.
 
 ## Future Connectors
 

@@ -1,5 +1,9 @@
-import type { ConnectorDefinition, DetectionResult } from "@/collection/connectors/types";
-import type { SourceTypeDefinition, SourceTypeKey } from "@/storage/db/schema";
+import type {
+  ConnectorDefinition,
+  ConnectorSourceTypeDefinition,
+  DetectionResult,
+} from "@/collection/connectors/types";
+import type { Source, SourceTypeKey } from "@/storage/db/schema";
 import { supabaseConnector } from "@/collection/connectors/supabase/connector";
 import { websiteConnector } from "@/collection/connectors/website/connector";
 import { vercelWebAnalyticsDrainConnector } from "@/collection/connectors/vercel-web-analytics-drain/connector";
@@ -11,6 +15,7 @@ import {
 } from "@/collection/connectors/future-connectors";
 import { instagramConnector } from "@/collection/connectors/instagram/connector";
 import { tiktokConnector } from "@/collection/connectors/tiktok/connector";
+import { xiaohongshuConnector } from "@/collection/connectors/xiaohongshu/connector";
 
 export const connectorRegistry: ConnectorDefinition[] = [
   vercelWebAnalyticsDrainConnector,
@@ -21,6 +26,7 @@ export const connectorRegistry: ConnectorDefinition[] = [
   instagramConnector,
   customCsvConnector,
   customApiConnector,
+  xiaohongshuConnector,
   websiteConnector,
 ];
 
@@ -28,6 +34,33 @@ export function getConnector(key: SourceTypeKey): ConnectorDefinition {
   const connector = connectorRegistry.find((item) => item.key === key);
   if (!connector) throw new Error(`Unknown connector: ${key}`);
   return connector;
+}
+
+export function getConnectorUnavailableReason(connector: ConnectorDefinition): string | null {
+  if (connector.availability === "planned") {
+    return `${connector.displayName} is planned and does not support live connections, connection tests, or sync yet.`;
+  }
+  return null;
+}
+
+export function getSourceOperationBlockReason(
+  source: Pick<Source, "source_type_key" | "status">,
+): string | null {
+  const connector = getConnector(source.source_type_key);
+  const unavailable = getConnectorUnavailableReason(connector);
+  if (unavailable) return unavailable;
+  if (source.status === "disabled") return "This source is disabled and cannot be tested or synced.";
+  return null;
+}
+
+export function getCredentialSetupBlockReason(
+  connector: ConnectorDefinition,
+  credentialKeys: Iterable<string>,
+): string | null {
+  const savedKeys = new Set(credentialKeys);
+  const missing = connector.requiredFields.filter((field) => field.required && !savedKeys.has(field.key));
+  if (missing.length === 0) return null;
+  return `Add required credentials before testing or syncing: ${missing.map((field) => field.label).join(", ")}.`;
 }
 
 export function detectSource(input: string): DetectionResult[] {
@@ -43,7 +76,7 @@ export function bestDetection(input: string): DetectionResult | null {
   return detectSource(input)[0] ?? null;
 }
 
-export function listSourceTypes(): SourceTypeDefinition[] {
+export function listSourceTypes(): ConnectorSourceTypeDefinition[] {
   const now = new Date().toISOString();
   return connectorRegistry.map((connector) => ({
     key: connector.key,
@@ -51,13 +84,18 @@ export function listSourceTypes(): SourceTypeDefinition[] {
     description: connector.description,
     category: connector.category,
     icon: connector.icon,
+    availability: connector.availability,
+    setup_kind: connector.setupKind,
+    default_sync_mode: connector.defaultSyncMode,
+    capabilities: connector.capabilities,
+    setup_instructions: connector.getSetupInstructions(),
     url_patterns: connector.urlPatterns.map((pattern) => pattern.source),
     required_fields: connector.requiredFields,
     optional_fields: connector.optionalFields,
     supported_metrics: connector.getMetricDefinitions().map((metric) => metric.key),
     auth_type: connector.authType,
     docs_url: connector.docsUrl ?? null,
-    enabled: true,
+    enabled: connector.availability === "live",
     created_at: now,
     updated_at: now,
   }));

@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import {
-  DASHBOARD_SESSION_COOKIE,
+  DEFAULT_DASHBOARD_PATH,
   DASHBOARD_SESSION_TTL_SECONDS,
   getDashboardAuthSetup,
+  getDashboardSessionCookieName,
+  safeDashboardRedirectPath,
   signDashboardSession,
 } from "@/storage/auth/dashboard-session";
 
 export const runtime = "nodejs";
-
-function safeNextPath(value: FormDataEntryValue | null) {
-  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return "/dashboard";
-  return value;
-}
 
 function redirect(request: Request, path: string) {
   return NextResponse.redirect(new URL(path, request.url), { status: 303 });
@@ -27,7 +24,7 @@ function timingSafePasswordMatches(candidate: string, expected: string) {
 
 export async function POST(request: Request) {
   const setup = getDashboardAuthSetup();
-  if (setup.bypass) return redirect(request, "/dashboard");
+  if (setup.bypass) return redirect(request, DEFAULT_DASHBOARD_PATH);
 
   if (!setup.configured || !process.env.DASHBOARD_ADMIN_PASSWORD || !process.env.DASHBOARD_SESSION_SECRET) {
     return redirect(request, "/login?setup=missing");
@@ -35,14 +32,14 @@ export async function POST(request: Request) {
 
   const form = await request.formData();
   const password = String(form.get("password") ?? "");
-  const nextPath = safeNextPath(form.get("next"));
+  const nextPath = safeDashboardRedirectPath(form.get("next"));
   if (!timingSafePasswordMatches(password, process.env.DASHBOARD_ADMIN_PASSWORD)) {
     return redirect(request, `/login?error=invalid&next=${encodeURIComponent(nextPath)}`);
   }
 
   const response = redirect(request, nextPath);
   response.cookies.set({
-    name: DASHBOARD_SESSION_COOKIE,
+    name: getDashboardSessionCookieName(),
     value: await signDashboardSession(process.env.DASHBOARD_SESSION_SECRET),
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

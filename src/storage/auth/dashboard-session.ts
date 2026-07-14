@@ -1,5 +1,9 @@
-export const DASHBOARD_SESSION_COOKIE = "__Host-moonarq_dashboard";
+export const DEFAULT_DASHBOARD_PATH = "/w/moonarq/dashboard";
+export const DASHBOARD_SESSION_COOKIE = "moonarq_dashboard";
+export const SECURE_DASHBOARD_SESSION_COOKIE = "__Host-moonarq_dashboard";
 export const DASHBOARD_SESSION_TTL_SECONDS = 60 * 60 * 12;
+
+const SAFE_REDIRECT_ORIGIN = "https://dashboard.moonarq.invalid";
 
 type SessionPayload = {
   v: 1;
@@ -14,6 +18,23 @@ export type DashboardAuthSetup = {
 };
 
 const encoder = new TextEncoder();
+
+export function getDashboardSessionCookieName(env: NodeJS.ProcessEnv = process.env) {
+  return env.NODE_ENV === "production" ? SECURE_DASHBOARD_SESSION_COOKIE : DASHBOARD_SESSION_COOKIE;
+}
+
+export function safeDashboardRedirectPath(value: unknown, fallback = DEFAULT_DASHBOARD_PATH) {
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return fallback;
+  }
+  try {
+    const parsed = new URL(value, SAFE_REDIRECT_ORIGIN);
+    if (parsed.origin !== SAFE_REDIRECT_ORIGIN) return fallback;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
+}
 
 function base64UrlEncode(value: Uint8Array | string) {
   const bytes = typeof value === "string" ? encoder.encode(value) : value;
@@ -98,7 +119,7 @@ export async function isDashboardRequestAuthenticated(request: Request, env: Nod
   if (setup.bypass) return true;
   if (!setup.configured) return false;
   const cookies = parseCookieHeader(request.headers.get("cookie"));
-  return verifyDashboardSession(cookies[DASHBOARD_SESSION_COOKIE], env.DASHBOARD_SESSION_SECRET);
+  return verifyDashboardSession(cookies[getDashboardSessionCookieName(env)], env.DASHBOARD_SESSION_SECRET);
 }
 
 export function isProtectedUiPath(pathname: string) {
@@ -117,6 +138,7 @@ export function isPublicIngestionOrAuthPath(pathname: string) {
     pathname === "/api/cron/sync" ||
     pathname === "/api/cron/daily-report" ||
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/webhooks/supabase/") ||
     pathname.startsWith("/api/webhooks/vercel/analytics-drain/")
   );
 }
@@ -132,7 +154,6 @@ export function isPrivateApiPath(pathname: string) {
     pathname.startsWith("/api/sync") ||
     pathname.startsWith("/api/metrics") ||
     pathname.startsWith("/api/reports") ||
-    pathname.startsWith("/api/content") ||
-    pathname.startsWith("/api/webhooks/supabase/")
+    pathname.startsWith("/api/content")
   );
 }

@@ -14,7 +14,7 @@ export default async function NewSourcePage({ params }: { params: Promise<{ data
       <SectionHeader
         eyebrow="Source onboarding"
         title={`Add Source to ${dataSpace.display_name}`}
-        description="Paste a link, detect the platform, choose sync mode, understand credentials/setup, save the source, then run an initial sync or continue in demo mode."
+        description="Choose a platform first, verify its account URL when useful, then finish with the recommended OAuth or server-side setup. Planned integrations stay visible without offering fake connection actions."
       />
       <Suspense fallback={<div className="rounded-lg border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-300">Loading source wizard...</div>}>
         <AddSourceWizard dataSpaceSlug={dataSpace.slug} dataSpaceName={dataSpace.display_name} basePath={dashboardPath(dataSpace.slug)} />

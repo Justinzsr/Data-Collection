@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Camera, ExternalLink, Eye, Heart, MessageCircle, Share2, Video } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, ExternalLink, Eye, Heart, MessageCircle, Share2, Video } from "lucide-react";
 import type { ReactNode } from "react";
 import { getContentDashboard } from "@/aggregation/services/content-service";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
@@ -100,13 +100,29 @@ function MetricIcon({ label }: { label: string }) {
   return null;
 }
 
-export default async function ContentPage({ params }: { params: Promise<{ dataSpaceSlug: string }> }) {
-  const { dataSpaceSlug } = await params;
+const PAGE_SIZE = 6;
+
+export default async function ContentPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ dataSpaceSlug: string }>;
+  searchParams?: Promise<{ platform?: string; page?: string }>;
+}) {
+  const [{ dataSpaceSlug }, query] = await Promise.all([params, searchParams]);
   const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
   if (!dataSpace) notFound();
   const content = await getContentDashboard({ dataSpaceId: dataSpace.id });
   const basePath = dashboardPath(dataSpace.slug);
-  const contentGroups = orderedContentGroups(content.items);
+  const availablePlatforms: string[] = Array.from(new Set(content.items.map((item) => item.source_type_key)));
+  const platform = query?.platform && availablePlatforms.includes(query.platform) ? query.platform : "all";
+  const filteredItems = platform === "all" ? content.items : content.items.filter((item) => item.source_type_key === platform);
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const requestedPage = Number.parseInt(query?.page ?? "1", 10);
+  const page = Number.isFinite(requestedPage) ? Math.min(Math.max(requestedPage, 1), totalPages) : 1;
+  const pagedItems = filteredItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const contentGroups = orderedContentGroups(pagedItems);
+  const filterHref = (nextPlatform: string, nextPage = 1) => `${basePath}/content?platform=${encodeURIComponent(nextPlatform)}&page=${nextPage}`;
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6">
@@ -117,6 +133,16 @@ export default async function ContentPage({ params }: { params: Promise<{ dataSp
       />
       {content.items.length ? (
         <div className="grid gap-6">
+          <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.025] p-3 sm:flex-row sm:items-center sm:justify-between">
+            <nav className="flex max-w-full gap-2 overflow-x-auto pb-1" aria-label="Filter content by platform">
+              {["all", ...availablePlatforms].map((key) => (
+                <LinkButton key={key} href={filterHref(key)} variant={platform === key ? "primary" : "ghost"} className="min-h-9 shrink-0 px-3 capitalize" aria-current={platform === key ? "page" : undefined}>
+                  {key === "all" ? `All (${content.items.length})` : key}
+                </LinkButton>
+              ))}
+            </nav>
+            <p className="text-xs text-slate-500">Showing {pagedItems.length} of {filteredItems.length}</p>
+          </div>
           {contentGroups.map(([sourceTypeKey, items]) => {
             const meta = platformMeta(sourceTypeKey);
             return (
@@ -131,16 +157,16 @@ export default async function ContentPage({ params }: { params: Promise<{ dataSp
                       <h2 className="mt-1 text-xl font-semibold text-white">{meta.title}</h2>
                     </div>
                   </div>
-                  <Badge tone={meta.tone}>{items.length} content rows</Badge>
+                  <Badge tone={meta.tone} className="self-start">{items.length} content rows</Badge>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 xl:grid-cols-2">
                   {items.map((item) => {
                     const title = item.title ?? item.external_content_id;
                     const description = item.caption ?? "Waiting for caption/description data";
                     return (
                       <GlassPanel key={item.id} className={`p-4 ${meta.sectionClass}`}>
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
                           <div className="min-w-0">
                             <div className="mb-2 flex flex-wrap gap-2">
                               <Badge tone={meta.tone}>{item.source_type_key}</Badge>
@@ -157,7 +183,7 @@ export default async function ContentPage({ params }: { params: Promise<{ dataSp
                             </LinkButton>
                           ) : null}
                         </div>
-                        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                        <div className="mt-4 grid grid-cols-2 gap-2 2xl:grid-cols-5">
                           {contentMetricTiles(content, item.id, item.source_type_key).map((metric) => {
                             const waiting = metric.value === "Waiting for scope/data";
                             return (
@@ -181,6 +207,17 @@ export default async function ContentPage({ params }: { params: Promise<{ dataSp
               </section>
             );
           })}
+          {totalPages > 1 ? (
+            <nav className="flex items-center justify-between gap-3 border-t border-white/10 pt-4" aria-label="Content pagination">
+              {page > 1 ? (
+                <LinkButton href={filterHref(platform, page - 1)} variant="secondary"><ChevronLeft className="h-4 w-4" /> Previous</LinkButton>
+              ) : <span />}
+              <p className="text-sm text-slate-400">Page {page} of {totalPages}</p>
+              {page < totalPages ? (
+                <LinkButton href={filterHref(platform, page + 1)} variant="secondary">Next <ChevronRight className="h-4 w-4" /></LinkButton>
+              ) : <span />}
+            </nav>
+          ) : null}
         </div>
       ) : (
         <GlassPanel className="p-5">

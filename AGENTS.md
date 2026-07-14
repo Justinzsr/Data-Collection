@@ -37,6 +37,10 @@ UI rules:
 - Avoid generic admin-template visuals and unreadable neon overload.
 - Verify no horizontal overflow on mobile widths.
 
+Local development and QA rules:
+- Always run and verify the app at `http://localhost:4000`.
+- If port 4000 is occupied by a stale local process, stop that process instead of silently switching to another port.
+
 Project skills:
 - Use `skills/uiux-dashboard/SKILL.md` for dashboard UI changes.
 - Use `skills/data-collection-base/SKILL.md` for architecture, sync, and storage changes.

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { DASHBOARD_SESSION_COOKIE } from "@/storage/auth/dashboard-session";
+import { getDashboardSessionCookieName } from "@/storage/auth/dashboard-session";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const response = NextResponse.redirect(new URL("/login", request.url), { status: 303 });
   response.cookies.set({
-    name: DASHBOARD_SESSION_COOKIE,
+    name: getDashboardSessionCookieName(),
     value: "",
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -16,4 +16,3 @@ export async function POST(request: Request) {
   });
   return response;
 }
-

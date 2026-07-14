@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --background: #070a0f;
-  --foreground: #f8fafc;
-  --surface: #0b111a;
-  --surface-elevated: #101827;
-  --muted: #94a3b8;
-  --border: rgba(148, 163, 184, 0.16);
-  --cyan: #38bdf8;
-  --teal: #2dd4bf;
-  --indigo: #818cf8;
+  --background: #080a0d;
+  --foreground: #f4f6f8;
+  --surface: #0f1217;
+  --surface-elevated: #151922;
+  --muted: #929cab;
+  --border: rgba(213, 220, 230, 0.11);
+  --cyan: #73c8ec;
+  --teal: #5ed5be;
+  --indigo: #99a5f5;
   --success: #22c55e;
   --warning: #f59e0b;
   --danger: #f43f5e;
@@ -26,8 +26,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   min-width: 320px;
-  overflow-x: hidden;
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
 }
 
 * {
@@ -40,28 +40,53 @@ body {
 
 .app-bg {
   background:
-    radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.16), transparent 28rem),
-    radial-gradient(circle at 88% 12%, rgba(45, 212, 191, 0.12), transparent 30rem),
-    linear-gradient(180deg, #070a0f 0%, #0b111a 50%, #070a0f 100%);
+    radial-gradient(circle at 12% -8%, rgba(66, 153, 194, 0.11), transparent 34rem),
+    radial-gradient(circle at 92% 4%, rgba(70, 157, 137, 0.07), transparent 32rem),
+    #080a0d;
 }
 
 .grid-bg {
   background-image:
-    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(to bottom, black, transparent 78%);
+    linear-gradient(rgba(190, 202, 216, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(190, 202, 216, 0.025) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(to bottom, black, transparent 62%);
 }
 
 .glass {
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(16, 24, 39, 0.82), rgba(11, 17, 26, 0.72));
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(18px);
+  background: linear-gradient(155deg, rgba(19, 23, 30, 0.94), rgba(13, 16, 21, 0.94));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025), 0 18px 50px rgba(0, 0, 0, 0.2);
 }
 
 .code-scroll {
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
+}
+
+summary {
+  list-style: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+.overview-module-card:has(> details[open]) {
+  grid-column: 1 / -1;
+}
+
+.overview-social-card[open] {
+  grid-column: 1 / -1;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(115, 200, 236, 0.72);
+  outline-offset: 3px;
+}
+
+* {
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  scrollbar-width: thin;
 }

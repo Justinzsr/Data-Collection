@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DASHBOARD_SESSION_COOKIE,
+  DEFAULT_DASHBOARD_PATH,
   getDashboardAuthSetup,
+  getDashboardSessionCookieName,
   isPrivateApiPath,
   isProtectedUiPath,
+  safeDashboardRedirectPath,
+  SECURE_DASHBOARD_SESSION_COOKIE,
   signDashboardSession,
   verifyDashboardSession,
 } from "@/storage/auth/dashboard-session";
@@ -25,6 +30,24 @@ describe("dashboard session gate", () => {
     ).toBe(true);
   });
 
+  it("uses local cookie names without __Host and secure names in production", () => {
+    expect(getDashboardSessionCookieName({ NODE_ENV: "test" })).toBe(DASHBOARD_SESSION_COOKIE);
+    expect(getDashboardSessionCookieName({ NODE_ENV: "development" })).toBe(DASHBOARD_SESSION_COOKIE);
+    expect(getDashboardSessionCookieName({ NODE_ENV: "production" })).toBe(SECURE_DASHBOARD_SESSION_COOKIE);
+    expect(DASHBOARD_SESSION_COOKIE.startsWith("__Host-")).toBe(false);
+    expect(SECURE_DASHBOARD_SESSION_COOKIE.startsWith("__Host-")).toBe(true);
+  });
+
+  it("allows normalized same-origin paths and rejects redirect authority tricks", () => {
+    expect(safeDashboardRedirectPath("/w/moonarq/dashboard?range=7d#health")).toBe(
+      "/w/moonarq/dashboard?range=7d#health",
+    );
+    expect(safeDashboardRedirectPath("https://evil.example/path")).toBe(DEFAULT_DASHBOARD_PATH);
+    expect(safeDashboardRedirectPath("//evil.example/path")).toBe(DEFAULT_DASHBOARD_PATH);
+    expect(safeDashboardRedirectPath("/\\evil.example/path")).toBe(DEFAULT_DASHBOARD_PATH);
+    expect(safeDashboardRedirectPath("dashboard")).toBe(DEFAULT_DASHBOARD_PATH);
+  });
+
   it("identifies protected UI and private API routes without blocking ingestion routes", () => {
     expect(isProtectedUiPath("/dashboard/sources")).toBe(true);
     expect(isProtectedUiPath("/w/moonarq/dashboard")).toBe(true);
@@ -38,6 +61,7 @@ describe("dashboard session gate", () => {
     expect(isPrivateApiPath("/api/track")).toBe(false);
     expect(isPrivateApiPath("/api/cron/sync")).toBe(false);
     expect(isPrivateApiPath("/api/cron/daily-report")).toBe(false);
+    expect(isPrivateApiPath("/api/webhooks/supabase/source")).toBe(false);
     expect(isPrivateApiPath("/api/webhooks/vercel/analytics-drain/source")).toBe(false);
   });
 });

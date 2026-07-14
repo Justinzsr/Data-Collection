@@ -5,13 +5,26 @@ import type { JsonRecord, SourceTypeKey, SyncRun, SyncRunStatus, SyncTrigger } f
 import { getDemoStore } from "@/storage/repositories/demo-store";
 import { listSources } from "@/storage/repositories/sources-repository";
 
-export async function createSyncRun(input: {
+export interface CreateSyncRunInput {
   source_id: string | null;
   source_type_key: SourceTypeKey | null;
   trigger: SyncTrigger;
   idempotency_key?: string | null;
   metadata?: JsonRecord;
-}): Promise<SyncRun> {
+}
+
+export interface CreateSyncRunResult {
+  run: SyncRun;
+  created: boolean;
+}
+
+function assertIdempotentRunMatches(existing: SyncRun, input: CreateSyncRunInput) {
+  if (existing.source_id !== input.source_id || existing.trigger !== input.trigger) {
+    throw new Error("Sync run idempotency key is already assigned to a different source or trigger.");
+  }
+}
+
+export async function createOrGetSyncRun(input: CreateSyncRunInput): Promise<CreateSyncRunResult> {
   const now = new Date().toISOString();
   const run: SyncRun = {
     id: randomUUID(),
@@ -37,8 +50,16 @@ export async function createSyncRun(input: {
   };
 
   if (!isRuntimeDatabaseConfigured()) {
-    getDemoStore().syncRuns.unshift(run);
-    return run;
+    const store = getDemoStore();
+    const existing = run.idempotency_key
+      ? store.syncRuns.find((item) => item.idempotency_key === run.idempotency_key)
+      : null;
+    if (existing) {
+      assertIdempotentRunMatches(existing, input);
+      return { run: existing, created: false };
+    }
+    store.syncRuns.unshift(run);
+    return { run, created: true };
   }
 
   const rows = await queryRows<SyncRun>(
@@ -68,6 +89,7 @@ export async function createSyncRun(input: {
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, $20
       )
+      on conflict (idempotency_key) do nothing
       returning *
     `,
     [
@@ -93,7 +115,24 @@ export async function createSyncRun(input: {
       run.created_at,
     ],
   );
-  return rows[0];
+  if (rows[0]) return { run: rows[0], created: true };
+  if (!run.idempotency_key) {
+    throw new Error("Could not create sync run.");
+  }
+  const existingRows = await queryRows<SyncRun>(
+    "select * from sync_runs where idempotency_key = $1 limit 1",
+    [run.idempotency_key],
+  );
+  const existing = existingRows[0];
+  if (!existing) {
+    throw new Error("Could not resolve the existing idempotent sync run.");
+  }
+  assertIdempotentRunMatches(existing, input);
+  return { run: existing, created: false };
+}
+
+export async function createSyncRun(input: CreateSyncRunInput): Promise<SyncRun> {
+  return (await createOrGetSyncRun(input)).run;
 }
 
 export async function updateSyncRun(syncRunId: string, patch: Partial<SyncRun>): Promise<SyncRun | null> {

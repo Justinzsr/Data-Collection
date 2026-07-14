@@ -1,14 +1,16 @@
 import { Plus } from "lucide-react";
 import { notFound } from "next/navigation";
-import { getPlatformModules } from "@/aggregation/services/platform-modules-service";
-import { getConnector } from "@/collection/connectors/registry";
+import {
+  getConnector,
+  getCredentialSetupBlockReason,
+  getSourceOperationBlockReason,
+} from "@/collection/connectors/registry";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { listCredentialHints } from "@/storage/repositories/credentials-repository";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
-import { PlatformModuleGrid } from "@/presentation/dashboard/platform-module-grid";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
@@ -16,20 +18,27 @@ import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
 
+function humanize(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export default async function SourcesPage({ params }: { params: Promise<{ dataSpaceSlug: string }> }) {
   const { dataSpaceSlug } = await params;
   const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
   if (!dataSpace) notFound();
   const basePath = dashboardPath(dataSpace.slug);
-  const [sources, modules] = await Promise.all([
-    listSources({ dataSpaceId: dataSpace.id }),
-    getPlatformModules("30d", { dataSpaceId: dataSpace.id, dataSpaceName: dataSpace.display_name }),
-  ]);
+  const sources = await listSources({ dataSpaceId: dataSpace.id });
   const withCredentials = await Promise.all(
     sources.map(async (source) => {
       const connector = getConnector(source.source_type_key);
       const credentialKeys = new Set([...connector.requiredFields, ...connector.optionalFields].map((field) => field.key));
-      return { source, credentials: (await listCredentialHints(source.id)).filter((credential) => credentialKeys.has(credential.field_key)) };
+      const credentials = (await listCredentialHints(source.id)).filter((credential) => credentialKeys.has(credential.field_key));
+      return {
+        source,
+        connector,
+        blockReason: getSourceOperationBlockReason(source) ?? getCredentialSetupBlockReason(connector, credentials.map((credential) => credential.field_key)),
+        credentials,
+      };
     }),
   );
   return (
@@ -62,63 +71,62 @@ export default async function SourcesPage({ params }: { params: Promise<{ dataSp
         </GlassPanel>
       ) : (
         <>
-          <PlatformModuleGrid modules={modules} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
-          <div className="hidden overflow-hidden rounded-lg border border-white/10 lg:block">
+          <div className="hidden overflow-hidden rounded-2xl border border-white/10 xl:block">
             <table className="w-full border-collapse text-left text-sm">
               <thead className="bg-white/[0.04] text-xs uppercase tracking-[0.14em] text-slate-500">
                 <tr>
-                  {["Source", "Status", "Sync", "Last manual", "Last cron", "Last webhook", "Next", "Actions"].map((heading) => (
+                  {["Source", "Status", "Schedule", "Last success", "Next", "Actions"].map((heading) => (
                     <th key={heading} className="px-4 py-3 font-medium">{heading}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {withCredentials.map(({ source, credentials }) => (
-                  <tr key={source.id} className="bg-black/10">
+                {withCredentials.map(({ source, connector, credentials, blockReason }) => (
+                  <tr key={source.id} data-testid={`source-row-${source.id}`} className="bg-black/10">
                     <td className="px-4 py-4">
                       <p className="font-medium text-white">{source.display_name}</p>
                       <p className="max-w-xs truncate text-xs text-slate-500">{source.normalized_url ?? source.input_url ?? source.source_type_key}</p>
                       {credentials.length ? <p className="mt-1 text-xs text-slate-500">Credentials: {credentials.map((c) => c.value_hint).join(", ")}</p> : null}
                     </td>
-                    <td className="px-4 py-4"><Badge tone={statusTone(source.status)}>{source.status}</Badge></td>
-                    <td className="px-4 py-4 text-slate-300">{source.sync_mode} · {source.sync_frequency_minutes}m</td>
-                    <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.last_manual_sync_at)}</td>
-                    <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.last_cron_sync_at)}</td>
-                    <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.last_webhook_sync_at)}</td>
+                    <td className="px-4 py-4"><Badge tone={statusTone(source.status)}>{humanize(source.status)}</Badge></td>
+                    <td className="px-4 py-4 text-slate-300">{humanize(source.sync_mode)} · {source.sync_frequency_minutes}m</td>
+                    <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.last_success_at)}</td>
                     <td className="px-4 py-4 text-slate-400">{formatAppDateTime(source.next_sync_at, "manual")}</td>
                     <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-2">
-                        <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact />
-                        <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact />
-                        <LinkButton href={`${basePath}/sources/${source.id}`} variant="secondary" className="px-3">Edit Credentials</LinkButton>
+                        {!blockReason && connector.capabilities.supportsManualSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
+                        {!blockReason && connector.capabilities.canTestConnection ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
+                        <LinkButton href={`${basePath}/sources/${source.id}`} variant="secondary" className="px-3">Manage</LinkButton>
                       </div>
+                      {blockReason ? <p className="mt-2 max-w-xs text-xs leading-5 text-slate-500">{blockReason}</p> : null}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="grid gap-4 lg:hidden">
-            {withCredentials.map(({ source }) => (
-              <GlassPanel key={source.id} className="p-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:hidden">
+            {withCredentials.map(({ source, connector, blockReason }) => (
+              <GlassPanel key={source.id} data-testid={`source-card-${source.id}`} className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-white">{source.display_name}</p>
                     <p className="truncate text-xs text-slate-500">{source.normalized_url ?? source.input_url}</p>
                   </div>
-                  <Badge tone={statusTone(source.status)}>{source.status}</Badge>
+                  <Badge tone={statusTone(source.status)}>{humanize(source.status)}</Badge>
                 </div>
                 <div className="mt-4 grid gap-2 text-sm text-slate-400">
-                  <p>Sync mode: {source.sync_mode} · {source.sync_frequency_minutes}m</p>
+                  <p>Sync mode: {humanize(source.sync_mode)} · {source.sync_frequency_minutes}m</p>
                   <p>Last success: {formatAppDateTime(source.last_success_at)}</p>
                   <p>Last error: {source.last_error ?? "none"}</p>
                   <p>Next: {formatAppDateTime(source.next_sync_at, "manual only")}</p>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact />
-                  <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact />
-                  <LinkButton href={`${basePath}/sources/${source.id}`} variant="secondary">Edit Credentials</LinkButton>
+                  {!blockReason && connector.capabilities.supportsManualSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
+                  {!blockReason && connector.capabilities.canTestConnection ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
+                  <LinkButton href={`${basePath}/sources/${source.id}`} variant="secondary">Manage</LinkButton>
                 </div>
+                {blockReason ? <p className="mt-3 text-xs leading-5 text-slate-500">{blockReason}</p> : null}
               </GlassPanel>
             ))}
           </div>

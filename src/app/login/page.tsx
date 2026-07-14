@@ -1,14 +1,17 @@
 import { ShieldCheck } from "lucide-react";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel } from "@/presentation/components/ui/panel";
-import { getDashboardAuthSetup } from "@/storage/auth/dashboard-session";
+import {
+  getDashboardAuthSetup,
+  safeDashboardRedirectPath,
+} from "@/storage/auth/dashboard-session";
 
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage({ searchParams }: { searchParams?: Promise<{ error?: string; next?: string; setup?: string }> }) {
   const params = await searchParams;
   const setup = getDashboardAuthSetup();
-  const nextPath = params?.next && params.next.startsWith("/") && !params.next.startsWith("//") ? params.next : "/dashboard";
+  const nextPath = safeDashboardRedirectPath(params?.next);
   return (
     <main className="grid min-h-screen place-items-center px-4 py-12">
       <GlassPanel className="w-full max-w-md p-6">
@@ -21,7 +24,7 @@ export default async function LoginPage({ searchParams }: { searchParams?: Promi
         </p>
         {setup.bypass ? (
           <div className="mt-6 text-center">
-            <LinkButton href="/dashboard" variant="primary">Enter with dev bypass</LinkButton>
+            <LinkButton href={nextPath} variant="primary">Enter with dev bypass</LinkButton>
             <p className="mt-3 text-xs leading-5 text-amber-100">DEV_AUTH_BYPASS is only honored outside production.</p>
           </div>
         ) : setup.configured ? (

@@ -18,6 +18,23 @@ function raw(payload: RawPayload["payload"]): RawPayload {
 describe("Supabase connector normalization", () => {
   beforeEach(() => resetDemoStore());
 
+  it("skips production polling when only webhook ingestion is configured", async () => {
+    const source = await getSource(DEMO_SOURCE_IDS.supabase);
+    if (!source) throw new Error("Missing demo source");
+
+    const result = await supabaseConnector.sync({
+      source,
+      credentials: {},
+      trigger: "cron",
+      isDemoMode: false,
+    });
+
+    expect(result).toMatchObject({
+      recordsFetched: 0,
+      skippedReason: "No polling credential configured; awaiting authenticated Supabase webhooks.",
+    });
+  });
+
   it("groups signups by created_at date and writes snapshot totals on sync date", async () => {
     const source = await getSource(DEMO_SOURCE_IDS.supabase);
     if (!source) throw new Error("Missing demo source");

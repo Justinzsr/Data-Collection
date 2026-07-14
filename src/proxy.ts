@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  DASHBOARD_SESSION_COOKIE,
   getDashboardAuthSetup,
+  getDashboardSessionCookieName,
   isPrivateApiPath,
   isProtectedUiPath,
   verifyDashboardSession,
 } from "@/storage/auth/dashboard-session";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
     const redirectUrl = request.nextUrl.clone();
@@ -37,7 +37,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const authenticated = await verifyDashboardSession(
-    request.cookies.get(DASHBOARD_SESSION_COOKIE)?.value,
+    request.cookies.get(getDashboardSessionCookieName())?.value,
     process.env.DASHBOARD_SESSION_SECRET,
   );
   if (authenticated) return NextResponse.next();

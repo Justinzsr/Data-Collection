@@ -8,7 +8,7 @@ export function getPublicAppUrl() {
     return `https://${vercelUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
   }
   if (process.env.NODE_ENV !== "production") {
-    return "http://127.0.0.1:3100";
+    return "http://localhost:4000";
   }
   return null;
 }

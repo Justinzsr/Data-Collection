@@ -15,7 +15,7 @@ export default async function HealthPage({ params }: { params: Promise<{ dataSpa
   return (
     <div className="mx-auto grid max-w-7xl gap-6">
       <SectionHeader eyebrow="System health" title={`${dataSpace.display_name} health`} description="Operational events are scoped to this data space and recorded instead of disappearing into logs." />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <GlassPanel className="p-4"><p className="text-sm text-slate-400">Sources</p><p className="mt-2 text-3xl font-semibold text-white">{health.sourcesTotal}</p></GlassPanel>
         <GlassPanel className="p-4"><p className="text-sm text-slate-400">Healthy</p><p className="mt-2 text-3xl font-semibold text-white">{health.healthySources}</p></GlassPanel>
         <GlassPanel className="p-4"><p className="text-sm text-slate-400">Warnings</p><p className="mt-2 text-3xl font-semibold text-white">{health.warningSources}</p></GlassPanel>
@@ -28,8 +28,8 @@ export default async function HealthPage({ params }: { params: Promise<{ dataSpa
           {health.recentEvents.map((event) => (
             <div key={event.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium text-white">{event.event_type}</p>
-                <Badge tone={statusTone(event.severity)}>{event.severity}</Badge>
+                <p className="font-medium capitalize text-white">{event.event_type.replaceAll("_", " ")}</p>
+                <Badge tone={statusTone(event.severity)}>{event.severity.replaceAll("_", " ")}</Badge>
               </div>
               <p className="mt-1 text-sm text-slate-400">{event.message}</p>
               <p className="mt-2 text-xs text-slate-500">{formatAppDateTime(event.created_at)}</p>

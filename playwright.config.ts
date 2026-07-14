@@ -4,19 +4,18 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
   use: {
-    baseURL: "http://localhost:3100",
+    baseURL: "http://localhost:4000",
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm exec next build && pnpm exec next start -H 127.0.0.1 -p 3100",
-    url: "http://localhost:3100",
-    reuseExistingServer: true,
+    command: "pnpm build && pnpm start",
+    url: "http://localhost:4000",
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "true",
     env: {
-      DEV_AUTH_BYPASS: "true",
       APP_ENCRYPTION_KEY: "test-key-32-bytes-long-for-aes!!",
       DASHBOARD_ADMIN_PASSWORD: "e2e-dashboard-password",
       DASHBOARD_SESSION_SECRET: "e2e-dashboard-session-secret-32-bytes",
-      NEXT_PUBLIC_APP_URL: "http://localhost:3100",
+      NEXT_PUBLIC_APP_URL: "http://localhost:4000",
     },
   },
   projects: [

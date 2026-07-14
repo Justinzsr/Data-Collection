@@ -1,1 +1,1 @@
-export { instagramConnector as instagramNormalizer } from "@/collection/connectors/future-connectors";
+export { instagramConnector as instagramNormalizer } from "@/collection/connectors/instagram/connector";

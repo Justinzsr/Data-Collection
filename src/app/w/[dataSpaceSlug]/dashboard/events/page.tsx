@@ -1,4 +1,4 @@
-import { Activity, ShieldAlert, Webhook } from "lucide-react";
+import { Activity, ChevronDown, ShieldAlert, Webhook } from "lucide-react";
 import { notFound } from "next/navigation";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { getWebsiteModeLabel, resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
@@ -34,7 +34,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
   const trackingKey = typeof trackerSource?.metadata.public_tracking_key === "string" ? trackerSource.metadata.public_tracking_key : null;
   const publicAppUrl = getPublicAppUrl();
   const publicAppUrlWarning = getPublicAppUrlWarning();
-  const endpoint = `${publicAppUrl ?? "http://127.0.0.1:3100"}/api/track`;
+  const endpoint = `${publicAppUrl ?? "http://localhost:4000"}/api/track`;
   const snippet = trackingKey ? generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey }) : null;
   const helper = trackingKey ? generateReactHelper({ endpoint, publicTrackingKey: trackingKey }) : null;
   const byPath = events.reduce<Record<string, number>>((acc, event) => {
@@ -43,7 +43,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
   }, {});
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-6">
+    <div className="mx-auto grid w-full min-w-0 max-w-7xl gap-6">
       <SectionHeader
         eyebrow="Website connector"
         title={`${dataSpace.display_name} Event dashboard`}
@@ -63,7 +63,17 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
         title="Website page views"
         description={website?.source_type_key === "vercel_web_analytics_drain" ? "Live Vercel Drain metrics" : `${dataSpace.display_name} website metrics`}
       />
-      <div className="grid gap-5 lg:grid-cols-3">
+      <details className="group glass min-w-0 overflow-hidden rounded-2xl">
+        <summary className="flex cursor-pointer items-center justify-between gap-4 p-4 transition hover:bg-white/[0.025] sm:p-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/70">Installation</p>
+            <h2 className="mt-1 text-base font-semibold text-white">Endpoints, tracking snippets, and setup</h2>
+            <p className="mt-1 text-sm text-slate-500">Expand when configuring or troubleshooting website collection.</p>
+          </div>
+          <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+        </summary>
+        <div className="grid min-w-0 gap-5 border-t border-white/10 p-4 sm:p-5">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-3">
         <GlassPanel className="p-4 sm:p-5">
           <h2 className="mb-3 text-base font-semibold text-white">Setup steps</h2>
           {sources.length ? (
@@ -107,7 +117,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
             <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Vercel Drain endpoint</p>
             <p className="mt-2 break-all font-mono text-xs text-cyan-50">
-              {drainSource ? `${publicAppUrl ?? "http://127.0.0.1:3100"}${drainSource.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${drainSource.id}`}` : "No Vercel Drain source in this data space"}
+              {drainSource ? `${publicAppUrl ?? "http://localhost:4000"}${drainSource.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${drainSource.id}`}` : "No Vercel Drain source in this data space"}
             </p>
           </div>
           <p className="text-sm leading-6 text-slate-300">
@@ -128,7 +138,9 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
           </p>
         </GlassPanel>
       )}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        </div>
+      </details>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
         <GlassPanel className="p-4 sm:p-5">
           <h2 className="mb-4 text-base font-semibold text-white">Events by path</h2>
           {Object.entries(byPath).length ? (

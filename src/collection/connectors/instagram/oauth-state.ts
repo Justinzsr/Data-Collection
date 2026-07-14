@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-export const INSTAGRAM_OAUTH_STATE_COOKIE = "__Host-moonarq_instagram_oauth";
+export const INSTAGRAM_OAUTH_STATE_COOKIE = "moonarq_instagram_oauth";
+export const SECURE_INSTAGRAM_OAUTH_STATE_COOKIE = "__Host-moonarq_instagram_oauth";
 export const INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 
 type InstagramMetaAppProfileKey = "default" | "moonarq";
@@ -21,6 +22,10 @@ export class InstagramOAuthStateError extends Error {
     super(message);
     this.name = "InstagramOAuthStateError";
   }
+}
+
+export function getInstagramOAuthStateCookieName(env: NodeJS.ProcessEnv = process.env) {
+  return env.NODE_ENV === "production" ? SECURE_INSTAGRAM_OAUTH_STATE_COOKIE : INSTAGRAM_OAUTH_STATE_COOKIE;
 }
 
 function base64UrlEncode(value: string | Buffer) {

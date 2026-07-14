@@ -49,7 +49,8 @@ export default async function SourceDataExplorerPage({
   const tab = query?.tab ?? "website";
   const range = query?.range ?? "30d";
   const sourceId = query?.sourceId ?? "all";
-  const page = Math.max(1, Number(query?.page ?? 1));
+  const requestedPage = Number.parseInt(query?.page ?? "1", 10);
+  const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1;
   const [sources, result] = await Promise.all([
     listSources({ dataSpaceId: dataSpace.id }),
     getSourceDataExplorer({ tab, range, sourceId, page, dataSpaceId: dataSpace.id }),
@@ -71,13 +72,13 @@ export default async function SourceDataExplorerPage({
 
       <GlassPanel className="p-4 sm:p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="flex flex-wrap gap-2">
+          <nav className="flex max-w-full gap-2 overflow-x-auto pb-1" aria-label="Data explorer tables">
             {tabs.map((item) => (
-              <Link key={item.key} href={hrefFor(basePath, { tab: item.key, range, sourceId })} className={`rounded-lg border px-3 py-2 text-sm transition ${result.tab === item.key ? "border-cyan-300/40 bg-cyan-300/15 text-cyan-50" : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"}`}>
+              <Link key={item.key} href={hrefFor(basePath, { tab: item.key, range, sourceId })} className={`shrink-0 rounded-xl border px-3 py-2 text-sm transition ${result.tab === item.key ? "border-cyan-200/25 bg-cyan-200 text-slate-950" : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"}`}>
                 {item.label}
               </Link>
             ))}
-          </div>
+          </nav>
 
           <form className="grid gap-3 sm:grid-cols-[minmax(8rem,10rem)_minmax(12rem,18rem)_auto]">
             <input type="hidden" name="tab" value={result.tab} />
