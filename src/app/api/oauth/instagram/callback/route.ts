@@ -125,6 +125,7 @@ export async function GET(request: Request) {
     const expiresAt = tokenExpiresAt(longToken?.expires_in ?? shortToken.expires_in, connectedAt);
     const profile = await fetchInstagramAccountProfile(activeToken, config, getInstagramAccountSelection(source));
     validateInstagramAccountForSource(source, profile);
+    const canonicalProfileUrl = `https://www.instagram.com/${profile.username}/`;
 
     await saveInstagramCredentials(source.id, {
       instagram_access_token: shortToken.access_token,
@@ -142,13 +143,15 @@ export async function GET(request: Request) {
       status: "healthy",
       external_account_id: profile.id,
       account_name: profile.username,
-      normalized_url: `https://www.instagram.com/${profile.username}`,
+      input_url: canonicalProfileUrl,
+      normalized_url: canonicalProfileUrl,
       metadata: {
         ...source.metadata,
         scaffoldOnly: false,
         oauth_connected: true,
         instagram_account_id: profile.id,
         instagram_username: profile.username,
+        profile_url: canonicalProfileUrl,
         page_id: profile.page_id ?? null,
         graph_api_version: config.graphApiVersion,
         meta_app_profile: config.profileKey,

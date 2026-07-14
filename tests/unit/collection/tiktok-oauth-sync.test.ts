@@ -15,7 +15,7 @@ import { DASHBOARD_SESSION_COOKIE, signDashboardSession } from "@/storage/auth/d
 import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import type { Source } from "@/storage/db/schema";
 import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store";
-import { listCredentialHints, saveCredential } from "@/storage/repositories/credentials-repository";
+import { getDecryptedCredentialMap, listCredentialHints, saveCredential } from "@/storage/repositories/credentials-repository";
 import { getSource } from "@/storage/repositories/sources-repository";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -520,6 +520,151 @@ describe("Auto Lab TikTok OAuth and sync", () => {
     expect(credentialStore).not.toContain(ACCESS_TOKEN);
     expect(credentialStore).not.toContain(REFRESH_TOKEN);
     expect(credentialStore).not.toContain(TIKTOK_CLIENT_SECRET);
+  });
+
+  it("reconnects the same TikTok open_id and refreshes stale account labels", async () => {
+    addAutoLabTikTokSource({
+      status: "healthy",
+      external_account_id: OPEN_ID,
+      account_name: "old_handle",
+      input_url: "https://www.tiktok.com/@old_handle",
+      normalized_url: "https://www.tiktok.com/@old_handle",
+      metadata: {
+        oauth_connected: true,
+        tiktok_open_id: OPEN_ID,
+        tiktok_username: "old_handle",
+      },
+    });
+    await saveCredential(AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_access_token", "previous-test-token");
+    mockTikTokApi({
+      user: {
+        open_id: OPEN_ID,
+        display_name: "Auto Lab IS350",
+        username: "just_4is",
+        profile_deep_link: "https://www.tiktok.com/@stale_api_handle",
+      },
+    });
+    const state = createTikTokOAuthState({
+      sourceId: AUTO_LAB_TIKTOK_SOURCE_ID,
+      dataSpaceSlug: "auto-lab",
+      returnPath: `/w/auto-lab/dashboard/sources/${AUTO_LAB_TIKTOK_SOURCE_ID}`,
+      tiktokAppProfile: "default",
+    });
+
+    const response = await tiktokOAuthCallbackRoute(
+      new Request(`https://app.example.com/api/oauth/tiktok/callback?code=code-from-tiktok&state=${encodeURIComponent(state)}`, {
+        headers: { cookie: oauthStateCookie(state) },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(new URL(response.headers.get("location") ?? "https://app.example.com").searchParams.get("tiktok_oauth")).toBe("connected");
+    expect(await getSource(AUTO_LAB_TIKTOK_SOURCE_ID, { dataSpaceId: DATA_SPACE_IDS.autoLab })).toMatchObject({
+      external_account_id: OPEN_ID,
+      account_name: "just_4is",
+      input_url: "https://www.tiktok.com/@just_4is",
+      normalized_url: "https://www.tiktok.com/@just_4is",
+      metadata: {
+        tiktok_open_id: OPEN_ID,
+        tiktok_username: "just_4is",
+        profile_deep_link: "https://www.tiktok.com/@just_4is",
+      },
+    });
+    expect((await getDecryptedCredentialMap(AUTO_LAB_TIKTOK_SOURCE_ID)).tiktok_access_token).toBe(ACCESS_TOKEN);
+  });
+
+  it("rejects switching a connected TikTok source to a different open_id before persisting credentials", async () => {
+    addAutoLabTikTokSource({
+      status: "healthy",
+      external_account_id: OPEN_ID,
+      account_name: "just_4is",
+      metadata: {
+        oauth_connected: true,
+        tiktok_open_id: OPEN_ID,
+        tiktok_username: "just_4is",
+      },
+    });
+    const existingToken = "existing-test-token";
+    await saveCredential(AUTO_LAB_TIKTOK_SOURCE_ID, "tiktok_access_token", existingToken);
+    mockTikTokApi({
+      user: {
+        open_id: MOONARQ_OPEN_ID,
+        display_name: "Different Account",
+        username: "different_account",
+        profile_deep_link: "https://www.tiktok.com/@different_account",
+      },
+    });
+    const state = createTikTokOAuthState({
+      sourceId: AUTO_LAB_TIKTOK_SOURCE_ID,
+      dataSpaceSlug: "auto-lab",
+      returnPath: `/w/auto-lab/dashboard/sources/${AUTO_LAB_TIKTOK_SOURCE_ID}`,
+      tiktokAppProfile: "default",
+    });
+
+    const response = await tiktokOAuthCallbackRoute(
+      new Request(`https://app.example.com/api/oauth/tiktok/callback?code=code-from-tiktok&state=${encodeURIComponent(state)}`, {
+        headers: { cookie: oauthStateCookie(state) },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    const redirect = new URL(response.headers.get("location") ?? "https://app.example.com");
+    expect(redirect.searchParams.get("tiktok_oauth")).toBe("error");
+    expect(redirect.searchParams.get("message")).toBe("That TikTok account does not match this connected source.");
+    expect(await getSource(AUTO_LAB_TIKTOK_SOURCE_ID, { dataSpaceId: DATA_SPACE_IDS.autoLab })).toMatchObject({
+      external_account_id: OPEN_ID,
+      account_name: "just_4is",
+      input_url: "https://www.tiktok.com/@auto_lab_cars",
+    });
+    const storedCredentials = await getDecryptedCredentialMap(AUTO_LAB_TIKTOK_SOURCE_ID);
+    expect(storedCredentials.tiktok_access_token).toBe(existingToken);
+    expect(storedCredentials.tiktok_refresh_token).toBeUndefined();
+    const mismatchEvent = getDemoStore().connectorEvents.find((event) => event.event_type === "tiktok_oauth_account_mismatch");
+    expect(mismatchEvent).toMatchObject({
+      source_id: AUTO_LAB_TIKTOK_SOURCE_ID,
+      severity: "error",
+      message: "TikTok OAuth account did not match the account already connected to this source.",
+      metadata: { sanitized: true, reason: "open_id_mismatch" },
+    });
+    expect(JSON.stringify(mismatchEvent)).not.toContain(MOONARQ_OPEN_ID);
+    expect(JSON.stringify(mismatchEvent)).not.toContain(OPEN_ID);
+  });
+
+  it("rejects a username switch for legacy connected sources without a stored open_id", async () => {
+    addAutoLabTikTokSource({
+      status: "healthy",
+      external_account_id: null,
+      account_name: "legacy_handle",
+      metadata: {
+        oauth_connected: true,
+        tiktok_username: "legacy_handle",
+      },
+    });
+    mockTikTokApi({
+      user: {
+        open_id: MOONARQ_OPEN_ID,
+        username: "different_account",
+      },
+    });
+    const state = createTikTokOAuthState({
+      sourceId: AUTO_LAB_TIKTOK_SOURCE_ID,
+      dataSpaceSlug: "auto-lab",
+      returnPath: `/w/auto-lab/dashboard/sources/${AUTO_LAB_TIKTOK_SOURCE_ID}`,
+      tiktokAppProfile: "default",
+    });
+
+    const response = await tiktokOAuthCallbackRoute(
+      new Request(`https://app.example.com/api/oauth/tiktok/callback?code=code-from-tiktok&state=${encodeURIComponent(state)}`, {
+        headers: { cookie: oauthStateCookie(state) },
+      }),
+    );
+
+    expect(new URL(response.headers.get("location") ?? "https://app.example.com").searchParams.get("tiktok_oauth")).toBe("error");
+    expect(await listCredentialHints(AUTO_LAB_TIKTOK_SOURCE_ID)).toHaveLength(0);
+    expect(getDemoStore().connectorEvents.find((event) => event.event_type === "tiktok_oauth_account_mismatch")?.metadata).toMatchObject({
+      sanitized: true,
+      reason: "username_mismatch",
+    });
   });
 
   it("runs a real mocked Test Connection and reports missing video scope", async () => {

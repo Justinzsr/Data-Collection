@@ -22,6 +22,7 @@ import type { JsonRecord, Source } from "@/storage/db/schema";
 import { saveCredential } from "@/storage/repositories/credentials-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
 import { updateSource } from "@/storage/repositories/sources-repository";
+import { dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
 
 function validUrl(inputUrl: string) {
   try {
@@ -37,7 +38,7 @@ function captionPreview(value: string | undefined | null) {
 }
 
 function numberValue(value: number | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function videoPublishedAt(video: TikTokVideo) {
@@ -244,10 +245,11 @@ export const tiktokConnector: ConnectorDefinition = {
   },
   async sync(ctx) {
     const snapshot = await fetchSnapshot(ctx);
+    const snapshotDate = dateKeyInAppTimeZone(snapshot.fetchedAt);
     return {
       rawPayloads: [
         {
-          externalId: `tiktok:${snapshot.account.open_id ?? ctx.source.id}:${snapshot.fetchedAt.slice(0, 10)}`,
+          externalId: `tiktok:${snapshot.account.open_id ?? ctx.source.id}:${snapshotDate}`,
           fetchedAt: snapshot.fetchedAt,
           payload: snapshot as unknown as JsonRecord,
           payloadHash: hashTikTokPayload(snapshot),
@@ -265,7 +267,7 @@ export const tiktokConnector: ConnectorDefinition = {
     for (const rawPayload of rawPayloads) {
       const payload = rawPayload.payload as Partial<TikTokSyncSnapshot>;
       if (payload.kind !== "tiktok_sync_snapshot" || !payload.account) continue;
-      const date = rawPayload.fetchedAt.slice(0, 10);
+      const date = dateKeyInAppTimeZone(rawPayload.fetchedAt);
       const accountDimensions = {
         open_id: payload.account.open_id ?? source.external_account_id ?? "unknown",
         username: payload.account.username ?? source.account_name ?? null,
@@ -276,19 +278,30 @@ export const tiktokConnector: ConnectorDefinition = {
       if (typeof payload.account.video_count === "number") metrics.push(metric(date, source, "tiktok_video_count", payload.account.video_count, "count", accountDimensions));
       if (typeof payload.account.likes_count === "number") metrics.push(metric(date, source, "tiktok_profile_likes", payload.account.likes_count, "count", accountDimensions));
 
+      const videos = payload.videos ?? [];
       const totals = { views: 0, likes: 0, comments: 0, shares: 0 };
-      for (const video of payload.videos ?? []) {
+      const complete = { views: true, likes: true, comments: true, shares: true };
+      for (const video of videos) {
         const views = numberValue(video.view_count);
         const likes = numberValue(video.like_count);
         const comments = numberValue(video.comment_count);
         const shares = numberValue(video.share_count);
-        const engagementRate = views > 0 ? ((likes + comments + shares) / views) * 100 : 0;
-        totals.views += views;
-        totals.likes += likes;
-        totals.comments += comments;
-        totals.shares += shares;
+        const hasCompleteEngagement = views !== undefined && likes !== undefined && comments !== undefined && shares !== undefined;
+        const engagementRate = hasCompleteEngagement
+          ? views > 0
+            ? ((likes + comments + shares) / views) * 100
+            : 0
+          : undefined;
+        if (views === undefined) complete.views = false;
+        else totals.views += views;
+        if (likes === undefined) complete.likes = false;
+        else totals.likes += likes;
+        if (comments === undefined) complete.comments = false;
+        else totals.comments += comments;
+        if (shares === undefined) complete.shares = false;
+        else totals.shares += shares;
         const publishedAt = videoPublishedAt(video);
-        const videoDate = publishedAt?.slice(0, 10) ?? date;
+        const videoDate = publishedAt ? dateKeyInAppTimeZone(publishedAt) : date;
         const common = {
           date: videoDate,
           sourceId: source.id,
@@ -302,27 +315,27 @@ export const tiktokConnector: ConnectorDefinition = {
           publishedAt,
           dimensions: {
             open_id: payload.account.open_id ?? source.external_account_id ?? "unknown",
-            duration: numberValue(video.duration),
-            width: numberValue(video.width),
-            height: numberValue(video.height),
+            duration: numberValue(video.duration) ?? null,
+            width: numberValue(video.width) ?? null,
+            height: numberValue(video.height) ?? null,
           },
         };
-        contentMetrics.push(
-          { ...common, metricKey: "tiktok_video_views", metricValue: views, unit: "count" },
-          { ...common, metricKey: "tiktok_likes", metricValue: likes, unit: "count" },
-          { ...common, metricKey: "tiktok_comments", metricValue: comments, unit: "count" },
-          { ...common, metricKey: "tiktok_shares", metricValue: shares, unit: "count" },
-          { ...common, metricKey: "tiktok_engagement_rate", metricValue: engagementRate, unit: "percent" },
-        );
+        if (views !== undefined) contentMetrics.push({ ...common, metricKey: "tiktok_video_views", metricValue: views, unit: "count" });
+        if (likes !== undefined) contentMetrics.push({ ...common, metricKey: "tiktok_likes", metricValue: likes, unit: "count" });
+        if (comments !== undefined) contentMetrics.push({ ...common, metricKey: "tiktok_comments", metricValue: comments, unit: "count" });
+        if (shares !== undefined) contentMetrics.push({ ...common, metricKey: "tiktok_shares", metricValue: shares, unit: "count" });
+        if (engagementRate !== undefined) contentMetrics.push({ ...common, metricKey: "tiktok_engagement_rate", metricValue: engagementRate, unit: "percent" });
       }
-      const totalEngagementRate = totals.views > 0 ? ((totals.likes + totals.comments + totals.shares) / totals.views) * 100 : 0;
-      metrics.push(
-        metric(date, source, "tiktok_video_views", totals.views, "count", { ...accountDimensions, rollup: "video_sync_total" }),
-        metric(date, source, "tiktok_likes", totals.likes, "count", { ...accountDimensions, rollup: "video_sync_total" }),
-        metric(date, source, "tiktok_comments", totals.comments, "count", { ...accountDimensions, rollup: "video_sync_total" }),
-        metric(date, source, "tiktok_shares", totals.shares, "count", { ...accountDimensions, rollup: "video_sync_total" }),
-        metric(date, source, "tiktok_engagement_rate", totalEngagementRate, "percent", { ...accountDimensions, rollup: "video_sync_total" }),
-      );
+      const confirmedEmptyAccount = videos.length === 0 && payload.account.video_count === 0;
+      const canRollUp = (key: keyof typeof complete) => (videos.length > 0 && complete[key]) || confirmedEmptyAccount;
+      if (canRollUp("views")) metrics.push(metric(date, source, "tiktok_video_views", totals.views, "count", { ...accountDimensions, rollup: "video_sync_total" }));
+      if (canRollUp("likes")) metrics.push(metric(date, source, "tiktok_likes", totals.likes, "count", { ...accountDimensions, rollup: "video_sync_total" }));
+      if (canRollUp("comments")) metrics.push(metric(date, source, "tiktok_comments", totals.comments, "count", { ...accountDimensions, rollup: "video_sync_total" }));
+      if (canRollUp("shares")) metrics.push(metric(date, source, "tiktok_shares", totals.shares, "count", { ...accountDimensions, rollup: "video_sync_total" }));
+      if (canRollUp("views") && canRollUp("likes") && canRollUp("comments") && canRollUp("shares")) {
+        const totalEngagementRate = totals.views > 0 ? ((totals.likes + totals.comments + totals.shares) / totals.views) * 100 : 0;
+        metrics.push(metric(date, source, "tiktok_engagement_rate", totalEngagementRate, "percent", { ...accountDimensions, rollup: "video_sync_total" }));
+      }
     }
     return { metrics, contentMetrics };
   },

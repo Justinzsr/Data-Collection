@@ -10,7 +10,12 @@ import {
   validateSignedTikTokOAuthState,
   validateTikTokOAuthState,
 } from "@/collection/connectors/tiktok/oauth-state";
-import { getTikTokAppProfileKeyForSource, safeTikTokReturnPath } from "@/collection/connectors/tiktok/source-policy";
+import {
+  canonicalTikTokProfileUrl,
+  checkTikTokOAuthIdentity,
+  getTikTokAppProfileKeyForSource,
+  safeTikTokReturnPath,
+} from "@/collection/connectors/tiktok/source-policy";
 import { saveCredential } from "@/storage/repositories/credentials-repository";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
@@ -109,6 +114,21 @@ export async function GET(request: Request) {
     const openId = user.open_id ?? token.open_id ?? null;
     const displayName = user.display_name ?? null;
     const username = user.username ?? null;
+    const identityCheck = checkTikTokOAuthIdentity(source, { openId, username });
+    if (!identityCheck.ok) {
+      await recordConnectorEvent({
+        source_id: source.id,
+        event_type: "tiktok_oauth_account_mismatch",
+        severity: "error",
+        message: "TikTok OAuth account did not match the account already connected to this source.",
+        metadata: { sanitized: true, reason: identityCheck.reason },
+      });
+      return sourceRedirect(request, returnPath, {
+        tiktok_oauth: "error",
+        message: "That TikTok account does not match this connected source.",
+      });
+    }
+    const canonicalProfileUrl = canonicalTikTokProfileUrl(username, user.profile_deep_link);
 
     await saveTikTokCredentials(source.id, {
       tiktok_access_token: token.access_token,
@@ -131,9 +151,10 @@ export async function GET(request: Request) {
 
     await updateSource(source.id, {
       status: "healthy",
+      input_url: canonicalProfileUrl ?? source.input_url,
       external_account_id: openId,
       account_name: username ?? displayName ?? source.account_name,
-      normalized_url: user.profile_deep_link ?? source.normalized_url,
+      normalized_url: canonicalProfileUrl ?? source.normalized_url,
       metadata: {
         ...source.metadata,
         scaffoldOnly: false,
@@ -141,7 +162,7 @@ export async function GET(request: Request) {
         tiktok_open_id: openId,
         tiktok_username: username ?? null,
         tiktok_display_name: displayName ?? null,
-        profile_deep_link: user.profile_deep_link ?? null,
+        profile_deep_link: canonicalProfileUrl,
         tiktok_scopes: token.scope ?? null,
         tiktok_app_profile: config.profileKey,
         tiktok_app_profile_label: config.profileLabel,
@@ -164,8 +185,8 @@ export async function GET(request: Request) {
       source_id: source.id,
       event_type: "tiktok_oauth_error",
       severity: "error",
-      message: error instanceof Error ? error.message : "TikTok OAuth callback failed.",
-      metadata: { sanitized: true },
+      message: "TikTok OAuth callback failed.",
+      metadata: { sanitized: true, errorType: error instanceof Error ? error.name : "UnknownError" },
     });
     return sourceRedirect(request, returnPath, { tiktok_oauth: "error", message: "TikTok OAuth setup failed." });
   }

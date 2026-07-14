@@ -53,12 +53,17 @@ export type PlatformModule = {
 
 type ModuleKey = PlatformModule["sourceTypeKey"];
 
+type MetricMode = "sum" | "latest" | "cumulative_snapshot";
+
 type MetricConfig = {
   primaryKey: string;
   primaryLabel: string;
   unit: string;
-  secondary: Array<{ key: string; label: string; unit: string; mode?: "sum" | "latest" }>;
+  primaryMode?: MetricMode;
+  secondary: Array<{ key: string; label: string; unit: string; mode?: MetricMode }>;
 };
+
+const cumulativeTikTokMetricKeys = ["tiktok_video_views", "tiktok_likes", "tiktok_comments", "tiktok_shares"] as const;
 
 const platformOrder: ModuleKey[] = ["website", "supabase", "tiktok", "instagram", "shopify", "custom_api", "custom_csv"];
 
@@ -109,10 +114,11 @@ const metricConfig: Record<ModuleKey, MetricConfig> = {
     primaryKey: "tiktok_video_views",
     primaryLabel: "Video views",
     unit: "count",
+    primaryMode: "cumulative_snapshot",
     secondary: [
-      { key: "tiktok_likes", label: "Likes", unit: "count" },
-      { key: "tiktok_comments", label: "Comments", unit: "count" },
-      { key: "tiktok_shares", label: "Shares", unit: "count" },
+      { key: "tiktok_likes", label: "Likes", unit: "count", mode: "cumulative_snapshot" },
+      { key: "tiktok_comments", label: "Comments", unit: "count", mode: "cumulative_snapshot" },
+      { key: "tiktok_shares", label: "Shares", unit: "count", mode: "cumulative_snapshot" },
       { key: "tiktok_engagement_rate", label: "Engagement", unit: "percent", mode: "latest" },
       { key: "tiktok_followers", label: "Followers", unit: "count", mode: "latest" },
       { key: "tiktok_video_count", label: "Videos", unit: "count", mode: "latest" },
@@ -208,8 +214,37 @@ function metricRowsFor(rows: MetricDaily[], source: Source | null, metricSourceT
 }
 
 function latestValue(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
-  const matches = metricRowsFor(rows, source, metricSourceTypeKey, metricKey).sort((a, b) => a.date.localeCompare(b.date));
+  const matches = metricRowsFor(rows, source, metricSourceTypeKey, metricKey).sort(
+    (a, b) => a.date.localeCompare(b.date) || a.updated_at.localeCompare(b.updated_at),
+  );
   return matches.at(-1)?.metric_value ?? 0;
+}
+
+function cumulativeSnapshotRows(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
+  const matches = metricRowsFor(rows, source, metricSourceTypeKey, metricKey);
+  const rollups = matches.filter((row) => row.dimensions.rollup === "video_sync_total");
+  return rollups.length > 0 ? rollups : matches;
+}
+
+function cumulativeSnapshotPoints(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
+  const latestByDate = new Map<string, MetricDaily>();
+  for (const row of cumulativeSnapshotRows(rows, source, metricSourceTypeKey, metricKey)) {
+    const existing = latestByDate.get(row.date);
+    if (!existing || row.updated_at.localeCompare(existing.updated_at) >= 0) latestByDate.set(row.date, row);
+  }
+  return [...latestByDate.values()]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((row) => ({ date: row.date, value: row.metric_value }));
+}
+
+function cumulativeSnapshotValue(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
+  return cumulativeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey).at(-1)?.value ?? 0;
+}
+
+function cumulativePeriodChange(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
+  const points = cumulativeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey);
+  if (points.length < 2) return null;
+  return points.at(-1)!.value - points[0].value;
 }
 
 function metricValue(
@@ -217,14 +252,34 @@ function metricValue(
   source: Source | null,
   metricSourceTypeKey: SourceTypeKey,
   metricKey: string,
-  mode: "sum" | "latest" = "sum",
+  mode: MetricMode = "sum",
   latestRows: MetricDaily[] = rows,
 ) {
   if (mode === "latest") return latestValue(latestRows, source, metricSourceTypeKey, metricKey);
+  if (mode === "cumulative_snapshot") return cumulativeSnapshotValue(latestRows, source, metricSourceTypeKey, metricKey);
   return metricRowsFor(rows, source, metricSourceTypeKey, metricKey).reduce((sum, row) => sum + row.metric_value, 0);
 }
 
-function sparkline(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string, startDate: string, endDate: string) {
+function sparkline(
+  rows: MetricDaily[],
+  source: Source | null,
+  metricSourceTypeKey: SourceTypeKey,
+  metricKey: string,
+  startDate: string,
+  endDate: string,
+  mode: MetricMode = "sum",
+) {
+  if (mode === "cumulative_snapshot") {
+    const points = cumulativeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey);
+    const firstDate = points[0]?.date;
+    if (!firstDate) return [];
+    const valuesByDate = new Map(points.map((point) => [point.date, point.value]));
+    let lastValue = points[0].value;
+    return enumerateDays(firstDate, endDate).map((date) => {
+      lastValue = valuesByDate.get(date) ?? lastValue;
+      return { date, value: lastValue };
+    });
+  }
   return enumerateDays(startDate, endDate).map((date) => ({
     date,
     value: metricRowsFor(rows, source, metricSourceTypeKey, metricKey)
@@ -373,12 +428,23 @@ function createModule(input: {
   const { moduleKey, source, metricSourceTypeKey, currentRows, previousRows, range } = input;
   const config = metricConfig[moduleKey];
   const status = source?.status ?? placeholderSourceStatus(moduleKey);
-  const currentValue = metricValue(currentRows, source, metricSourceTypeKey, config.primaryKey);
-  const previousValue = metricValue(previousRows, source, metricSourceTypeKey, config.primaryKey);
+  const primaryMode = config.primaryMode ?? "sum";
+  const currentValue = metricValue(currentRows, source, metricSourceTypeKey, config.primaryKey, primaryMode, input.latestRows);
+  const currentComparisonValue =
+    primaryMode === "cumulative_snapshot"
+      ? cumulativePeriodChange(currentRows, source, metricSourceTypeKey, config.primaryKey)
+      : currentValue;
+  const previousComparisonValue =
+    primaryMode === "cumulative_snapshot"
+      ? cumulativePeriodChange(previousRows, source, metricSourceTypeKey, config.primaryKey)
+      : metricValue(previousRows, source, metricSourceTypeKey, config.primaryKey);
   const latestUsersTotal =
     moduleKey === "supabase" ? metricValue(currentRows, source, metricSourceTypeKey, "users_total", "latest", input.latestRows) : 0;
   const isHealthySupabaseNoSignupWindow = moduleKey === "supabase" && currentValue === 0 && latestUsersTotal > 0;
-  const deltaPercent = isHealthySupabaseNoSignupWindow ? null : calculateDelta(currentValue, previousValue);
+  const deltaPercent =
+    isHealthySupabaseNoSignupWindow || currentComparisonValue === null || previousComparisonValue === null
+      ? null
+      : calculateDelta(currentComparisonValue, previousComparisonValue);
 
   const platformLabel = platformLabelFor(moduleKey, input.dataSpaceName);
   return {
@@ -403,7 +469,7 @@ function createModule(input: {
       value: metricValue(currentRows, source, metricSourceTypeKey, item.key, item.mode ?? "sum", input.latestRows),
       unit: item.unit,
     })),
-    sparkline: sparkline(currentRows, source, metricSourceTypeKey, config.primaryKey, range.startDate, range.endDate),
+    sparkline: sparkline(currentRows, source, metricSourceTypeKey, config.primaryKey, range.startDate, range.endDate, primaryMode),
     insights: input.insights ?? [],
     lastSyncAt: latestSync(source),
     nextSyncAt: source?.next_sync_at ?? null,
@@ -427,7 +493,20 @@ export async function getPlatformModules(
     listSources({ dataSpaceId: options.dataSpaceId }),
     listMetrics({ startDate: range.startDate, endDate: range.endDate, dataSpaceId: options.dataSpaceId }),
     listMetrics({ startDate: previousRange.startDate, endDate: previousRange.endDate, dataSpaceId: options.dataSpaceId }),
-    listMetrics({ metricKeys: ["users_total", "confirmed_users", "followers", "engagement_rate", "tiktok_engagement_rate", "tiktok_followers", "tiktok_video_count", "latest_deployment_status"], dataSpaceId: options.dataSpaceId }),
+    listMetrics({
+      metricKeys: [
+        "users_total",
+        "confirmed_users",
+        "followers",
+        "engagement_rate",
+        ...cumulativeTikTokMetricKeys,
+        "tiktok_engagement_rate",
+        "tiktok_followers",
+        "tiktok_video_count",
+        "latest_deployment_status",
+      ],
+      dataSpaceId: options.dataSpaceId,
+    }),
   ]);
 
   const websiteSource = resolvePrimaryWebsiteSource(sources);

@@ -86,6 +86,63 @@ describe("sync engine", () => {
     expect(runs.every((run) => run.source_type_key !== "shopify")).toBe(true);
   });
 
+  it("reports unique content inserts separately from metric upserts", async () => {
+    const connector = getConnector("website");
+    const originalSync = connector.sync;
+    const originalNormalize = connector.normalize;
+    let sequence = 0;
+    connector.sync = async () => {
+      sequence += 1;
+      return {
+        rawPayloads: [{
+          externalId: `count-test-${sequence}`,
+          fetchedAt: `2026-07-14T18:0${sequence}:00.000Z`,
+          payload: { sequence },
+        }],
+        recordsFetched: 1,
+        message: "Count test sync completed.",
+      };
+    };
+    connector.normalize = async () => ({
+      metrics: [],
+      contentMetrics: [
+        {
+          date: "2026-07-14",
+          sourceId: DEMO_SOURCE_IDS.website,
+          sourceTypeKey: "website",
+          externalContentId: "count-test-item",
+          contentType: "page",
+          title: "Count test",
+          metricKey: "page_views",
+          metricValue: 10 + sequence,
+          unit: "count",
+        },
+        {
+          date: "2026-07-14",
+          sourceId: DEMO_SOURCE_IDS.website,
+          sourceTypeKey: "website",
+          externalContentId: "count-test-item",
+          contentType: "page",
+          title: "Count test",
+          metricKey: "unique_visitors",
+          metricValue: 5 + sequence,
+          unit: "count",
+        },
+      ],
+    });
+
+    try {
+      const first = await enqueueSyncRun({ sourceId: DEMO_SOURCE_IDS.website, trigger: "manual" });
+      const second = await enqueueSyncRun({ sourceId: DEMO_SOURCE_IDS.website, trigger: "manual" });
+
+      expect(first).toMatchObject({ records_inserted: 2, records_updated: 0, metrics_upserted: 2 });
+      expect(second).toMatchObject({ records_inserted: 1, records_updated: 1, metrics_upserted: 2 });
+    } finally {
+      connector.sync = originalSync;
+      connector.normalize = originalNormalize;
+    }
+  });
+
   it("source lock prevents concurrent syncs", async () => {
     const first = await acquireSourceLock(DEMO_SOURCE_IDS.website, "run-one", 60_000);
     const second = await acquireSourceLock(DEMO_SOURCE_IDS.website, "run-two", 60_000);

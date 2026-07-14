@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { PATCH as patchSourceRoute } from "@/app/api/sources/[id]/route";
 import { DATA_SPACE_IDS } from "@/storage/data-spaces";
-import { getSource, updateSource, type SourceUpdatePatch } from "@/storage/repositories/sources-repository";
+import {
+  createSource,
+  getSource,
+  nextAlignedSyncAt,
+  updateSource,
+  type SourceUpdatePatch,
+} from "@/storage/repositories/sources-repository";
 import { resetDemoStore } from "@/storage/repositories/demo-store";
 import { DEMO_SOURCE_IDS } from "@/storage/seed/demo-data";
 
@@ -89,5 +95,20 @@ describe("source update safety", () => {
     const source = await getSource(DEMO_SOURCE_IDS.website, { dataSpaceId: DATA_SPACE_IDS.moonarq });
     expect(source?.display_name).not.toBe("Wrong workspace");
     expect(source?.data_space_id).toBe(DATA_SPACE_IDS.moonarq);
+  });
+
+  it("uses connector scheduling defaults and aligns polling to cron boundaries", async () => {
+    const source = await createSource({
+      data_space_id: DATA_SPACE_IDS.autoLab,
+      source_type_key: "tiktok",
+      display_name: "Auto Lab TikTok test",
+    });
+
+    expect(source).toMatchObject({
+      sync_mode: "hourly",
+      sync_frequency_minutes: 60,
+      supports_webhook: false,
+    });
+    expect(nextAlignedSyncAt(new Date("2026-07-14T18:00:56.000Z"), 60)).toBe("2026-07-14T19:00:00.000Z");
   });
 });
