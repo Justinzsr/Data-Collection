@@ -1,1 +1,1 @@
-export { shopifyConnector as shopifyNormalizer } from "@/collection/connectors/future-connectors";
+export { shopifyConnector as shopifyNormalizer } from "@/collection/connectors/shopify/connector";

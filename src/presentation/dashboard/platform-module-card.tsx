@@ -42,10 +42,23 @@ const tones = {
   custom_csv: "teal",
 } as const;
 
+const compactPlatformLabels: Partial<Record<keyof typeof icons, string>> = {
+  website: "Website",
+  supabase: "Supabase",
+  tiktok: "TikTok",
+  instagram: "Instagram",
+  shopify: "Shopify",
+};
+
+function compactStatusLabel(status: PlatformModule["status"]) {
+  if (status === "needs_credentials") return "setup";
+  return status.replaceAll("_", " ");
+}
+
 function formatMetric(value: number | string, unit: string) {
   if (typeof value === "string") return value;
-  if (unit === "usd") {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  if (/^[a-z]{3}$/i.test(unit)) {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: unit.toUpperCase() }).format(value);
   }
   if (unit === "percent") return `${value.toFixed(1)}%`;
   return new Intl.NumberFormat("en-US").format(value);
@@ -76,11 +89,15 @@ export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", 
                 <Icon className="h-4 w-4 text-cyan-100" />
               </span>
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold text-white">{module.platformLabel}</h2>
-                <p className="truncate text-[11px] text-slate-500">{module.displayName}</p>
+                <h2 aria-label={module.platformLabel} title={module.platformLabel} className="truncate text-sm font-semibold text-white">
+                  {compactPlatformLabels[module.sourceTypeKey] ?? module.platformLabel}
+                </h2>
+                <p title={module.displayName} className="truncate text-[11px] text-slate-500">{module.displayName}</p>
               </div>
             </div>
-            <Badge tone={statusTone(module.status)}>{module.status.replaceAll("_", " ")}</Badge>
+            <span title={module.status.replaceAll("_", " ")}>
+              <Badge tone={statusTone(module.status)}>{compactStatusLabel(module.status)}</Badge>
+            </span>
           </div>
 
           <div className="mt-2.5 flex min-w-0 items-end justify-between gap-3">
@@ -153,7 +170,11 @@ export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", 
                   Source
                 </LinkButton>
               ) : (
-                <LinkButton href={`${basePath}/sources/new`} variant="ghost" className="min-h-9 px-3 text-xs">
+                <LinkButton
+                  href={module.sourceTypeKey === "shopify" ? `${basePath}/sources/new?template=shopify` : `${basePath}/sources/new`}
+                  variant="ghost"
+                  className="min-h-9 px-3 text-xs"
+                >
                   Configure
                 </LinkButton>
               )}

@@ -109,34 +109,6 @@ export const vercelProjectConnector = createPlannedConnector({
   ],
 });
 
-export const shopifyConnector = createPlannedConnector({
-  key: "shopify",
-  displayName: "Shopify",
-  description: "Future Shopify Admin API connector for orders, sales, refunds, and products.",
-  category: "Commerce",
-  icon: "ShoppingBag",
-  urlPatterns: [/\.myshopify\.com/i, /^https:\/\/admin\.shopify\.com\/store\//i],
-  authType: "shopify_admin_api_token",
-  supportedMetrics: ["orders", "gross_sales", "current_total", "net_payment", "refunds", "top_products"],
-  detect(inputUrl) {
-    const url = validUrl(inputUrl);
-    if (!url) return null;
-    if (url.hostname.endsWith(".myshopify.com")) {
-      return { confidence: 0.98, normalizedUrl: url.origin, reasons: [".myshopify.com store URL detected."], accountName: url.hostname.replace(".myshopify.com", "") };
-    }
-    if (url.hostname === "admin.shopify.com" && url.pathname.startsWith("/store/")) {
-      const store = url.pathname.split("/").filter(Boolean)[1];
-      return { confidence: 0.98, normalizedUrl: `https://admin.shopify.com/store/${store}`, reasons: ["Shopify admin store URL detected."], accountName: store };
-    }
-    return null;
-  },
-  setup: [
-    "Shopify is scaffolded only for this MVP because commerce is not operating yet.",
-    "Future real sync will use the official Shopify Admin API with a per-source encrypted Admin API token.",
-    "Planned metrics: orders, gross_sales, current_total, net_payment, refunds, and top_products.",
-  ],
-});
-
 export const customApiConnector = createPlannedConnector({
   key: "custom_api",
   displayName: "Custom API",

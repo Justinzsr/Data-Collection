@@ -41,6 +41,19 @@ Local development and QA rules:
 - Always run and verify the app at `http://localhost:4000`.
 - If port 4000 is occupied by a stale local process, stop that process instead of silently switching to another port.
 
+Clean-worktree and release-discipline rules:
+- Treat repository cleanliness as a release requirement, not a preference. Inspect `git status`, the active branch, upstream tracking, and the exact diff before making changes and again before handoff.
+- Prefer a dedicated clean feature branch/worktree created from the latest `origin/main` for non-trivial implementation work. If the current worktree contains unrelated or user-owned changes, preserve them and move the task to a clean worktree instead of mixing or overwriting them.
+- Never stage, commit, revert, or reformat unrelated files. Run `git diff --check` and inspect the staged diff before every commit.
+- Scan the changed files and commit range for secrets, private keys, tokens, `.env` files, generated artifacts, debug output, and accidental personal data before push or merge.
+- Do not push, merge, or deploy until the user authorizes that action. Authorization to implement does not automatically authorize publishing.
+- Before push or merge, fetch the remote and verify branch divergence, mergeability, required checks, migrations, and the full test gate below. A dirty worktree, failing check, unresolved discrepancy, or uncertain credential migration is a hard stop.
+- After merge, verify that `origin/main` contains the intended commit and that the production deployment was built from that exact merged SHA. Do not infer success from a green local build alone.
+- Perform post-deploy browser smoke tests on the real production alias, reconcile visible headline metrics against their authoritative source, and inspect Vercel runtime errors/5xx plus Supabase source and sync health.
+- Preserve existing platform connections and encrypted credentials across code deployments. Never require reconnection unless an OAuth token, scope, account identity, or credential is actually invalid, and explain the evidence before reconnecting.
+- If any local, CI, production, data, or UI result disagrees, do not report completion. Diagnose it, fix it, repeat the relevant checks, and only then call the work clean.
+- End implementation work with a clean worktree and a concise evidence-based handoff that lists the commit/PR/deployment, tests run, production checks, data-source health, and any explicitly non-blocking debt.
+
 Project skills:
 - Use `skills/uiux-dashboard/SKILL.md` for dashboard UI changes.
 - Use `skills/data-collection-base/SKILL.md` for architecture, sync, and storage changes.

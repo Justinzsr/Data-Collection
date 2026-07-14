@@ -7,6 +7,7 @@ MVP:
 - Website: first-party tracking through `/api/track`.
 - Instagram: official Meta Graph API OAuth and manual sync for isolated source-specific Instagram accounts.
 - TikTok: official TikTok Login Kit OAuth and API v2 sync for data-space-scoped TikTok sources.
+- Shopify: official Admin GraphQL API with a store-owned Dev Dashboard app and encrypted client credentials.
 
 ## Instagram Meta app profiles
 
@@ -105,8 +106,15 @@ Create the source in `/w/moonarq/dashboard/sources/new?template=tiktok` with dis
 
 MoonArq TikTok should use `MOONARQ_TIKTOK_*` when a separate MoonArq production or sandbox app profile is available. If those env vars are absent, it uses the default profile fallback. In either case, synced records remain scoped by `source_id` and `data_space_id`, so MoonArq and Auto Lab reports, exports, dashboards, health, sync, content, and Data Explorer views stay isolated.
 
+## Shopify client credentials
+
+Create the source at `/w/moonarq/dashboard/sources/new?template=shopify` using the store's canonical `https://your-store.myshopify.com` URL. In Shopify Dev Dashboard, create an app owned by the same organization as the store, release a version with only `read_orders`, and install it on that store. Save the app Client ID and Client secret on the MoonArq source detail page; both are encrypted server-side.
+
+The connector exchanges those credentials for a 24-hour access token on the server for each test or sync. Tokens and client credentials are never written to raw ingestion payloads or returned to the UI. Each run fetches a complete overlapping 60-day order window, excludes test orders, and upserts store-local daily rollups so retries do not double count.
+
+The API projection includes order IDs, timestamps, currency totals, and line-item names and quantities. It deliberately excludes customer names, emails, phones, addresses, IP data, notes, and payment details. Older order history requires Shopify's separately approved `read_all_orders` access and is not requested by this connector.
+
 Scaffolded:
 - Vercel project: deployment metadata later.
-- Shopify: Admin API later.
 - Custom API: generic JSON API later.
 - Custom CSV: manual upload later.

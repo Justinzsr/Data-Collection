@@ -140,9 +140,9 @@ const metricConfig: Record<ModuleKey, MetricConfig> = {
     primaryLabel: "Orders",
     unit: "count",
     secondary: [
-      { key: "net_payment", label: "Net payment", unit: "usd" },
-      { key: "gross_sales", label: "Gross sales", unit: "usd" },
-      { key: "refunds", label: "Refunds", unit: "usd" },
+      { key: "net_payment", label: "Net payment", unit: "currency" },
+      { key: "gross_sales", label: "Gross sales", unit: "currency" },
+      { key: "refunds", label: "Refunds", unit: "currency" },
     ],
   },
   vercel_project: {
@@ -218,6 +218,12 @@ function latestValue(rows: MetricDaily[], source: Source | null, metricSourceTyp
     (a, b) => a.date.localeCompare(b.date) || a.updated_at.localeCompare(b.updated_at),
   );
   return matches.at(-1)?.metric_value ?? 0;
+}
+
+function latestUnit(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string, fallback: string) {
+  return metricRowsFor(rows, source, metricSourceTypeKey, metricKey)
+    .sort((left, right) => left.date.localeCompare(right.date) || left.updated_at.localeCompare(right.updated_at))
+    .at(-1)?.unit ?? fallback;
 }
 
 function cumulativeSnapshotRows(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
@@ -305,9 +311,10 @@ function latestSync(source: Source | null) {
 }
 
 function placeholderSourceStatus(sourceTypeKey: ModuleKey): SourceStatus {
-  if (sourceTypeKey === "shopify" || sourceTypeKey === "custom_api" || sourceTypeKey === "custom_csv") {
+  if (sourceTypeKey === "custom_api" || sourceTypeKey === "custom_csv") {
     return "disabled";
   }
+  if (sourceTypeKey === "shopify") return "needs_credentials";
   return "demo";
 }
 
@@ -321,6 +328,16 @@ function providerBreakdownText(rows: MetricDaily[], source: Source | null, metri
   }, {});
   const [topProvider, value] = Object.entries(totals).sort((left, right) => right[1] - left[1])[0] ?? [];
   return topProvider ? `${topProvider} leads with ${value} signups in this range.` : "Provider breakdown arrives after the first Supabase sync.";
+}
+
+function topShopifyProductText(rows: MetricDaily[], source: Source | null) {
+  const totals = metricRowsFor(rows, source, "shopify", "top_products").reduce<Record<string, number>>((acc, row) => {
+    const name = typeof row.dimensions.product_name === "string" ? row.dimensions.product_name : "Unknown product";
+    acc[name] = (acc[name] ?? 0) + row.metric_value;
+    return acc;
+  }, {});
+  const [name, units] = Object.entries(totals).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0] ?? [];
+  return name ? `${name} (${units} units)` : "Waiting for the first order sync";
 }
 
 function topEntry(events: WebEvent[], selector: (event: WebEvent) => string | null | undefined, fallback: string) {
@@ -349,6 +366,13 @@ function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsit
         message: `Add a ${dataSpaceName} Supabase project and save its service role key server-side for real signup and user metrics.`,
       };
     }
+    if (moduleKey === "shopify") {
+      return {
+        label: "Needs setup",
+        severity: "warning",
+        message: `Add the ${dataSpaceName} Shopify store, install the read-only Dev Dashboard app, and save its encrypted client credentials.`,
+      };
+    }
     return {
       label: "Future",
       severity: "demo",
@@ -375,6 +399,16 @@ function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsit
           : moduleKey === "website"
             ? "Choose Vercel Drain or Website Tracker and finish that setup path so private website metrics can land."
             : "Finish the connector setup before expecting private metrics.",
+    };
+  }
+  if (source.status === "warning") {
+    return {
+      label: "Setup pending",
+      severity: "warning",
+      message:
+        moduleKey === "shopify"
+          ? "Credentials are saved. Test the Shopify connection, then run the first sync before treating these metrics as live."
+          : "Setup is saved but has not completed a successful live sync yet. Test the connection and run the first sync.",
     };
   }
   if (source.status === "error") {
@@ -467,7 +501,7 @@ function createModule(input: {
       key: item.key,
       label: item.label,
       value: metricValue(currentRows, source, metricSourceTypeKey, item.key, item.mode ?? "sum", input.latestRows),
-      unit: item.unit,
+      unit: item.unit === "currency" ? latestUnit(input.latestRows, source, metricSourceTypeKey, item.key, "usd") : item.unit,
     })),
     sparkline: sparkline(currentRows, source, metricSourceTypeKey, config.primaryKey, range.startDate, range.endDate, primaryMode),
     insights: input.insights ?? [],
@@ -504,6 +538,10 @@ export async function getPlatformModules(
         "tiktok_followers",
         "tiktok_video_count",
         "latest_deployment_status",
+        "gross_sales",
+        "current_total",
+        "net_payment",
+        "refunds",
       ],
       dataSpaceId: options.dataSpaceId,
     }),
@@ -575,8 +613,14 @@ export async function getPlatformModules(
         previousRows,
         latestRows,
         range,
-        sourceModeLabel: source?.metadata.scaffoldOnly === true ? "Scaffold" : source ? "Monitored Source" : "Future",
+        sourceModeLabel: source?.metadata.scaffoldOnly === true ? "Scaffold" : source ? "Monitored Source" : moduleKey === "shopify" ? "Needs setup" : "Future",
         dataSpaceName: options.dataSpaceName,
+        insights: moduleKey === "shopify"
+          ? [
+              { label: "Top product", value: topShopifyProductText(currentRows, source) },
+              { label: "Coverage", value: "Latest rolling 60-day order window" },
+            ]
+          : undefined,
       }),
     );
   }

@@ -10,9 +10,9 @@ import { vercelWebAnalyticsDrainConnector } from "@/collection/connectors/vercel
 import {
   customApiConnector,
   customCsvConnector,
-  shopifyConnector,
   vercelProjectConnector,
 } from "@/collection/connectors/future-connectors";
+import { shopifyConnector } from "@/collection/connectors/shopify/connector";
 import { instagramConnector } from "@/collection/connectors/instagram/connector";
 import { tiktokConnector } from "@/collection/connectors/tiktok/connector";
 import { xiaohongshuConnector } from "@/collection/connectors/xiaohongshu/connector";

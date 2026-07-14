@@ -1,0 +1,350 @@
+import type {
+  ConnectionTestResult,
+  ConnectorDefinition,
+  NormalizedMetric,
+  RawPayload,
+} from "@/collection/connectors/types";
+import {
+  exchangeShopifyClientCredentials,
+  fetchShopifyShop,
+  fetchShopifySnapshot,
+  getShopifyStoreForSource,
+  hashShopifySnapshot,
+  isShopifySnapshot,
+  missingShopifyScopes,
+  normalizeShopifyStoreUrl,
+  SHOPIFY_ORDER_LOOKBACK_DAYS,
+  SHOPIFY_REQUIRED_SCOPES,
+  ShopifyApiError,
+  type ShopifyMoneyBag,
+  type ShopifyOrder,
+  type ShopifySyncSnapshot,
+} from "@/collection/connectors/shopify/api";
+import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
+import type { JsonRecord, Source } from "@/storage/db/schema";
+
+type DailySummary = {
+  orders: number;
+  grossSales: number;
+  currentTotal: number;
+  netPayment: number;
+  refunds: number;
+};
+
+const SHOPIFY_WINDOW_METRIC_KEYS = [
+  "orders",
+  "gross_sales",
+  "current_total",
+  "net_payment",
+  "refunds",
+  "top_products",
+] as const;
+
+function roundMetric(value: number) {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+}
+
+function moneyValue(bag: ShopifyMoneyBag | null, expectedCurrency: string, label: string) {
+  if (!bag) return null;
+  const currency = bag.shopMoney?.currencyCode;
+  const amount = Number(bag.shopMoney?.amount);
+  if (currency !== expectedCurrency) {
+    throw new Error(`${label} used ${currency || "an unknown currency"}; expected the shop currency ${expectedCurrency}. Mixed currencies are not summed.`);
+  }
+  if (!Number.isFinite(amount)) throw new Error(`${label} returned an invalid money amount.`);
+  return amount;
+}
+
+function grossSales(order: ShopifyOrder, expectedCurrency: string) {
+  const subtotal = moneyValue(order.subtotalPriceSet, expectedCurrency, `Order ${order.id} subtotal`);
+  const discounts = moneyValue(order.totalDiscountsSet, expectedCurrency, `Order ${order.id} discounts`) ?? 0;
+  if (subtotal !== null) return subtotal + discounts;
+  return order.lineItems.nodes.reduce((sum, item) => {
+    const unitPrice = moneyValue(item.originalUnitPriceSet, expectedCurrency, `Line item ${item.id} original price`);
+    if (unitPrice === null) throw new Error(`Line item ${item.id} did not include an original price.`);
+    return sum + unitPrice * item.quantity;
+  }, 0);
+}
+
+export function shopifyDateKey(value: string, ianaTimezone: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`Shopify returned an invalid timestamp: ${value}`);
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: ianaTimezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+  } catch {
+    throw new Error(`Shopify returned an invalid IANA time zone: ${ianaTimezone}`);
+  }
+  const byType = new Map(parts.map((part) => [part.type, part.value]));
+  const year = byType.get("year");
+  const month = byType.get("month");
+  const day = byType.get("day");
+  if (!year || !month || !day) throw new Error("Could not calculate the Shopify store-local date.");
+  return `${year}-${month}-${day}`;
+}
+
+function enumerateDateKeys(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  const dates: string[] = [];
+  while (start <= end) {
+    dates.push(start.toISOString().slice(0, 10));
+    start.setUTCDate(start.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function emptySummary(): DailySummary {
+  return { orders: 0, grossSales: 0, currentTotal: 0, netPayment: 0, refunds: 0 };
+}
+
+function metric(
+  date: string,
+  source: Source,
+  metricKey: string,
+  metricValue: number,
+  unit: string,
+  dimensions: JsonRecord,
+): NormalizedMetric {
+  return {
+    date,
+    sourceId: source.id,
+    sourceTypeKey: "shopify",
+    metricKey,
+    metricValue: roundMetric(metricValue),
+    unit,
+    dimensions,
+  };
+}
+
+function normalizeSnapshot(snapshot: ShopifySyncSnapshot, source: Source) {
+  const currency = snapshot.shop.currencyCode;
+  const unit = currency.toLowerCase();
+  const startDate = snapshot.windowStartDate;
+  const endDate = shopifyDateKey(snapshot.fetchedAt, snapshot.shop.ianaTimezone);
+  const summaries = new Map(enumerateDateKeys(startDate, endDate).map((date) => [date, emptySummary()]));
+  const productMetrics: NormalizedMetric[] = [];
+
+  for (const order of snapshot.orders) {
+    if (order.test) continue;
+    if (order.currencyCode !== currency) {
+      throw new Error(`Order ${order.id} used ${order.currencyCode}; expected shop currency ${currency}. Mixed currencies are not summed.`);
+    }
+    const date = shopifyDateKey(order.createdAt, snapshot.shop.ianaTimezone);
+    const summary = summaries.get(date) ?? emptySummary();
+    summary.orders += 1;
+    summary.grossSales += grossSales(order, currency);
+    summary.currentTotal += moneyValue(order.currentTotalPriceSet, currency, `Order ${order.id} current total`) ?? 0;
+    summary.netPayment += moneyValue(order.netPaymentSet, currency, `Order ${order.id} net payment`) ?? 0;
+    summary.refunds += moneyValue(order.totalRefundedSet, currency, `Order ${order.id} refunds`) ?? 0;
+    summaries.set(date, summary);
+
+    for (const item of order.lineItems.nodes) {
+      if (!Number.isInteger(item.quantity) || item.quantity < 0) {
+        throw new Error(`Line item ${item.id} returned an invalid quantity.`);
+      }
+      productMetrics.push(metric(date, source, "top_products", item.quantity, "units", {
+        rollup: "order_line_units",
+        store: snapshot.shop.myshopifyDomain,
+        order_id: order.id,
+        line_item_id: item.id,
+        product_name: item.name.slice(0, 240),
+      }));
+    }
+  }
+
+  const dailyMetrics = [...summaries.entries()].flatMap(([date, summary]) => {
+    const dimensions: JsonRecord = {
+      rollup: "daily_order_summary",
+      store: snapshot.shop.myshopifyDomain,
+      currency,
+      timezone: snapshot.shop.ianaTimezone,
+      definition_version: "orders-v1",
+    };
+    return [
+      metric(date, source, "orders", summary.orders, "count", dimensions),
+      metric(date, source, "gross_sales", summary.grossSales, unit, dimensions),
+      metric(date, source, "current_total", summary.currentTotal, unit, dimensions),
+      metric(date, source, "net_payment", summary.netPayment, unit, dimensions),
+      metric(date, source, "refunds", summary.refunds, unit, dimensions),
+    ];
+  });
+  return [...dailyMetrics, ...productMetrics];
+}
+
+function connectionError(error: unknown): ConnectionTestResult {
+  if (error instanceof ShopifyApiError && error.code === "shop_not_permitted") {
+    return {
+      ok: false,
+      status: "unsupported",
+      message: "Shopify rejected this store because the app and store are not in the same Shopify organization. Use an app owned by this store's organization.",
+      details: { code: error.code },
+    };
+  }
+  return {
+    ok: false,
+    status: error instanceof ShopifyApiError && error.code === "missing_scopes" ? "unsupported" : "error",
+    message: error instanceof Error ? error.message : "Shopify connection test failed.",
+    details: { code: error instanceof ShopifyApiError ? error.code ?? null : null, sanitized: true },
+  };
+}
+
+export const shopifyConnector: ConnectorDefinition = {
+  key: "shopify",
+  displayName: "Shopify",
+  description: "Official Shopify Admin GraphQL API connector for store-local orders and sales, without collecting customer contact data.",
+  category: "Commerce",
+  icon: "ShoppingBag",
+  availability: "live",
+  setupKind: "credentials",
+  defaultSyncMode: "hourly",
+  urlPatterns: [/^https:\/\/[a-z0-9-]+\.myshopify\.com\/?$/i, /^https:\/\/admin\.shopify\.com\/store\/[a-z0-9-]+/i],
+  authType: "shopify_client_credentials",
+  docsUrl: "https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/client-credentials-grant",
+  requiredFields: [
+    {
+      key: "shopify_client_id",
+      label: "Shopify Client ID",
+      description: "From the installed app's Settings page in Shopify Dev Dashboard. Stored encrypted server-side.",
+      required: true,
+      secret: true,
+      type: "password",
+      placeholder: "Paste the Client ID",
+    },
+    {
+      key: "shopify_client_secret",
+      label: "Shopify Client secret",
+      description: "Used only server-side to request a short-lived Admin API token. Never stored in frontend code or raw analytics payloads.",
+      required: true,
+      secret: true,
+      type: "password",
+      placeholder: "Paste the Client secret",
+    },
+  ],
+  optionalFields: [],
+  capabilities: {
+    supportsWebhook: false,
+    supportsPolling: true,
+    supportsManualSync: true,
+    recommendedSyncFrequencyMinutes: 60,
+    canBackfill: true,
+    canTestConnection: true,
+  },
+  detect(inputUrl) {
+    const store = normalizeShopifyStoreUrl(inputUrl);
+    if (!store) return null;
+    return {
+      sourceTypeKey: "shopify",
+      displayName: "Shopify",
+      availability: "live",
+      setupKind: "credentials",
+      confidence: 0.99,
+      normalizedUrl: store.normalizedUrl,
+      externalAccountId: store.shopDomain,
+      accountName: store.storeHandle,
+      reasons: ["Official Shopify store URL detected and normalized to its canonical myshopify.com domain."],
+      requiredSetup: this.getSetupInstructions(),
+      possibleMetrics: this.getMetricDefinitions().map((definition) => definition.key),
+      demoAvailable: false,
+    };
+  },
+  async testConnection(ctx) {
+    if (!ctx.credentials.shopify_client_id?.trim() || !ctx.credentials.shopify_client_secret?.trim()) {
+      return {
+        ok: false,
+        status: "needs_credentials",
+        message: "Save the Shopify Client ID and Client secret before testing the connection.",
+        details: { required: ["shopify_client_id", "shopify_client_secret"] },
+      };
+    }
+    try {
+      const store = getShopifyStoreForSource(ctx.source);
+      const token = await exchangeShopifyClientCredentials(store.shopDomain, ctx.credentials);
+      const missingScopes = missingShopifyScopes(token.scopes.join(","));
+      if (missingScopes.length > 0) {
+        return {
+          ok: false,
+          status: "unsupported",
+          message: `Shopify app is installed but missing required scope: ${missingScopes.join(", ")}. Release a version with read_orders and update the installation.`,
+          details: { missingScopes, requiredScopes: [...SHOPIFY_REQUIRED_SCOPES] },
+        };
+      }
+      const shop = await fetchShopifyShop(store.shopDomain, token.accessToken);
+      return {
+        ok: true,
+        status: "connected",
+        message: `Shopify Admin API connected for ${shop.name}.`,
+        details: {
+          shopDomain: shop.myshopifyDomain,
+          shopName: shop.name,
+          currency: shop.currencyCode,
+          timezone: shop.ianaTimezone,
+          scopes: token.scopes,
+          tokenLifetimeSeconds: token.expiresIn,
+        },
+      };
+    } catch (error) {
+      return connectionError(error);
+    }
+  },
+  async sync(ctx) {
+    const snapshot = await fetchShopifySnapshot(ctx.source, ctx.credentials);
+    return {
+      rawPayloads: [
+        {
+          externalId: `shopify:${snapshot.shop.myshopifyDomain}:${snapshot.queryStartAt.slice(0, 10)}`,
+          fetchedAt: snapshot.fetchedAt,
+          payload: snapshot as unknown as JsonRecord,
+          payloadHash: hashShopifySnapshot(snapshot),
+          cursor: {
+            fetchedAt: snapshot.fetchedAt,
+            queryStartAt: snapshot.queryStartAt,
+            orderCount: snapshot.orders.length,
+            mode: "overlapping_60_day_snapshot",
+          },
+        },
+      ],
+      cursorAfter: {
+        fetchedAt: snapshot.fetchedAt,
+        queryStartAt: snapshot.queryStartAt,
+        mode: "overlapping_60_day_snapshot",
+      },
+      recordsFetched: snapshot.orders.length,
+      message: `Synced ${snapshot.orders.length} Shopify order record(s) from the latest ${SHOPIFY_ORDER_LOOKBACK_DAYS}-day window without customer contact fields.`,
+    };
+  },
+  async normalize(rawPayloads: RawPayload[], source: Source) {
+    const snapshots = rawPayloads
+      .map((payload) => payload.payload)
+      .filter(isShopifySnapshot)
+      .sort((left, right) => left.fetchedAt.localeCompare(right.fetchedAt));
+    const latest = snapshots.at(-1);
+    if (!latest) return { metrics: [] };
+    return {
+      metrics: normalizeSnapshot(latest, source),
+      replaceMetricWindow: {
+        metricKeys: [...SHOPIFY_WINDOW_METRIC_KEYS],
+        startDate: latest.windowStartDate,
+        endDate: shopifyDateKey(latest.fetchedAt, latest.shop.ianaTimezone),
+      },
+    };
+  },
+  getMetricDefinitions() {
+    return metricDefinitions.filter((definition) => definition.source_type_key === "shopify");
+  },
+  getSetupInstructions() {
+    return [
+      "In Shopify Dev Dashboard, create an app owned by the same organization as this store.",
+      "Create and release an app version with only the read_orders Admin API scope, then install it on this store.",
+      "Copy the Client ID and Client secret from the app Settings page into MoonArq; both values stay encrypted server-side.",
+      `MoonArq exchanges those credentials for a short-lived token on each run and recomputes an overlapping ${SHOPIFY_ORDER_LOOKBACK_DAYS}-day window idempotently.`,
+      "The connector requests order totals and line-item names/quantities only. It does not request customer names, email, phone, address, IP, notes, or payment details.",
+      "Gross sales means order subtotal plus pre-return discounts; current total is after edits/returns; net payment is received minus refunded; refunds are grouped by the order's store-local creation date.",
+    ];
+  },
+};

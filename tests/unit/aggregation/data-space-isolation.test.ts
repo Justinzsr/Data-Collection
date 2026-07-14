@@ -165,4 +165,13 @@ describe("data space isolation", () => {
     expect(migration).toContain("s.data_space_name");
     expect(migration).toContain("where data_space_slug = 'moonarq'");
   });
+
+  it("keeps the Shopify reporting migration private and PostgreSQL aggregate filters well formed", () => {
+    const migration = readFileSync("src/storage/db/migrations/0006_shopify_official_connector.sql", "utf8");
+    expect(migration).toContain("create or replace view reporting.moonarq_shopify_daily");
+    expect(migration).toContain("with (security_invoker = true)");
+    expect(migration).toContain("upper(max(m.unit) filter (where m.unit ~ '^[a-zA-Z]{3}$'))");
+    expect(migration).toContain("revoke all on reporting.moonarq_shopify_daily from anon, authenticated");
+    expect(migration).not.toContain("upper(max(m.unit)) filter");
+  });
 });

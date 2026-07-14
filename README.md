@@ -63,7 +63,7 @@ Do not use Vercel Deployment Protection for the whole app if it would block webh
 
 ## Demo Mode
 
-When `DATABASE_URL` is missing, the app seeds in-memory demo data for MoonArq website traffic, unique visitors, sessions, custom events, Supabase signups/users, source health, sync runs, content placeholders, and future source placeholders.
+When `DATABASE_URL` is missing, the app seeds in-memory demo data for MoonArq website traffic, unique visitors, sessions, custom events, Supabase signups/users, source health, sync runs, and content placeholders. Shopify remains an empty live-connector state until a real store is configured.
 
 ```bash
 pnpm db:seed
@@ -80,7 +80,7 @@ Go to `/dashboard/sources/new`, paste a link, and the app detects likely monitor
 - `https://vercel.com/team/project`
 - `https://your-store.myshopify.com`
 
-Links identify the source. Private metrics still require the right ingestion path: Vercel Drain, Website Tracker, service role key, webhook secret, or another official API credential.
+Links identify the source. Private metrics still require the right ingestion path: Vercel Drain, Website Tracker, service role key, webhook secret, or another official API credential. Shopify uses an installed store-owned Dev Dashboard app with encrypted client credentials and the minimum `read_orders` scope.
 
 ## Credentials
 

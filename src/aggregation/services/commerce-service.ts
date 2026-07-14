@@ -1,7 +1,15 @@
-export async function getCommerceDashboard() {
+import { getPlatformModules } from "@/aggregation/services/platform-modules-service";
+
+export async function getCommerceDashboard(options: { dataSpaceId?: string; dataSpaceName?: string } = {}) {
+  const modules = await getPlatformModules("30d", options);
+  const shopifyModule = modules.find((item) => item.sourceTypeKey === "shopify");
+  if (!shopifyModule) throw new Error("Shopify platform module is unavailable.");
+  const connected = Boolean(shopifyModule.sourceId && shopifyModule.status === "healthy");
   return {
-    connected: false,
-    message: "Shopify is scaffolded for future official Admin API integration. It is intentionally not dominant in the MVP dashboard.",
-    plannedMetrics: ["orders", "gross_sales", "current_total", "net_payment", "refunds", "top_products"],
+    connected,
+    module: shopifyModule,
+    message: connected
+      ? "Live Shopify order and sales metrics from the official Admin GraphQL API."
+      : "Connect a store-owned Shopify Dev Dashboard app with the minimum read_orders scope.",
   };
 }
