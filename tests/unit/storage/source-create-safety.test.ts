@@ -50,4 +50,39 @@ describe("source creation safety", () => {
     expect(valid.status).toBe(201);
     expect(body.source).toMatchObject({ source_type_key: "website", sync_mode: "webhook" });
   });
+
+  it("accepts only canonical Shopify hosts and ignores a forged normalized URL", async () => {
+    const before = getDemoStore().sources.length;
+    for (const input_url of [
+      "http://your-store.myshopify.com",
+      "https://shop.example.com",
+      "https://169.254.169.254/latest/meta-data",
+      "https://your-store.myshopify.com.attacker.example",
+    ]) {
+      const response = await createSourceRoute(request({
+        source_type_key: "shopify",
+        display_name: "Unsafe Shopify",
+        input_url,
+      }));
+      expect(response.status).toBe(400);
+    }
+    expect(getDemoStore().sources).toHaveLength(before);
+
+    const response = await createSourceRoute(request({
+      source_type_key: "shopify",
+      display_name: "MoonArq Shopify",
+      input_url: "https://admin.shopify.com/store/moonarq-store/orders",
+      normalized_url: "https://attacker.example",
+    }));
+    expect(response.status).toBe(201);
+    expect((await response.json()).source).toMatchObject({
+      source_type_key: "shopify",
+      input_url: "https://admin.shopify.com/store/moonarq-store/orders",
+      normalized_url: "https://moonarq-store.myshopify.com",
+      external_account_id: "moonarq-store.myshopify.com",
+      account_name: "moonarq-store",
+      sync_mode: "hourly",
+      status: "needs_credentials",
+    });
+  });
 });

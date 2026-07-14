@@ -15,7 +15,7 @@ import type { SyncRun, SyncTrigger } from "@/storage/db/schema";
 import { getDecryptedCredentialMap } from "@/storage/repositories/credentials-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
 import { upsertContentMetrics } from "@/storage/repositories/content-repository";
-import { upsertMetrics } from "@/storage/repositories/metrics-repository";
+import { replaceMetricsWindow, upsertMetrics } from "@/storage/repositories/metrics-repository";
 import { recordChangeEventsForRawPayloads } from "@/storage/repositories/platform-change-events-repository";
 import { storeRawPayloads } from "@/storage/repositories/raw-ingestions-repository";
 import { getSource, listDueSources, markSourceSyncState } from "@/storage/repositories/sources-repository";
@@ -163,7 +163,23 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
     }
     const normalized = await connector.normalize(syncResult.rawPayloads, source);
     assertLockLease();
-    const metrics = await upsertMetrics(normalized.metrics);
+    let metrics: { upserted: number };
+    if (normalized.replaceMetricWindow) {
+      const connectorMetricKeys = new Set(connector.getMetricDefinitions().map((definition) => definition.key));
+      if (normalized.replaceMetricWindow.metricKeys.some((metricKey) => !connectorMetricKeys.has(metricKey))) {
+        throw new Error("Connector requested replacement of a metric it does not own.");
+      }
+      metrics = await replaceMetricsWindow(normalized.metrics, {
+        ...normalized.replaceMetricWindow,
+        sourceId: source.id,
+        sourceTypeKey: source.source_type_key,
+      }, {
+        syncRunId: run.id,
+        lockKey: lock.lock_key,
+      });
+    } else {
+      metrics = await upsertMetrics(normalized.metrics);
+    }
     assertLockLease();
     const content = await upsertContentMetrics(normalized.contentMetrics ?? []);
     assertLockLease();

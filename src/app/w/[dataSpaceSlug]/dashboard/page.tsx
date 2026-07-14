@@ -395,9 +395,9 @@ export default async function DataSpaceDashboardPage({
     getInstagramDashboardSummary({ dataSpaceId: dataSpace.id }),
     getTikTokDashboardSummary({ dataSpaceId: dataSpace.id }),
   ]);
-  const futureModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "shopify" || platformModule.sourceTypeKey === "custom_api" || platformModule.sourceTypeKey === "custom_csv");
+  const futureModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "custom_api" || platformModule.sourceTypeKey === "custom_csv");
   const autoLabEmpty = isAutoLabDataSpace(dataSpace) && sources.length === 0;
-  const overviewTypes = new Set(["website", "supabase", "tiktok", "instagram"]);
+  const overviewTypes = new Set(["website", "supabase", "tiktok", "instagram", "shopify"]);
   const overviewModules = modules.filter((module) => overviewTypes.has(module.sourceTypeKey) && Boolean(module.sourceId || dataSpace.slug === "moonarq"));
   const hasDirectInstagramPanel = instagramSummary.sources.length > 0;
   const hasDirectTikTokPanel = tiktokSummary.sources.length > 0;
@@ -411,7 +411,7 @@ export default async function DataSpaceDashboardPage({
       {!autoLabEmpty ? (
         <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3" data-testid="dashboard-data-stage" aria-label="Performance graphs and platform summaries">
           <PlatformTrendChart series={moduleSeries(modules)} />
-          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="overview-module-grid">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="overview-module-grid">
             {overviewModules.map((module) => (
               <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
             ))}

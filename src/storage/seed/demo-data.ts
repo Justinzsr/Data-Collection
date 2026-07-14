@@ -28,7 +28,6 @@ export const DEMO_SOURCE_IDS = {
   supabase: "22222222-2222-4222-8222-222222222222",
   tiktok: "33333333-3333-4333-8333-333333333333",
   instagram: "44444444-4444-4444-8444-444444444444",
-  shopify: "55555555-5555-4555-8555-555555555555",
 } as const;
 
 function iso(date: Date) {
@@ -161,19 +160,6 @@ function makeSources(): Source[] {
       sync_mode: "manual",
       metadata: { demo: true, scaffoldOnly: true },
     }),
-    source({
-      id: DEMO_SOURCE_IDS.shopify,
-      source_type_key: "shopify",
-      display_name: "Shopify Future Store",
-      input_url: "https://your-store.myshopify.com",
-      normalized_url: "https://your-store.myshopify.com",
-      account_name: "your-store",
-      status: "disabled",
-      sync_mode: "manual",
-      last_success_at: null,
-      next_sync_at: null,
-      metadata: { demo: true, scaffoldOnly: true, future: true },
-    }),
   ];
 }
 
@@ -224,7 +210,6 @@ function makeMetrics(): MetricDaily[] {
       metric(date, DEMO_SOURCE_IDS.tiktok, "tiktok", "tiktok_shares", 6 + age),
       metric(date, DEMO_SOURCE_IDS.tiktok, "tiktok", "tiktok_engagement_rate", 8.4, "percent"),
       metric(date, DEMO_SOURCE_IDS.instagram, "instagram", "reach", 900 + age * 21),
-      metric(date, DEMO_SOURCE_IDS.shopify, "shopify", "orders", 0, "count", { demo: true, future: true }),
     );
   }
   return rows;

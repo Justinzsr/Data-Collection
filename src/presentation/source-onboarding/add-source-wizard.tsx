@@ -179,6 +179,7 @@ function defaultInputFor(sourceTypeKey: string, dataSpaceSlug: string) {
 function inputPlaceholderFor(sourceTypeKey: string) {
   if (sourceTypeKey === "instagram") return "https://www.instagram.com/your-account";
   if (sourceTypeKey === "tiktok") return "https://www.tiktok.com/@your-account";
+  if (sourceTypeKey === "shopify") return "https://your-store.myshopify.com";
   if (sourceTypeKey === "supabase") return "https://your-project.supabase.co";
   if (sourceTypeKey === "website") return "https://your-site.com";
   return "Paste the official account, project, or source URL";
@@ -300,7 +301,7 @@ export function AddSourceWizard({
         if (!cancelled) {
           const loadedSourceTypes: SourceTypeDefinition[] = body.sourceTypes ?? [];
           setSourceTypes(loadedSourceTypes);
-          if (!templateApplied.current && (template === "instagram" || template === "tiktok")) {
+          if (!templateApplied.current && (template === "instagram" || template === "tiktok" || template === "shopify")) {
             const templateType = loadedSourceTypes.find((item) => item.key === template);
             if (isConnectable(templateType)) {
               templateApplied.current = true;

@@ -71,7 +71,7 @@ describe("planned connector safety", () => {
   });
 
   it("keeps every future connector planned and credential-free", () => {
-    for (const key of ["vercel_project", "shopify", "custom_api", "custom_csv"] as const) {
+    for (const key of ["vercel_project", "custom_api", "custom_csv"] as const) {
       const connector = getConnector(key);
       expect(connector.availability).toBe("planned");
       expect(connector.requiredFields).toEqual([]);

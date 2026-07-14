@@ -17,8 +17,15 @@ describe("connector detection", () => {
   it("detects live and explicitly planned connectors", () => {
     const shopify = detectSource("https://your-store.myshopify.com")[0];
     expect(shopify.sourceTypeKey).toBe("shopify");
-    expect(shopify.availability).toBe("planned");
+    expect(shopify.availability).toBe("live");
+    expect(shopify.setupKind).toBe("credentials");
+    expect(shopify.normalizedUrl).toBe("https://your-store.myshopify.com");
     expect(shopify.demoAvailable).toBe(false);
+    expect(detectSource("https://admin.shopify.com/store/your-store/orders")[0]).toMatchObject({
+      sourceTypeKey: "shopify",
+      normalizedUrl: "https://your-store.myshopify.com",
+      availability: "live",
+    });
     expect(detectSource("https://www.tiktok.com/@account")[0].sourceTypeKey).toBe("tiktok");
     expect(detectSource("https://www.instagram.com/account")[0].sourceTypeKey).toBe("instagram");
     expect(detectSource("https://vercel.com/team/project")[0].sourceTypeKey).toBe("vercel_project");
@@ -72,5 +79,25 @@ describe("connector detection", () => {
     const fields = [...connector.requiredFields, ...connector.optionalFields].map((field) => field.key);
     expect(fields).toContain("service_role_key");
     expect(fields).not.toContain("anon_key");
+  });
+
+  it("lists Shopify as a live encrypted-credential connector", () => {
+    const shopify = listSourceTypes().find((sourceType) => sourceType.key === "shopify");
+    expect(shopify).toMatchObject({
+      enabled: true,
+      availability: "live",
+      setup_kind: "credentials",
+      default_sync_mode: "hourly",
+      auth_type: "shopify_client_credentials",
+      capabilities: {
+        supportsPolling: true,
+        supportsManualSync: true,
+        canTestConnection: true,
+      },
+    });
+    expect(shopify?.required_fields.map((field) => field.key)).toEqual([
+      "shopify_client_id",
+      "shopify_client_secret",
+    ]);
   });
 });

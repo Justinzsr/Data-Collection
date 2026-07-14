@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { NormalizedMetric } from "@/collection/connectors/types";
-import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
+import {
+  getDatabasePool,
+  isRuntimeDatabaseConfigured,
+  queryRows,
+  withDatabaseTransaction,
+  type DatabaseExecutor,
+} from "@/storage/db/client";
 import type { JsonRecord, MetricDaily, SourceTypeKey } from "@/storage/db/schema";
 import { dimensionsHash } from "@/storage/seed/demo-data";
 import { getDemoStore } from "@/storage/repositories/demo-store";
@@ -54,36 +60,46 @@ export function normalizeMetricDailyRow(row: MetricDaily): MetricDaily {
   };
 }
 
-export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upserted: number }> {
-  const now = new Date().toISOString();
+type MetricReplacementWindow = {
+  sourceId: string;
+  sourceTypeKey: SourceTypeKey;
+  metricKeys: string[];
+  startDate: string;
+  endDate: string;
+};
 
-  if (!isRuntimeDatabaseConfigured()) {
-    const store = getDemoStore();
-    let upserted = 0;
-    for (const metric of metrics) {
-      const dimensions = metric.dimensions ?? {};
-      const hash = dimensionsHash(dimensions);
-      const existing = store.metricsDaily.find(
-        (row) =>
-          row.date === metric.date &&
-          row.source_id === metric.sourceId &&
-          row.source_type_key === metric.sourceTypeKey &&
-          row.metric_key === metric.metricKey &&
-          row.dimensions_hash === hash,
-      );
-      if (existing) {
-        existing.metric_value = metric.metricValue;
-        existing.unit = metric.unit;
-        existing.dimensions = dimensions;
-        existing.updated_at = now;
-      } else {
-        store.metricsDaily.push(toMetricRow(metric, now));
-      }
-      upserted += 1;
-    }
-    return { upserted };
+function validateMetricReplacement(metrics: NormalizedMetric[], window: MetricReplacementWindow) {
+  const allowedKeys = new Set(window.metricKeys);
+  if (
+    !window.sourceId ||
+    window.metricKeys.length === 0 ||
+    allowedKeys.size !== window.metricKeys.length ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(window.startDate) ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(window.endDate) ||
+    window.startDate > window.endDate
+  ) {
+    throw new Error("Metric replacement window is invalid.");
   }
+  const identities = new Set<string>();
+  for (const metric of metrics) {
+    const identity = `${metric.date}\u0000${metric.metricKey}\u0000${dimensionsHash(metric.dimensions ?? {})}`;
+    if (
+      metric.sourceId !== window.sourceId ||
+      metric.sourceTypeKey !== window.sourceTypeKey ||
+      !allowedKeys.has(metric.metricKey) ||
+      metric.date < window.startDate ||
+      metric.date > window.endDate ||
+      !Number.isFinite(metric.metricValue) ||
+      identities.has(identity)
+    ) {
+      throw new Error("A replacement metric is invalid, duplicated, or outside its declared source, type, key, or date window.");
+    }
+    identities.add(identity);
+  }
+}
 
+async function upsertMetricRows(metrics: NormalizedMetric[], executor: DatabaseExecutor) {
+  const now = new Date().toISOString();
   for (const metric of metrics) {
     const dimensions = metric.dimensions ?? {};
     const hash = dimensionsHash(dimensions);
@@ -125,9 +141,100 @@ export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upse
         now,
         now,
       ],
+      executor,
     );
   }
   return { upserted: metrics.length };
+}
+
+export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upserted: number }> {
+  const now = new Date().toISOString();
+
+  if (!isRuntimeDatabaseConfigured()) {
+    const store = getDemoStore();
+    let upserted = 0;
+    for (const metric of metrics) {
+      const dimensions = metric.dimensions ?? {};
+      const hash = dimensionsHash(dimensions);
+      const existing = store.metricsDaily.find(
+        (row) =>
+          row.date === metric.date &&
+          row.source_id === metric.sourceId &&
+          row.source_type_key === metric.sourceTypeKey &&
+          row.metric_key === metric.metricKey &&
+          row.dimensions_hash === hash,
+      );
+      if (existing) {
+        existing.metric_value = metric.metricValue;
+        existing.unit = metric.unit;
+        existing.dimensions = dimensions;
+        existing.updated_at = now;
+      } else {
+        store.metricsDaily.push(toMetricRow(metric, now));
+      }
+      upserted += 1;
+    }
+    return { upserted };
+  }
+
+  return upsertMetricRows(metrics, getDatabasePool());
+}
+
+export async function replaceMetricsWindow(
+  metrics: NormalizedMetric[],
+  window: MetricReplacementWindow,
+  lease: { syncRunId: string; lockKey: string },
+): Promise<{ upserted: number }> {
+  validateMetricReplacement(metrics, window);
+
+  if (!isRuntimeDatabaseConfigured()) {
+    const store = getDemoStore();
+    const keys = new Set(window.metricKeys);
+    store.metricsDaily = store.metricsDaily.filter((row) => !(
+      row.source_id === window.sourceId &&
+      row.source_type_key === window.sourceTypeKey &&
+      keys.has(row.metric_key) &&
+      row.date >= window.startDate &&
+      row.date <= window.endDate
+    ));
+    return upsertMetrics(metrics);
+  }
+
+  return withDatabaseTransaction(async (client) => {
+    await queryRows("select pg_advisory_xact_lock(hashtextextended($1, 0))", [window.sourceId], client);
+    const assertLeaseOwner = async () => {
+      const rows = await queryRows<{ owned: boolean }>(
+        `
+          select exists (
+            select 1
+            from source_locks
+            where source_id = $1
+              and locked_by_sync_run_id = $2
+              and lock_key = $3
+              and expires_at > now()
+          ) as owned
+        `,
+        [window.sourceId, lease.syncRunId, lease.lockKey],
+        client,
+      );
+      if (!rows[0]?.owned) throw new Error("Source lock lease was lost before the metric snapshot could be replaced.");
+    };
+    await assertLeaseOwner();
+    await queryRows(
+      `
+        delete from metrics_daily
+        where source_id = $1
+          and source_type_key = $2
+          and metric_key = any($3::text[])
+          and date between $4 and $5
+      `,
+      [window.sourceId, window.sourceTypeKey, window.metricKeys, window.startDate, window.endDate],
+      client,
+    );
+    const result = await upsertMetricRows(metrics, client);
+    await assertLeaseOwner();
+    return result;
+  });
 }
 
 export async function incrementMetric(metric: NormalizedMetric): Promise<{ upserted: number; value: number }> {

@@ -79,6 +79,15 @@ export async function POST(request: Request) {
     if (!supportsSyncMode(syncMode, connector.capabilities)) {
       return Response.json({ error: `${syncMode} sync is not supported by this connector.` }, { status: 400 });
     }
+    const shopifyDetection = connector.key === "shopify" && body.input_url
+      ? connector.detect(body.input_url)
+      : null;
+    if (connector.key === "shopify" && !shopifyDetection) {
+      return Response.json(
+        { error: "Shopify sources require a canonical https://*.myshopify.com URL or an official admin.shopify.com/store/... URL." },
+        { status: 400 },
+      );
+    }
     const dataSpace = body.data_space_slug
       ? await getDataSpaceBySlug(body.data_space_slug)
       : await getDefaultDataSpace();
@@ -89,9 +98,9 @@ export async function POST(request: Request) {
       source_type_key: connector.key,
       display_name: body.display_name ?? connector.displayName,
       input_url: body.input_url ?? null,
-      normalized_url: body.normalized_url ?? null,
-      external_account_id: body.external_account_id ?? null,
-      account_name: body.account_name ?? null,
+      normalized_url: shopifyDetection?.normalizedUrl ?? body.normalized_url ?? null,
+      external_account_id: shopifyDetection?.externalAccountId ?? body.external_account_id ?? null,
+      account_name: shopifyDetection?.accountName ?? body.account_name ?? null,
       sync_mode: syncMode,
       supports_webhook: connector.capabilities.supportsWebhook,
       status: needsCredentials ? "needs_credentials" : "demo",

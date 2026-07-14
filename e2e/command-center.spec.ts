@@ -5,10 +5,11 @@ test("dashboard shows platform modules and sparklines", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard");
   await expect(page.getByRole("heading", { name: "MoonArq command center" })).toBeVisible();
-  await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" }).first()).toBeVisible();
-  await expect(page.locator("article").filter({ hasText: "MoonArq Supabase" }).first()).toBeVisible();
+  await expect(page.getByTestId("overview-module-summary-website")).toBeVisible();
+  await expect(page.getByTestId("overview-module-summary-supabase")).toBeVisible();
   await expect(page.locator("summary").filter({ hasText: "TikTok official API" })).toBeVisible();
   await expect(page.locator("summary").filter({ hasText: "Instagram Graph API" })).toBeVisible();
+  await expect(page.getByTestId("overview-module-summary-shopify")).toBeVisible();
   await expect(page.getByText("Planned and custom sources")).toBeVisible();
   await expect(page.getByTestId("platform-sparkline").first()).toBeVisible();
 });
@@ -22,7 +23,7 @@ test("dashboard puts graphs, platform summaries, and health metrics above the fo
     scrollY: window.scrollY,
     stageTop: document.querySelector<HTMLElement>("[data-testid='dashboard-data-stage']")?.getBoundingClientRect().top ?? Infinity,
     chartBottom: document.querySelector<HTMLElement>("[data-testid='overview-chart']")?.getBoundingClientRect().bottom ?? Infinity,
-    summaryBottoms: ["website", "supabase", "tiktok", "instagram"].map((type) =>
+    summaryBottoms: ["website", "supabase", "tiktok", "instagram", "shopify"].map((type) =>
       document.querySelector<HTMLElement>(`[data-testid='overview-module-summary-${type}']`)?.getBoundingClientRect().bottom ?? Infinity,
     ),
     kpiBottoms: Array.from(document.querySelectorAll<HTMLElement>("[data-testid='overview-kpi']")).map((element) => element.getBoundingClientRect().bottom),
@@ -32,7 +33,7 @@ test("dashboard puts graphs, platform summaries, and health metrics above the fo
   expect(placement.scrollY).toBe(0);
   expect(placement.stageTop).toBeLessThan(220);
   expect(placement.chartBottom).toBeLessThan(placement.viewportHeight);
-  expect(placement.summaryBottoms).toHaveLength(4);
+  expect(placement.summaryBottoms).toHaveLength(5);
   expect(placement.summaryBottoms.every((bottom) => bottom < placement.viewportHeight)).toBe(true);
   expect(placement.kpiBottoms).toHaveLength(4);
   expect(placement.kpiBottoms.every((bottom) => bottom < placement.viewportHeight)).toBe(true);
@@ -42,7 +43,7 @@ test("platform modules keep the overview visible and disclose detail on demand",
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard");
 
-  for (const type of ["website", "supabase", "tiktok", "instagram"]) {
+  for (const type of ["website", "supabase", "tiktok", "instagram", "shopify"]) {
     await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", false);
     await expect(page.getByTestId(`overview-module-summary-${type}`)).toBeVisible();
     await expect(page.getByTestId(`overview-module-detail-${type}`)).toBeHidden();
@@ -55,6 +56,23 @@ test("platform modules keep the overview visible and disclose detail on demand",
   await expect(page.getByText("Page views", { exact: true }).first()).toBeVisible();
   await page.getByTestId("overview-module-summary-website").click();
   await expect(website).toHaveJSProperty("open", false);
+});
+
+test("Shopify CTA opens the official connector directly and keeps credentials empty", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard/sources/new?template=shopify");
+  await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
+  await expect(page.getByRole("heading", { name: "Configure Shopify" })).toBeVisible();
+  await page.getByLabel("Public source URL").fill("https://e2e-shop.myshopify.com");
+  await page.getByRole("button", { name: "Check URL" }).click();
+  await expect(page.getByText("URL matches Shopify")).toBeVisible();
+  await page.getByRole("button", { name: "Review connection" }).click();
+  await expect(page.getByText("Encrypted server credentials", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Save source" }).click();
+  await page.getByText("Additional encrypted settings").click();
+  await expect(page.getByLabel("Shopify Client ID")).toHaveValue("");
+  await expect(page.getByLabel("Shopify Client secret")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Save Credentials" })).toBeVisible();
 });
 
 test("add source wizard detects Supabase and Website and shows credentials after save", async ({ page }) => {
@@ -186,5 +204,5 @@ test("mobile dashboard has no horizontal overflow", async ({ page }) => {
   await page.goto("/w/moonarq/dashboard");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
-  await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" }).first()).toBeVisible();
+  await expect(page.getByTestId("overview-module-summary-website")).toBeVisible();
 });

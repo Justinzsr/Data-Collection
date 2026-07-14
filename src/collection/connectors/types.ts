@@ -95,6 +95,11 @@ export interface NormalizedContentMetric {
 export interface NormalizedMetricBundle {
   metrics: NormalizedMetric[];
   contentMetrics?: NormalizedContentMetric[];
+  replaceMetricWindow?: {
+    metricKeys: string[];
+    startDate: string;
+    endDate: string;
+  };
 }
 
 export interface SyncResult {

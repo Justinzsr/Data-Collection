@@ -5,6 +5,7 @@ import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import type { Source } from "@/storage/db/schema";
 import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store";
 import { upsertMetrics } from "@/storage/repositories/metrics-repository";
+import { createSource } from "@/storage/repositories/sources-repository";
 import { DEMO_SOURCE_IDS } from "@/storage/seed/demo-data";
 
 const NOW = "2026-05-11T18:30:00.000Z";
@@ -71,7 +72,8 @@ describe("platform modules service", () => {
     ]);
     expect(modules.find((module) => module.sourceTypeKey === "website")?.primaryMetric.key).toBe("unique_visitors");
     expect(modules.find((module) => module.sourceTypeKey === "supabase")?.primaryMetric.key).toBe("signups");
-    expect(modules.find((module) => module.sourceTypeKey === "shopify")?.status).toBe("disabled");
+    expect(modules.find((module) => module.sourceTypeKey === "shopify")?.status).toBe("needs_credentials");
+    expect(modules.find((module) => module.sourceTypeKey === "shopify")?.setupState.label).toBe("Needs setup");
     expect(modules.find((module) => module.sourceTypeKey === "website")?.sourceModeLabel).toBe("Demo");
   });
 
@@ -87,6 +89,35 @@ describe("platform modules service", () => {
     const customApi = modules.find((module) => module.sourceTypeKey === "custom_api");
     expect(supabase?.setupState.severity).toBe("warning");
     expect(customApi?.setupState.label).toBe("Future");
+  });
+
+  it("shows live Shopify totals in the store currency with a top-product insight", async () => {
+    process.env.DEMO_NOW = NOW;
+    const source = await createSource({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "shopify",
+      display_name: "MoonArq Shopify",
+      input_url: "https://moonarq-store.myshopify.com",
+      normalized_url: "https://moonarq-store.myshopify.com",
+      status: "healthy",
+      sync_mode: "hourly",
+    });
+    await upsertMetrics([
+      { date: "2026-05-11", sourceId: source.id, sourceTypeKey: "shopify", metricKey: "orders", metricValue: 2, unit: "count", dimensions: { rollup: "daily_order_summary", currency: "CAD" } },
+      { date: "2026-05-11", sourceId: source.id, sourceTypeKey: "shopify", metricKey: "net_payment", metricValue: 120, unit: "cad", dimensions: { rollup: "daily_order_summary", currency: "CAD" } },
+      { date: "2026-05-11", sourceId: source.id, sourceTypeKey: "shopify", metricKey: "gross_sales", metricValue: 150, unit: "cad", dimensions: { rollup: "daily_order_summary", currency: "CAD" } },
+      { date: "2026-05-11", sourceId: source.id, sourceTypeKey: "shopify", metricKey: "refunds", metricValue: 10, unit: "cad", dimensions: { rollup: "daily_order_summary", currency: "CAD" } },
+      { date: "2026-05-11", sourceId: source.id, sourceTypeKey: "shopify", metricKey: "top_products", metricValue: 3, unit: "units", dimensions: { rollup: "order_line_units", product_name: "Moon Bracelet" } },
+    ]);
+
+    const shopifyModule = (await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq })).find((item) => item.sourceTypeKey === "shopify");
+    expect(shopifyModule).toMatchObject({
+      sourceId: source.id,
+      status: "healthy",
+      primaryMetric: { key: "orders", value: 2 },
+    });
+    expect(shopifyModule?.secondaryMetrics.find((metric) => metric.key === "net_payment")).toMatchObject({ value: 120, unit: "cad" });
+    expect(shopifyModule?.insights.find((insight) => insight.label === "Top product")?.value).toBe("Moon Bracelet (3 units)");
   });
 
   it("shows latest Supabase snapshot totals even when signups are historical", async () => {

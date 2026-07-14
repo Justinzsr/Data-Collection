@@ -74,6 +74,13 @@ async function buildReportForDataSpace(reportDatePt: string, dataSpace: DataSpac
   const activeSources = sources.filter((source) => source.status !== "disabled");
   const instagramSources = connectedInstagramSources(instagram);
   const instagramConnected = instagramSources.length > 0;
+  const tiktokConnected = sources.some((source) => source.source_type_key === "tiktok" && source.status === "healthy");
+  const shopifyConnected = sources.some((source) => source.source_type_key === "shopify" && source.status === "healthy");
+  const pendingPlatforms = [
+    tiktokConnected ? null : "TikTok",
+    instagramConnected ? null : "Instagram",
+    shopifyConnected ? null : "Shopify",
+  ].filter((platform): platform is string => Boolean(platform));
   const errors = events.filter((event) => event.severity === "error").length;
   const healthStatus = errors > 0 ? "warning" : "healthy";
   if (activeSources.length === 0) {
@@ -111,7 +118,14 @@ async function buildReportForDataSpace(reportDatePt: string, dataSpace: DataSpac
     ...(instagramConnected
       ? [section("instagram", `${dataSpace.display_name} Instagram`, `${instagramSources.map((source) => source.username ? `@${source.username}` : source.displayName).join(", ")} reported ${instagram.totals.reach.toLocaleString("en-US")} reach, ${instagram.totals.likes.toLocaleString("en-US")} likes, and ${instagram.totals.comments.toLocaleString("en-US")} comments across ${instagram.totals.fetchedMediaCount.toLocaleString("en-US")} synced media item(s).`, 50)]
       : []),
-    section("future_platforms", "Future Platforms", `TikTok${instagramConnected ? "" : ", Instagram"}, and Shopify remain intentionally unconnected unless this data space has its own source setup.`, 60),
+    section(
+      "future_platforms",
+      "Platform Connections",
+      pendingPlatforms.length > 0
+        ? `${pendingPlatforms.join(", ")} ${pendingPlatforms.length === 1 ? "is" : "are"} not connected in this data space.`
+        : "TikTok, Instagram, and Shopify are connected in this data space.",
+      60,
+    ),
   ];
   const metrics = [
     metric("executive_summary", "summary", "Summary", null, summary, null, 10),
@@ -146,9 +160,9 @@ async function buildReportForDataSpace(reportDatePt: string, dataSpace: DataSpac
           metric("instagram", "instagram_engagement_rate", "Engagement rate", instagram.totals.engagementRate, null, "percent", 80),
         ]
       : []),
-    metric("future_platforms", "tiktok", "TikTok", null, "Not connected", "status", 10),
+    metric("future_platforms", "tiktok", "TikTok", null, tiktokConnected ? "Connected" : "Not connected", "status", 10),
     metric("future_platforms", "instagram", "Instagram", null, instagramConnected ? "Connected" : "Not connected", "status", 20),
-    metric("future_platforms", "shopify", "Shopify", null, "Not connected", "status", 30),
+    metric("future_platforms", "shopify", "Shopify", null, shopifyConnected ? "Connected" : "Not connected", "status", 30),
   ];
   return { website, supabase, instagram, sourceCount: activeSources.length, healthStatus, summary, sections, metrics, dataSpace };
 }

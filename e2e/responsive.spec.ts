@@ -26,7 +26,7 @@ for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/w/moonarq/dashboard");
 
-    for (const type of ["website", "supabase", "tiktok", "instagram"]) {
+    for (const type of ["website", "supabase", "tiktok", "instagram", "shopify"]) {
       await page.getByTestId(`overview-module-summary-${type}`).click();
       await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", true);
     }
@@ -46,6 +46,7 @@ for (const path of [
   "/w/moonarq/dashboard/sources/new",
   "/w/moonarq/dashboard/events",
   "/w/moonarq/dashboard/content",
+  "/w/moonarq/dashboard/commerce",
   "/w/moonarq/dashboard/sync",
   "/w/moonarq/dashboard/data",
   "/w/moonarq/dashboard/reports/daily",
