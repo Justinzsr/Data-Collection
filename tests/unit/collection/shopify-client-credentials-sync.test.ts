@@ -103,6 +103,8 @@ function shopifySource(patch: Partial<Source> = {}): Source {
 
 type MockOptions = {
   scope?: string;
+  shopId?: string;
+  shopDomain?: string;
   tokenStatus?: number;
   tokenErrorDescription?: string;
   lineItemPagination?: boolean;
@@ -156,9 +158,9 @@ function mockShopifyApi(options: MockOptions = {}) {
       return jsonResponse({
         data: {
           shop: {
-            id: "gid://shopify/Shop/1",
+            id: options.shopId ?? "gid://shopify/Shop/1",
             name: "MoonArq Studio",
-            myshopifyDomain: "moonarq-store.myshopify.com",
+            myshopifyDomain: options.shopDomain ?? "moonarq-store.myshopify.com",
             currencyCode: "USD",
             ianaTimezone: "America/Los_Angeles",
           },
@@ -294,6 +296,144 @@ describe("Shopify client-credentials connector", () => {
     expect(requests[0].url).not.toContain(CLIENT_SECRET);
     expect(String(requests[0].init?.body)).toContain("grant_type=client_credentials");
     expect(new Headers(requests[1].init?.headers).get("x-shopify-access-token")).toBe(ACCESS_TOKEN);
+  });
+
+  it("accepts a renamed myshopify alias while retaining Shopify's permanent shop domain", async () => {
+    const { requests } = mockShopifyApi({ shopDomain: "original-shop-id.myshopify.com" });
+    const result = await getConnector("shopify").testConnection({
+      source: shopifySource({
+        input_url: "https://friendly-shop-name.myshopify.com",
+        normalized_url: "https://friendly-shop-name.myshopify.com",
+        external_account_id: "friendly-shop-name.myshopify.com",
+        account_name: "friendly-shop-name",
+        metadata: { shopify_shop_id: "gid://shopify/Shop/1" },
+      }),
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: "connected",
+      details: { shopDomain: "original-shop-id.myshopify.com" },
+    });
+    expect(requests[0].url).toBe("https://friendly-shop-name.myshopify.com/admin/oauth/access_token");
+    expect(requests[1].url).toBe("https://friendly-shop-name.myshopify.com/admin/api/2026-07/graphql.json");
+  });
+
+  it("pins the immutable shop ID on first connect and rejects a later cross-store switch", async () => {
+    const source = await createSource({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "shopify",
+      display_name: "MoonArq Shopify",
+      input_url: "https://friendly-shop-name.myshopify.com",
+      normalized_url: "https://friendly-shop-name.myshopify.com",
+      external_account_id: "friendly-shop-name.myshopify.com",
+      account_name: "friendly-shop-name",
+      status: "needs_credentials",
+      sync_mode: "hourly",
+    });
+    mockShopifyApi({ shopDomain: "original-shop-id.myshopify.com" });
+
+    const first = await getConnector("shopify").testConnection({
+      source,
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+    });
+    expect(first).toMatchObject({ ok: true, status: "connected" });
+    const pinnedSource = getDemoStore().sources.find((item) => item.id === source.id);
+    expect(pinnedSource?.metadata).toMatchObject({
+      shopify_shop_id: "gid://shopify/Shop/1",
+      shopify_permanent_domain: "original-shop-id.myshopify.com",
+      shopify_connected_domain: "friendly-shop-name.myshopify.com",
+    });
+
+    vi.unstubAllGlobals();
+    const { requests } = mockShopifyApi({
+      shopId: "gid://shopify/Shop/2",
+      shopDomain: "another-shop.myshopify.com",
+    });
+    const credentials = { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET };
+    const switched = await getConnector("shopify").testConnection({
+      source: pinnedSource!,
+      credentials,
+      isDemoMode: false,
+    });
+    expect(switched).toMatchObject({
+      ok: false,
+      status: "error",
+      details: { code: "shop_identity_mismatch", sanitized: true },
+    });
+    await expect(getConnector("shopify").sync({
+      source: pinnedSource!,
+      credentials,
+      isDemoMode: false,
+      trigger: "manual",
+    })).rejects.toMatchObject({ code: "shop_identity_mismatch" });
+    expect(requests.some((request) => String(request.body?.query).includes("MoonArqShopifyOrders"))).toBe(false);
+  });
+
+  it("atomically allows only one first-time Shopify identity pin", async () => {
+    const source = await createSource({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "shopify",
+      display_name: "MoonArq Shopify",
+      input_url: "https://friendly-a.myshopify.com",
+      normalized_url: "https://friendly-a.myshopify.com",
+      external_account_id: "friendly-a.myshopify.com",
+      account_name: "friendly-a",
+      status: "needs_credentials",
+      sync_mode: "hourly",
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+      if (url.endsWith("/admin/oauth/access_token")) {
+        return jsonResponse({ access_token: ACCESS_TOKEN, scope: "read_orders", expires_in: 86_399 });
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query?: string };
+      if (!body.query?.includes("MoonArqShopifyConnection")) {
+        return jsonResponse({ errors: [{ message: "Unexpected query." }] }, 400);
+      }
+      const hostname = new URL(url).hostname;
+      const suffix = hostname.startsWith("friendly-a.") ? "a" : "b";
+      return jsonResponse({
+        data: {
+          shop: {
+            id: `gid://shopify/Shop/${suffix === "a" ? "1" : "2"}`,
+            name: `MoonArq ${suffix.toUpperCase()}`,
+            myshopifyDomain: `original-${suffix}.myshopify.com`,
+            currencyCode: "USD",
+            ianaTimezone: "America/Los_Angeles",
+          },
+        },
+      });
+    }));
+    const sourceB: Source = {
+      ...source,
+      input_url: "https://friendly-b.myshopify.com",
+      normalized_url: "https://friendly-b.myshopify.com",
+      external_account_id: "friendly-b.myshopify.com",
+      account_name: "friendly-b",
+    };
+    const credentials = { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET };
+
+    const results = await Promise.all([
+      getConnector("shopify").testConnection({ source, credentials, isDemoMode: false }),
+      getConnector("shopify").testConnection({ source: sourceB, credentials, isDemoMode: false }),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(["connected", "error"]);
+    expect(results.find((result) => !result.ok)).toMatchObject({
+      details: { code: "shop_identity_mismatch", sanitized: true },
+    });
+    const pinned = getDemoStore().sources.find((item) => item.id === source.id);
+    const pinnedShopId = String(pinned?.metadata.shopify_shop_id ?? "");
+    expect(["gid://shopify/Shop/1", "gid://shopify/Shop/2"]).toContain(pinnedShopId);
+    expect(pinned?.metadata.shopify_permanent_domain).toBe(
+      pinnedShopId.endsWith("/1") ? "original-a.myshopify.com" : "original-b.myshopify.com",
+    );
+    expect(JSON.stringify(results)).not.toContain(CLIENT_SECRET);
+    expect(JSON.stringify(results)).not.toContain(ACCESS_TOKEN);
   });
 
   it("syncs a complete paginated window and normalizes store-local, non-test metrics", async () => {

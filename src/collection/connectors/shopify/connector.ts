@@ -5,9 +5,11 @@ import type {
   RawPayload,
 } from "@/collection/connectors/types";
 import {
+  assertShopifyShopIdentity,
   exchangeShopifyClientCredentials,
   fetchShopifyShop,
   fetchShopifySnapshot,
+  getPinnedShopifyShopId,
   getShopifyStoreForSource,
   hashShopifySnapshot,
   isShopifySnapshot,
@@ -15,6 +17,7 @@ import {
   normalizeShopifyStoreUrl,
   SHOPIFY_ORDER_LOOKBACK_DAYS,
   SHOPIFY_REQUIRED_SCOPES,
+  SHOPIFY_SHOP_ID_METADATA_KEY,
   ShopifyApiError,
   type ShopifyMoneyBag,
   type ShopifyOrder,
@@ -22,6 +25,7 @@ import {
 } from "@/collection/connectors/shopify/api";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 import type { JsonRecord, Source } from "@/storage/db/schema";
+import { pinSourceMetadataValue } from "@/storage/repositories/sources-repository";
 
 type DailySummary = {
   orders: number;
@@ -194,6 +198,30 @@ function connectionError(error: unknown): ConnectionTestResult {
   };
 }
 
+async function pinShopifyIdentity(
+  source: Source,
+  shop: Pick<ShopifySyncSnapshot["shop"], "id" | "myshopifyDomain">,
+  configuredShopDomain: string,
+) {
+  if (getPinnedShopifyShopId(source)) return;
+  const result = await pinSourceMetadataValue(
+    source.id,
+    SHOPIFY_SHOP_ID_METADATA_KEY,
+    shop.id,
+    {
+      shopify_permanent_domain: shop.myshopifyDomain,
+      shopify_connected_domain: configuredShopDomain,
+    },
+    { dataSpaceId: source.data_space_id },
+  );
+  if (result.status === "conflict") {
+    throw new ShopifyApiError(
+      "The Shopify app resolved to a different store than this source's pinned Shopify identity. Create a new source to connect another store.",
+      { status: 409, code: "shop_identity_mismatch" },
+    );
+  }
+}
+
 export const shopifyConnector: ConnectorDefinition = {
   key: "shopify",
   displayName: "Shopify",
@@ -275,6 +303,8 @@ export const shopifyConnector: ConnectorDefinition = {
         };
       }
       const shop = await fetchShopifyShop(store.shopDomain, token.accessToken);
+      assertShopifyShopIdentity(ctx.source, shop);
+      await pinShopifyIdentity(ctx.source, shop, store.shopDomain);
       return {
         ok: true,
         status: "connected",
@@ -294,6 +324,7 @@ export const shopifyConnector: ConnectorDefinition = {
   },
   async sync(ctx) {
     const snapshot = await fetchShopifySnapshot(ctx.source, ctx.credentials);
+    await pinShopifyIdentity(ctx.source, snapshot.shop, getShopifyStoreForSource(ctx.source).shopDomain);
     return {
       rawPayloads: [
         {
