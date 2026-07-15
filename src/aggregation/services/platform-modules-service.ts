@@ -63,8 +63,6 @@ type MetricConfig = {
   secondary: Array<{ key: string; label: string; unit: string; mode?: MetricMode }>;
 };
 
-const cumulativeTikTokMetricKeys = ["tiktok_video_views", "tiktok_likes", "tiktok_comments", "tiktok_shares"] as const;
-
 const platformOrder: ModuleKey[] = ["website", "supabase", "tiktok", "instagram", "shopify", "custom_api", "custom_csv"];
 
 const platformLabels: Record<ModuleKey, string> = {
@@ -128,10 +126,11 @@ const metricConfig: Record<ModuleKey, MetricConfig> = {
     primaryKey: "instagram_media_reach",
     primaryLabel: "Reach",
     unit: "count",
+    primaryMode: "cumulative_snapshot",
     secondary: [
       { key: "instagram_followers", label: "Followers", unit: "count", mode: "latest" },
-      { key: "instagram_media_likes", label: "Likes", unit: "count" },
-      { key: "instagram_media_comments", label: "Comments", unit: "count" },
+      { key: "instagram_media_likes", label: "Likes", unit: "count", mode: "cumulative_snapshot" },
+      { key: "instagram_media_comments", label: "Comments", unit: "count", mode: "cumulative_snapshot" },
       { key: "instagram_engagement_rate", label: "Engagement", unit: "percent", mode: "latest" },
     ],
   },
@@ -170,6 +169,20 @@ const metricConfig: Record<ModuleKey, MetricConfig> = {
     ],
   },
 };
+
+const legacyLatestLookupMetricKeys = ["followers", "engagement_rate", "current_total"] as const;
+
+const latestLookupMetricKeys = [
+  ...new Set([
+    ...legacyLatestLookupMetricKeys,
+    ...Object.values(metricConfig).flatMap((config) => [
+      ...(config.primaryMode && config.primaryMode !== "sum" ? [config.primaryKey] : []),
+      ...config.secondary
+        .filter((metric) => (metric.mode && metric.mode !== "sum") || metric.unit === "currency")
+        .map((metric) => metric.key),
+    ]),
+  ]),
+];
 
 function toUtcDate(date: string) {
   return new Date(`${date}T00:00:00.000Z`);
@@ -228,7 +241,7 @@ function latestUnit(rows: MetricDaily[], source: Source | null, metricSourceType
 
 function cumulativeSnapshotRows(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
   const matches = metricRowsFor(rows, source, metricSourceTypeKey, metricKey);
-  const rollups = matches.filter((row) => row.dimensions.rollup === "video_sync_total");
+  const rollups = matches.filter((row) => typeof row.dimensions.rollup === "string" && row.dimensions.rollup.endsWith("_sync_total"));
   return rollups.length > 0 ? rollups : matches;
 }
 
@@ -528,21 +541,7 @@ export async function getPlatformModules(
     listMetrics({ startDate: range.startDate, endDate: range.endDate, dataSpaceId: options.dataSpaceId }),
     listMetrics({ startDate: previousRange.startDate, endDate: previousRange.endDate, dataSpaceId: options.dataSpaceId }),
     listMetrics({
-      metricKeys: [
-        "users_total",
-        "confirmed_users",
-        "followers",
-        "engagement_rate",
-        ...cumulativeTikTokMetricKeys,
-        "tiktok_engagement_rate",
-        "tiktok_followers",
-        "tiktok_video_count",
-        "latest_deployment_status",
-        "gross_sales",
-        "current_total",
-        "net_payment",
-        "refunds",
-      ],
+      metricKeys: latestLookupMetricKeys,
       dataSpaceId: options.dataSpaceId,
     }),
   ]);
