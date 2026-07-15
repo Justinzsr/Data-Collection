@@ -306,6 +306,71 @@ export async function updateSource(
   return rows[0] ?? null;
 }
 
+export type SourceMetadataPinResult =
+  | { status: "pinned"; source: Source }
+  | { status: "conflict"; source: Source }
+  | { status: "missing"; source: null };
+
+export async function pinSourceMetadataValue(
+  sourceId: string,
+  key: string,
+  value: string,
+  additionalMetadata: JsonRecord = {},
+  scope: SourceScope = {},
+): Promise<SourceMetadataPinResult> {
+  const normalizedKey = key.trim();
+  const normalizedValue = value.trim();
+  if (!normalizedKey || !normalizedValue) throw new Error("Source metadata pin key and value are required.");
+  const now = new Date().toISOString();
+
+  if (!isRuntimeDatabaseConfigured()) {
+    const store = getDemoStore();
+    const index = store.sources.findIndex(
+      (source) => source.id === sourceId && sourceMatchesScope(source, scope),
+    );
+    if (index < 0) return { status: "missing", source: null };
+    const source = store.sources[index];
+    const existing = source.metadata[normalizedKey];
+    if (existing !== undefined && existing !== null && existing !== normalizedValue) {
+      return { status: "conflict", source };
+    }
+    const updated: Source = {
+      ...source,
+      metadata: {
+        ...source.metadata,
+        ...additionalMetadata,
+        [normalizedKey]: normalizedValue,
+      },
+      updated_at: now,
+    };
+    store.sources[index] = updated;
+    return { status: "pinned", source: updated };
+  }
+
+  const scoped = Boolean(scope.dataSpaceId);
+  const metadataIndex = scoped ? 5 : 4;
+  const updatedAtIndex = scoped ? 6 : 5;
+  const rows = await queryRows<Source>(
+    `
+      update sources
+      set metadata = coalesce(metadata, '{}'::jsonb)
+          || $${metadataIndex}::jsonb
+          || jsonb_build_object($2::text, $3::text),
+          updated_at = $${updatedAtIndex}
+      where id = $1
+        ${scoped ? "and data_space_id = $4" : ""}
+        and (metadata ->> $2 is null or metadata ->> $2 = $3)
+      returning *
+    `,
+    scoped
+      ? [sourceId, normalizedKey, normalizedValue, scope.dataSpaceId, JSON.stringify(additionalMetadata), now]
+      : [sourceId, normalizedKey, normalizedValue, JSON.stringify(additionalMetadata), now],
+  );
+  if (rows[0]) return { status: "pinned", source: rows[0] };
+  const source = await getSource(sourceId, scope);
+  return source ? { status: "conflict", source } : { status: "missing", source: null };
+}
+
 export async function deleteSource(sourceId: string): Promise<boolean> {
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();

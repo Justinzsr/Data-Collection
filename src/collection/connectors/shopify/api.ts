@@ -6,6 +6,7 @@ import type { JsonRecord, Source } from "@/storage/db/schema";
 export const SHOPIFY_ADMIN_API_VERSION = "2026-07";
 export const SHOPIFY_REQUIRED_SCOPES = ["read_orders"] as const;
 export const SHOPIFY_ORDER_LOOKBACK_DAYS = 60;
+export const SHOPIFY_SHOP_ID_METADATA_KEY = "shopify_shop_id";
 
 const SHOPIFY_ORDER_PAGE_SIZE = 25;
 const SHOPIFY_MAX_ORDER_PAGES = 100;
@@ -158,6 +159,24 @@ export function getShopifyStoreForSource(source: Pick<Source, "normalized_url" |
     status: 400,
     code: "invalid_shop_domain",
   });
+}
+
+export function getPinnedShopifyShopId(source: Pick<Source, "metadata">) {
+  const value = source.metadata[SHOPIFY_SHOP_ID_METADATA_KEY];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function assertShopifyShopIdentity(
+  source: Pick<Source, "metadata">,
+  shop: Pick<ShopifyShop, "id">,
+) {
+  const pinnedShopId = getPinnedShopifyShopId(source);
+  if (pinnedShopId && pinnedShopId !== shop.id) {
+    throw new ShopifyApiError(
+      "The Shopify app resolved to a different store than this source's pinned Shopify identity. Create a new source to connect another store.",
+      { status: 409, code: "shop_identity_mismatch" },
+    );
+  }
 }
 
 function parseScopes(value: unknown) {
@@ -337,15 +356,21 @@ export async function fetchShopifyShop(
 ) {
   const data = await shopifyGraphql<{ shop?: ShopifyShop }>(shopDomain, accessToken, SHOP_QUERY, {}, fetchImpl);
   const shop = data.shop;
-  if (!shop || typeof shop.myshopifyDomain !== "string" || typeof shop.ianaTimezone !== "string") {
+  if (
+    !shop ||
+    typeof shop.id !== "string" ||
+    !shop.id.startsWith("gid://shopify/Shop/") ||
+    typeof shop.myshopifyDomain !== "string" ||
+    !SHOPIFY_STORE_PATTERN.test(shop.myshopifyDomain) ||
+    typeof shop.ianaTimezone !== "string"
+  ) {
     throw new ShopifyApiError("Shopify returned an incomplete shop profile.", { code: "invalid_shop_response" });
   }
-  if (shop.myshopifyDomain.toLowerCase() !== shopDomain.toLowerCase()) {
-    throw new ShopifyApiError("The Shopify token resolved to a different store than the configured source.", {
-      status: 409,
-      code: "shop_identity_mismatch",
-    });
-  }
+  // A merchant can rename the public *.myshopify.com URL while Shopify keeps
+  // returning the original permanent myshopifyDomain as the stable shop ID.
+  // Successful token exchange and GraphQL access on shopDomain already prove
+  // that the installed app belongs to the configured store, so both valid
+  // aliases must be accepted here.
   return shop;
 }
 
@@ -554,7 +579,7 @@ export function hashShopifySnapshot(snapshot: ShopifySyncSnapshot) {
 }
 
 export async function fetchShopifySnapshot(
-  source: Pick<Source, "normalized_url" | "input_url">,
+  source: Pick<Source, "normalized_url" | "input_url" | "metadata">,
   credentials: Record<string, string>,
   options: { fetchImpl?: typeof fetch; now?: Date } = {},
 ): Promise<ShopifySyncSnapshot> {
@@ -570,6 +595,7 @@ export async function fetchShopifySnapshot(
     });
   }
   const shop = await fetchShopifyShop(store.shopDomain, token.accessToken, fetchImpl);
+  assertShopifyShopIdentity(source, shop);
   const windowEndDate = dateKeyInTimeZone(now, shop.ianaTimezone);
   const windowStartDate = subtractCalendarDays(windowEndDate, SHOPIFY_ORDER_LOOKBACK_DAYS - 1);
   const queryStartAt = zonedStartOfDayUtc(windowStartDate, shop.ianaTimezone);
