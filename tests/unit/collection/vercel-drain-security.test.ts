@@ -6,6 +6,7 @@ import type { SourceStatus } from "@/storage/db/schema";
 import { saveCredential } from "@/storage/repositories/credentials-repository";
 import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store";
 import { listWebEvents } from "@/storage/repositories/events-repository";
+import { listMetrics } from "@/storage/repositories/metrics-repository";
 import { createSource } from "@/storage/repositories/sources-repository";
 
 const SIGNATURE_SECRET = "vercel-drain-signature-test-secret";
@@ -196,5 +197,48 @@ describe("Vercel Analytics Drain ingress security", () => {
       syncRuns: store.syncRuns.length,
       metrics: store.metricsDaily.length,
     }).toEqual(countsAfterFirst);
+  });
+
+  it("does not manufacture session totals from the Vercel Drain payload", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+
+    const response = await postDrain(source.id, signature());
+    expect(response.status).toBe(200);
+
+    const rows = await listMetrics({
+      metricKeys: ["page_views", "unique_visitors", "sessions"],
+      startDate: "2026-04-22",
+      endDate: "2026-04-22",
+    });
+    const sourceRows = rows.filter((row) => row.source_id === source.id && row.dimensions.rollup === "daily");
+    expect(sourceRows.find((row) => row.metric_key === "page_views")?.metric_value).toBe(1);
+    expect(sourceRows.find((row) => row.metric_key === "unique_visitors")?.metric_value).toBe(1);
+    expect(sourceRows.find((row) => row.metric_key === "sessions")).toBeUndefined();
+  });
+
+  it("does not ingest the same Drain event twice when it is retried in a different batch", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    expect((await postDrain(source.id, signature())).status).toBe(200);
+
+    const original = JSON.parse(RAW_BODY) as Record<string, unknown>;
+    const secondBatch = JSON.stringify([
+      original,
+      {
+        ...original,
+        timestamp: Date.parse("2026-04-22T12:01:00.000Z"),
+        deviceId: "device-two",
+        path: "/second-page",
+      },
+    ]);
+    expect((await postDrain(source.id, signature(secondBatch), secondBatch)).status).toBe(200);
+
+    const sourceEvents = (await listWebEvents(100)).filter((event) => event.source_id === source.id);
+    const rows = await listMetrics({ metricKeys: ["page_views", "unique_visitors"], startDate: "2026-04-22", endDate: "2026-04-22" });
+    const sourceRows = rows.filter((row) => row.source_id === source.id && row.dimensions.rollup === "daily");
+    expect(sourceEvents).toHaveLength(2);
+    expect(sourceRows.find((row) => row.metric_key === "page_views")?.metric_value).toBe(2);
+    expect(sourceRows.find((row) => row.metric_key === "unique_visitors")?.metric_value).toBe(2);
   });
 });

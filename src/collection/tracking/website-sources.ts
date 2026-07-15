@@ -9,6 +9,15 @@ const preference: Record<WebsiteSourceKey, number> = {
   website: 1,
 };
 
+const statusPreference: Record<Source["status"], number> = {
+  healthy: 0,
+  warning: 1,
+  error: 2,
+  needs_credentials: 3,
+  demo: 4,
+  disabled: 5,
+};
+
 export function isWebsiteSourceKey(value: SourceTypeKey): value is WebsiteSourceKey {
   return WEBSITE_SOURCE_KEYS.includes(value as WebsiteSourceKey);
 }
@@ -23,7 +32,11 @@ export function getWebsiteModeLabel(source: Pick<Source, "source_type_key" | "st
 export function resolvePrimaryWebsiteSource(sources: Source[]) {
   return sources
     .filter((source): source is Source & { source_type_key: WebsiteSourceKey } => isWebsiteSourceKey(source.source_type_key) && source.status !== "disabled")
-    .sort((left, right) => preference[left.source_type_key] - preference[right.source_type_key])[0] ?? null;
+    .sort(
+      (left, right) =>
+        statusPreference[left.status] - statusPreference[right.status] ||
+        preference[left.source_type_key] - preference[right.source_type_key],
+    )[0] ?? null;
 }
 
 export function listSecondaryWebsiteSources(sources: Source[]) {

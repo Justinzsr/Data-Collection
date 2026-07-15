@@ -699,6 +699,32 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     expect(autoLabWorkbook).not.toContain("MoonArq_Supabase");
   });
 
+  it("stores late-evening Instagram snapshots on the Pacific business date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T05:30:00.000Z"));
+    try {
+      addAutoLabInstagramSource({ status: "healthy" });
+      await saveInstagramCredentials();
+      mockInstagramGraphApi();
+
+      const run = await enqueueSyncRun({ sourceId: AUTO_LAB_INSTAGRAM_SOURCE_ID, trigger: "manual" });
+      const store = getDemoStore();
+      const rawSnapshot = store.rawIngestions.find((item) => item.source_id === AUTO_LAB_INSTAGRAM_SOURCE_ID);
+      const followerSnapshot = store.metricsDaily.find(
+        (metric) =>
+          metric.source_id === AUTO_LAB_INSTAGRAM_SOURCE_ID &&
+          metric.metric_key === "instagram_followers" &&
+          metric.dimensions.rollup === "snapshot",
+      );
+
+      expect(run.status).toBe("success");
+      expect(rawSnapshot?.external_id).toBe(`instagram:${AUTO_LAB_INSTAGRAM_ACCOUNT_ID}:2026-07-14`);
+      expect(followerSnapshot?.date).toBe("2026-07-14");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("syncs MoonArq Instagram through the same connector without leaking into Auto Lab reports or exports", async () => {
     addAutoLabInstagramSource({ status: "healthy" });
     addMoonArqInstagramSource({ status: "healthy" });

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ingestTrackEvent } from "@/collection/tracking/track-endpoint";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
-import { resetDemoStore } from "@/storage/repositories/demo-store";
+import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store";
 import { listWebEvents } from "@/storage/repositories/events-repository";
 import { listMetrics } from "@/storage/repositories/metrics-repository";
 import { createSource } from "@/storage/repositories/sources-repository";
@@ -179,6 +179,62 @@ describe("website tracker validation", () => {
     expect(utcRows.find((row) => row.dimensions.rollup === "daily" && row.dimensions.demo !== true)).toBeUndefined();
   });
 
+  it("deduplicates visitors and sessions within the same Pacific day after UTC midnight", async () => {
+    await ingestTrackEvent(
+      {
+        ...baseEvent,
+        anonymous_id: "anon-evening",
+        session_id: "session-evening",
+        occurred_at: "2026-04-23T00:30:00.000Z",
+      },
+      { origin: "https://moonarqstudio.com" },
+    );
+    await ingestTrackEvent(
+      {
+        ...baseEvent,
+        anonymous_id: "anon-evening",
+        session_id: "session-evening",
+        occurred_at: "2026-04-23T01:00:00.000Z",
+      },
+      { origin: "https://moonarqstudio.com" },
+    );
+
+    const rows = await listMetrics({
+      metricKeys: ["page_views", "unique_visitors", "sessions"],
+      startDate: "2026-04-22",
+      endDate: "2026-04-22",
+    });
+    expect(rows.find((row) => row.metric_key === "page_views" && row.dimensions.rollup === "daily")?.metric_value).toBe(2);
+    expect(rows.find((row) => row.metric_key === "unique_visitors" && row.dimensions.rollup === "daily")?.metric_value).toBe(1);
+    expect(rows.find((row) => row.metric_key === "sessions" && row.dimensions.rollup === "daily")?.metric_value).toBe(1);
+  });
+
+  it("counts the same visitor and session again after the Pacific day changes", async () => {
+    const sharedIdentity = {
+      ...baseEvent,
+      anonymous_id: "anon-midnight",
+      session_id: "session-midnight",
+    };
+    await ingestTrackEvent(
+      { ...sharedIdentity, occurred_at: "2026-04-23T06:30:00.000Z" },
+      { origin: "https://moonarqstudio.com" },
+    );
+    await ingestTrackEvent(
+      { ...sharedIdentity, occurred_at: "2026-04-23T07:30:00.000Z" },
+      { origin: "https://moonarqstudio.com" },
+    );
+
+    const rows = await listMetrics({
+      metricKeys: ["unique_visitors", "sessions"],
+      startDate: "2026-04-22",
+      endDate: "2026-04-23",
+    });
+    for (const date of ["2026-04-22", "2026-04-23"]) {
+      expect(rows.find((row) => row.date === date && row.metric_key === "unique_visitors" && row.dimensions.rollup === "daily")?.metric_value).toBe(1);
+      expect(rows.find((row) => row.date === date && row.metric_key === "sessions" && row.dimensions.rollup === "daily")?.metric_value).toBe(1);
+    }
+  });
+
   it("stores tracker page views as raw events but suppresses rollups when Vercel Drain is primary", async () => {
     await createSource({
       source_type_key: "vercel_web_analytics_drain",
@@ -214,6 +270,30 @@ describe("website tracker validation", () => {
         reason: "vercel_drain_primary",
       },
     });
+  });
+
+  it("keeps the healthy tracker primary while the Vercel Drain needs attention", async () => {
+    const tracker = getDemoStore().sources.find((source) => source.source_type_key === "website");
+    if (tracker) tracker.status = "healthy";
+    await createSource({
+      source_type_key: "vercel_web_analytics_drain",
+      display_name: "MoonArq Website Drain",
+      input_url: "https://moonarqstudio.com",
+      normalized_url: "https://moonarqstudio.com",
+      account_name: "moonarqstudio.com",
+      status: "warning",
+      sync_mode: "webhook",
+      supports_webhook: true,
+      metadata: { monitored_source: "moonarq_website" },
+    });
+
+    await ingestTrackEvent(
+      { ...baseEvent, occurred_at: "2026-05-03T12:00:00.000Z" },
+      { origin: "https://moonarqstudio.com" },
+    );
+
+    const rows = await listMetrics({ metricKeys: ["page_views"], startDate: "2026-05-03", endDate: "2026-05-03" });
+    expect(rows.find((row) => row.metric_key === "page_views" && row.dimensions.rollup === "daily")?.metric_value).toBe(1);
   });
 
   it("keeps tracker custom events available when Vercel Drain is primary", async () => {

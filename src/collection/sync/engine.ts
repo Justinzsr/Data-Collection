@@ -10,7 +10,7 @@ import {
   renewSourceLock,
   SOURCE_LOCK_RENEW_INTERVAL_MS,
 } from "@/collection/sync/locks";
-import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
+import { isRuntimeDatabaseConfigured, withDatabaseTransaction, type DatabaseExecutor } from "@/storage/db/client";
 import type { SyncRun, SyncTrigger } from "@/storage/db/schema";
 import { getDecryptedCredentialMap } from "@/storage/repositories/credentials-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
@@ -151,16 +151,38 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
         cursor_after: syncResult.cursorAfter ?? null,
       })) as SyncRun;
     }
-    const raw = await storeRawPayloads(source, syncResult.rawPayloads);
+    const webEvents = syncResult.webEvents ?? [];
+    if (webEvents.length > 0 && webEvents.length !== syncResult.rawPayloads.length) {
+      throw new Error("Connector web events must align one-to-one with raw payloads for idempotent ingestion.");
+    }
+    let raw: Awaited<ReturnType<typeof storeRawPayloads>>;
+    let webEventsInserted = 0;
+    if (webEvents.length > 0) {
+      raw = { inserted: 0, duplicates: 0, rows: [], insertedIndexes: [] };
+      for (const [index, webEvent] of webEvents.entries()) {
+        const persistPair = async (executor?: DatabaseExecutor) => {
+          const stored = await storeRawPayloads(source, [syncResult.rawPayloads[index]], executor);
+          if (stored.inserted === 1) await ingestWebsiteEvent(webEvent, executor);
+          return stored;
+        };
+        const stored = isRuntimeDatabaseConfigured()
+          ? await withDatabaseTransaction((client) => persistPair(client))
+          : await persistPair();
+        raw.inserted += stored.inserted;
+        raw.duplicates += stored.duplicates;
+        raw.rows.push(...stored.rows);
+        if (stored.inserted === 1) {
+          raw.insertedIndexes.push(index);
+          webEventsInserted += 1;
+        }
+        assertLockLease();
+      }
+    } else {
+      raw = await storeRawPayloads(source, syncResult.rawPayloads);
+    }
     assertLockLease();
     await recordChangeEventsForRawPayloads(source, syncResult.rawPayloads);
     assertLockLease();
-    let webEventsInserted = 0;
-    for (const webEvent of syncResult.webEvents ?? []) {
-      await ingestWebsiteEvent(webEvent);
-      webEventsInserted += 1;
-      assertLockLease();
-    }
     const normalized = await connector.normalize(syncResult.rawPayloads, source);
     assertLockLease();
     let metrics: { upserted: number };

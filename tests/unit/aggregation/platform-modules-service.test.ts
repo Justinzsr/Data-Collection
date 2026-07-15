@@ -52,6 +52,28 @@ function tiktokSnapshot(date: string, sourceId: string, metricKey: string, metri
   };
 }
 
+function instagramSnapshot(date: string, metricKey: string, metricValue: number) {
+  return {
+    date,
+    sourceId: DEMO_SOURCE_IDS.instagram,
+    sourceTypeKey: "instagram" as const,
+    metricKey,
+    metricValue,
+    unit: "count",
+    dimensions: { rollup: metricKey === "instagram_followers" ? "snapshot" : "media_sync_total" },
+  };
+}
+
+function enableDemoInstagram() {
+  const store = getDemoStore();
+  const instagramSource = store.sources.find((source) => source.id === DEMO_SOURCE_IDS.instagram);
+  if (instagramSource) {
+    instagramSource.status = "healthy";
+    instagramSource.metadata = { oauth_connected: true };
+  }
+  store.metricsDaily = store.metricsDaily.filter((metric) => metric.source_id !== DEMO_SOURCE_IDS.instagram);
+}
+
 describe("platform modules service", () => {
   beforeEach(() => {
     if (ORIGINAL_DEMO_NOW) process.env.DEMO_NOW = ORIGINAL_DEMO_NOW;
@@ -75,6 +97,7 @@ describe("platform modules service", () => {
     expect(modules.find((module) => module.sourceTypeKey === "shopify")?.status).toBe("needs_credentials");
     expect(modules.find((module) => module.sourceTypeKey === "shopify")?.setupState.label).toBe("Needs setup");
     expect(modules.find((module) => module.sourceTypeKey === "website")?.sourceModeLabel).toBe("Demo");
+    expect(modules.find((module) => module.sourceTypeKey === "website")?.rangeLabel).toBe("Last 30 days");
   });
 
   it("computes delta vs previous period", () => {
@@ -337,6 +360,7 @@ describe("platform modules service", () => {
     const instagram = modules.find((module) => module.sourceTypeKey === "instagram");
 
     expect(instagram?.primaryMetric.value).toBe(120);
+    expect(instagram?.primaryMetric).toMatchObject({ deltaPercent: 20, deltaLabel: "+20.0% since Jul 12" });
     expect(instagram?.secondaryMetrics).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "instagram_followers", value: 20 }),
       expect.objectContaining({ key: "instagram_media_likes", value: 12 }),
@@ -348,6 +372,55 @@ describe("platform modules service", () => {
       { date: "2026-07-13", value: 110 },
       { date: "2026-07-14", value: 120 },
     ]);
+  });
+
+  it("uses the latest snapshot before the range as the Instagram baseline", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    enableDemoInstagram();
+    await upsertMetrics([
+      instagramSnapshot("2026-06-14", "instagram_media_reach", 100),
+      instagramSnapshot("2026-07-14", "instagram_media_reach", 120),
+    ]);
+
+    const instagram = (await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq }))
+      .find((module) => module.sourceTypeKey === "instagram");
+
+    expect(instagram?.primaryMetric).toMatchObject({ value: 120, deltaPercent: 20, deltaLabel: "+20.0% in selected range" });
+    expect(instagram?.sparkline).toHaveLength(30);
+    expect(instagram?.sparkline.at(0)?.value).toBe(100);
+    expect(instagram?.sparkline.at(-1)?.value).toBe(120);
+  });
+
+  it("describes a zero Instagram baseline without claiming the earlier snapshot is missing", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    enableDemoInstagram();
+    await upsertMetrics([
+      instagramSnapshot("2026-06-14", "instagram_media_reach", 0),
+      instagramSnapshot("2026-07-14", "instagram_media_reach", 10),
+    ]);
+
+    const instagram = (await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq }))
+      .find((module) => module.sourceTypeKey === "instagram");
+
+    expect(instagram?.primaryMetric).toMatchObject({ value: 10, deltaPercent: null, deltaLabel: "Up from 0 in selected range" });
+  });
+
+  it("ignores future-dated Instagram rows and carries the latest valid snapshot into Today", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    enableDemoInstagram();
+    await upsertMetrics([
+      instagramSnapshot("2026-07-13", "instagram_media_reach", 100),
+      instagramSnapshot("2026-07-13", "instagram_followers", 20),
+      instagramSnapshot("2026-07-15", "instagram_media_reach", 999),
+      instagramSnapshot("2026-07-15", "instagram_followers", 999),
+    ]);
+
+    const instagram = (await getPlatformModules("today", { dataSpaceId: DATA_SPACE_IDS.moonarq }))
+      .find((module) => module.sourceTypeKey === "instagram");
+
+    expect(instagram?.primaryMetric).toMatchObject({ value: 100, deltaPercent: null, deltaLabel: "Latest snapshot Jul 13" });
+    expect(instagram?.secondaryMetrics.find((metric) => metric.key === "instagram_followers")?.value).toBe(20);
+    expect(instagram?.sparkline).toEqual([{ date: "2026-07-14", value: 100 }]);
   });
 
   it("compares TikTok end-minus-start growth against the previous period", async () => {
@@ -400,6 +473,32 @@ describe("platform modules service", () => {
 
     const modules = await getPlatformModules("7d", { dataSpaceId: DATA_SPACE_IDS.moonarq, dataSpaceName: "MoonArq" });
     expect(modules.find((module) => module.sourceTypeKey === "website")?.primaryMetric.value).toBe(30);
+  });
+
+  it("marks Vercel Drain sessions unavailable instead of showing a fabricated total", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    const source = await createSource({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "vercel_web_analytics_drain",
+      display_name: "MoonArq Vercel Drain",
+      status: "healthy",
+      sync_mode: "webhook",
+      supports_webhook: true,
+    });
+    await upsertMetrics([
+      { date: "2026-07-14", sourceId: source.id, sourceTypeKey: "vercel_web_analytics_drain", metricKey: "unique_visitors", metricValue: 5, unit: "count", dimensions: { rollup: "daily" } },
+      { date: "2026-07-14", sourceId: source.id, sourceTypeKey: "vercel_web_analytics_drain", metricKey: "page_views", metricValue: 12, unit: "count", dimensions: { rollup: "daily" } },
+      { date: "2026-07-14", sourceId: source.id, sourceTypeKey: "vercel_web_analytics_drain", metricKey: "sessions", metricValue: 99, unit: "count", dimensions: { rollup: "daily" } },
+    ]);
+
+    const website = (await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq }))
+      .find((module) => module.sourceTypeKey === "website");
+
+    expect(website?.sourceModeLabel).toBe("Vercel Drain");
+    expect(website?.secondaryMetrics.find((metric) => metric.key === "sessions")).toMatchObject({
+      value: "Unavailable",
+      unit: "status",
+    });
   });
 
   it("uses concise global freshness copy", async () => {
