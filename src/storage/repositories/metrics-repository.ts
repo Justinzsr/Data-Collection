@@ -237,7 +237,10 @@ export async function replaceMetricsWindow(
   });
 }
 
-export async function incrementMetric(metric: NormalizedMetric): Promise<{ upserted: number; value: number }> {
+export async function incrementMetric(
+  metric: NormalizedMetric,
+  executor?: DatabaseExecutor,
+): Promise<{ upserted: number; value: number }> {
   const now = new Date().toISOString();
   const dimensions = metric.dimensions ?? {};
   const hash = dimensionsHash(dimensions);
@@ -301,14 +304,18 @@ export async function incrementMetric(metric: NormalizedMetric): Promise<{ upser
       now,
       now,
     ],
+    executor,
   );
   return { upserted: 1, value: rows[0] ? normalizeMetricDailyRow(rows[0]).metric_value : metric.metricValue };
 }
 
-export async function incrementMetrics(metrics: NormalizedMetric[]): Promise<{ upserted: number }> {
+export async function incrementMetrics(
+  metrics: NormalizedMetric[],
+  executor?: DatabaseExecutor,
+): Promise<{ upserted: number }> {
   let upserted = 0;
   for (const metric of metrics) {
-    const result = await incrementMetric(metric);
+    const result = await incrementMetric(metric, executor);
     upserted += result.upserted;
   }
   return { upserted };

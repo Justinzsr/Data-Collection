@@ -20,6 +20,7 @@ import {
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
+import { dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
 
 function validUrl(inputUrl: string) {
   try {
@@ -200,10 +201,11 @@ export const instagramConnector: ConnectorDefinition = {
   },
   async sync(ctx) {
     const { snapshot, failures } = await fetchSnapshot(ctx);
+    const snapshotDate = dateKeyInAppTimeZone(snapshot.fetchedAt);
     return {
       rawPayloads: [
         {
-          externalId: `instagram:${snapshot.account.id}:${snapshot.fetchedAt.slice(0, 10)}`,
+          externalId: `instagram:${snapshot.account.id}:${snapshotDate}`,
           fetchedAt: snapshot.fetchedAt,
           payload: snapshot as unknown as JsonRecord,
           payloadHash: hashInstagramPayload(snapshot),
@@ -221,7 +223,7 @@ export const instagramConnector: ConnectorDefinition = {
     for (const rawPayload of rawPayloads) {
       const payload = rawPayload.payload as Partial<InstagramSyncSnapshot>;
       if (payload.kind !== "instagram_sync_snapshot" || !payload.account) continue;
-      const date = rawPayload.fetchedAt.slice(0, 10);
+      const date = dateKeyInAppTimeZone(rawPayload.fetchedAt);
       const accountDimensions = {
         account_id: payload.account.id,
         username: payload.account.username,
@@ -233,7 +235,7 @@ export const instagramConnector: ConnectorDefinition = {
       );
       const totals = { reach: 0, likes: 0, comments: 0, saved: 0, totalInteractions: 0 };
       for (const media of payload.media ?? []) {
-        const mediaDate = media.timestamp ? media.timestamp.slice(0, 10) : date;
+        const mediaDate = media.timestamp ? dateKeyInAppTimeZone(media.timestamp) : date;
         const reach = media.insights?.reach ?? 0;
         const saved = media.insights?.saved ?? 0;
         const totalInteractions = media.insights?.total_interactions ?? 0;

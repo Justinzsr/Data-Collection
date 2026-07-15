@@ -14,6 +14,7 @@ export type PlatformModule = {
   status: "demo" | "needs_credentials" | "healthy" | "warning" | "error" | "disabled";
   syncMode: string;
   sourceModeLabel: string;
+  rangeLabel: string;
   primaryMetric: {
     key: string;
     label: string;
@@ -256,6 +257,21 @@ function cumulativeSnapshotPoints(rows: MetricDaily[], source: Source | null, me
     .map((row) => ({ date: row.date, value: row.metric_value }));
 }
 
+function cumulativeRangeSnapshotPoints(
+  rows: MetricDaily[],
+  source: Source | null,
+  metricSourceTypeKey: SourceTypeKey,
+  metricKey: string,
+  range: { startDate: string; endDate: string },
+) {
+  const pointsThroughEnd = cumulativeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey)
+    .filter((point) => point.date <= range.endDate);
+  const baseline = pointsThroughEnd.filter((point) => point.date <= range.startDate).at(-1);
+  const pointsInRange = pointsThroughEnd.filter((point) => point.date >= range.startDate);
+  if (!baseline) return pointsInRange;
+  return [baseline, ...pointsInRange.filter((point) => point.date !== baseline.date)];
+}
+
 function cumulativeSnapshotValue(rows: MetricDaily[], source: Source | null, metricSourceTypeKey: SourceTypeKey, metricKey: string) {
   return cumulativeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey).at(-1)?.value ?? 0;
 }
@@ -264,6 +280,49 @@ function cumulativePeriodChange(rows: MetricDaily[], source: Source | null, metr
   const points = cumulativeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey);
   if (points.length < 2) return null;
   return points.at(-1)!.value - points[0].value;
+}
+
+function shortDateLabel(date: string) {
+  const [, month = "1", day = "1"] = date.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[Number(month) - 1] ?? month} ${Number(day)}`;
+}
+
+function cumulativeSelectedRangeDelta(
+  rows: MetricDaily[],
+  source: Source | null,
+  metricSourceTypeKey: SourceTypeKey,
+  metricKey: string,
+  range: { startDate: string; endDate: string },
+) {
+  const points = cumulativeRangeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey, range);
+  const pointsInRange = points.filter((point) => point.date >= range.startDate);
+  const latestInRange = pointsInRange.at(-1);
+  const latestAvailable = points.at(-1);
+
+  if (!latestInRange) {
+    return {
+      deltaPercent: null,
+      deltaLabel: latestAvailable ? `Latest snapshot ${shortDateLabel(latestAvailable.date)}` : "No snapshot available",
+    };
+  }
+
+  const baseline = points[0];
+  if (!baseline || baseline.date === latestInRange.date) {
+    return { deltaPercent: null, deltaLabel: `First snapshot ${shortDateLabel(latestInRange.date)}` };
+  }
+
+  const scopeLabel = baseline.date <= range.startDate ? "in selected range" : `since ${shortDateLabel(baseline.date)}`;
+  if (baseline.value === 0 && latestInRange.value !== 0) {
+    return { deltaPercent: null, deltaLabel: `Up from 0 ${scopeLabel}` };
+  }
+
+  const deltaPercent = calculateDelta(latestInRange.value, baseline.value);
+  const sign = deltaPercent !== null && deltaPercent > 0 ? "+" : "";
+  return {
+    deltaPercent,
+    deltaLabel: deltaPercent === null ? `Change unavailable ${scopeLabel}` : `${sign}${deltaPercent.toFixed(1)}% ${scopeLabel}`,
+  };
 }
 
 function metricValue(
@@ -289,11 +348,14 @@ function sparkline(
   mode: MetricMode = "sum",
 ) {
   if (mode === "cumulative_snapshot") {
-    const points = cumulativeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey);
-    const firstDate = points[0]?.date;
-    if (!firstDate) return [];
+    const range = { startDate, endDate };
+    const points = cumulativeRangeSnapshotPoints(rows, source, metricSourceTypeKey, metricKey, range);
+    const baseline = points.filter((point) => point.date <= startDate).at(-1);
+    const firstPoint = points[0];
+    if (!firstPoint) return [];
     const valuesByDate = new Map(points.map((point) => [point.date, point.value]));
-    let lastValue = points[0].value;
+    const firstDate = baseline ? startDate : firstPoint.date;
+    let lastValue = baseline?.value ?? firstPoint.value;
     return enumerateDays(firstDate, endDate).map((date) => {
       lastValue = valuesByDate.get(date) ?? lastValue;
       return { date, value: lastValue };
@@ -311,6 +373,12 @@ function deltaLabel(deltaPercent: number | null) {
   if (deltaPercent === null) return "No previous data";
   const sign = deltaPercent > 0 ? "+" : "";
   return `${sign}${deltaPercent.toFixed(1)}% vs previous period`;
+}
+
+function rangeLabel(range: { startDate: string; endDate: string }) {
+  const days = enumerateDays(range.startDate, range.endDate).length;
+  if (days === 1) return "Today";
+  return `Last ${days} days`;
 }
 
 export function calculateDelta(current: number, previous: number) {
@@ -476,7 +544,8 @@ function createModule(input: {
   const config = metricConfig[moduleKey];
   const status = source?.status ?? placeholderSourceStatus(moduleKey);
   const primaryMode = config.primaryMode ?? "sum";
-  const currentValue = metricValue(currentRows, source, metricSourceTypeKey, config.primaryKey, primaryMode, input.latestRows);
+  const latestRowsThroughEnd = input.latestRows.filter((row) => row.date <= range.endDate);
+  const currentValue = metricValue(currentRows, source, metricSourceTypeKey, config.primaryKey, primaryMode, latestRowsThroughEnd);
   const currentComparisonValue =
     primaryMode === "cumulative_snapshot"
       ? cumulativePeriodChange(currentRows, source, metricSourceTypeKey, config.primaryKey)
@@ -486,12 +555,17 @@ function createModule(input: {
       ? cumulativePeriodChange(previousRows, source, metricSourceTypeKey, config.primaryKey)
       : metricValue(previousRows, source, metricSourceTypeKey, config.primaryKey);
   const latestUsersTotal =
-    moduleKey === "supabase" ? metricValue(currentRows, source, metricSourceTypeKey, "users_total", "latest", input.latestRows) : 0;
+    moduleKey === "supabase" ? metricValue(currentRows, source, metricSourceTypeKey, "users_total", "latest", latestRowsThroughEnd) : 0;
   const isHealthySupabaseNoSignupWindow = moduleKey === "supabase" && currentValue === 0 && latestUsersTotal > 0;
-  const deltaPercent =
-    isHealthySupabaseNoSignupWindow || currentComparisonValue === null || previousComparisonValue === null
-      ? null
-      : calculateDelta(currentComparisonValue, previousComparisonValue);
+  const usesSelectedRangeDelta = moduleKey === "instagram" && primaryMode === "cumulative_snapshot";
+  const selectedRangeDelta = usesSelectedRangeDelta
+    ? cumulativeSelectedRangeDelta(latestRowsThroughEnd, source, metricSourceTypeKey, config.primaryKey, range)
+    : null;
+  const deltaPercent = selectedRangeDelta
+    ? selectedRangeDelta.deltaPercent
+    : isHealthySupabaseNoSignupWindow || currentComparisonValue === null || previousComparisonValue === null
+        ? null
+        : calculateDelta(currentComparisonValue, previousComparisonValue);
 
   const platformLabel = platformLabelFor(moduleKey, input.dataSpaceName);
   return {
@@ -502,21 +576,44 @@ function createModule(input: {
     status,
     syncMode: source?.sync_mode ?? "manual",
     sourceModeLabel: input.sourceModeLabel ?? (moduleKey === "website" ? getWebsiteModeLabel(source) : source?.status === "demo" ? "Demo" : "Monitored Source"),
+    rangeLabel: rangeLabel(range),
     primaryMetric: {
       key: config.primaryKey,
       label: config.primaryLabel,
       value: currentValue,
       unit: config.unit,
       deltaPercent,
-      deltaLabel: isHealthySupabaseNoSignupWindow ? "No new signups" : deltaLabel(deltaPercent),
+      deltaLabel: isHealthySupabaseNoSignupWindow
+        ? "No new signups"
+        : selectedRangeDelta
+          ? selectedRangeDelta.deltaLabel
+          : deltaLabel(deltaPercent),
     },
-    secondaryMetrics: config.secondary.slice(0, 4).map((item) => ({
-      key: item.key,
-      label: item.label,
-      value: metricValue(currentRows, source, metricSourceTypeKey, item.key, item.mode ?? "sum", input.latestRows),
-      unit: item.unit === "currency" ? latestUnit(input.latestRows, source, metricSourceTypeKey, item.key, "usd") : item.unit,
-    })),
-    sparkline: sparkline(currentRows, source, metricSourceTypeKey, config.primaryKey, range.startDate, range.endDate, primaryMode),
+    secondaryMetrics: config.secondary.slice(0, 4).map((item) => {
+      const unavailableVercelSession =
+        moduleKey === "website" && source?.source_type_key === "vercel_web_analytics_drain" && item.key === "sessions";
+      return {
+        key: item.key,
+        label: item.label,
+        value: unavailableVercelSession
+          ? "Unavailable"
+          : metricValue(currentRows, source, metricSourceTypeKey, item.key, item.mode ?? "sum", latestRowsThroughEnd),
+        unit: unavailableVercelSession
+          ? "status"
+          : item.unit === "currency"
+            ? latestUnit(latestRowsThroughEnd, source, metricSourceTypeKey, item.key, "usd")
+            : item.unit,
+      };
+    }),
+    sparkline: sparkline(
+      primaryMode === "cumulative_snapshot" ? latestRowsThroughEnd : currentRows,
+      source,
+      metricSourceTypeKey,
+      config.primaryKey,
+      range.startDate,
+      range.endDate,
+      primaryMode,
+    ),
     insights: input.insights ?? [],
     lastSyncAt: latestSync(source),
     nextSyncAt: source?.next_sync_at ?? null,

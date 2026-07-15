@@ -3,6 +3,7 @@ import { hasWebEventIdentity, storeWebEvent } from "@/storage/repositories/event
 import type { JsonRecord, WebEvent } from "@/storage/db/schema";
 import type { WebsiteSourceKey } from "@/collection/tracking/website-sources";
 import { dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
+import { isRuntimeDatabaseConfigured, query, withDatabaseTransaction, type DatabaseExecutor } from "@/storage/db/client";
 
 export interface WebsiteEventIngestionInput {
   sourceTypeKey: WebsiteSourceKey;
@@ -10,6 +11,7 @@ export interface WebsiteEventIngestionInput {
   publicTrackingKey: string | null;
   anonymousId: string;
   sessionId: string;
+  includeSessionMetric?: boolean;
   userId?: string | null;
   eventName: string;
   path: string;
@@ -23,12 +25,28 @@ export interface WebsiteEventIngestionInput {
   occurredAt: string;
 }
 
-export async function ingestWebsiteEvent(input: WebsiteEventIngestionInput): Promise<WebEvent> {
+async function ingestWebsiteEventWithExecutor(
+  input: WebsiteEventIngestionInput,
+  executor?: DatabaseExecutor,
+): Promise<WebEvent> {
   const date = dateKeyInAppTimeZone(input.occurredAt);
-  const [hasVisitorAlready, hasSessionAlready] = await Promise.all([
-    hasWebEventIdentity({ sourceId: input.sourceId, occurredDate: date, anonymousId: input.anonymousId }),
-    hasWebEventIdentity({ sourceId: input.sourceId, occurredDate: date, sessionId: input.sessionId }),
-  ]);
+  if (executor) {
+    await query(
+      "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`website-daily-identity:${input.sourceId ?? "none"}:${date}`],
+      executor,
+    );
+  }
+  const hasVisitorAlready = await hasWebEventIdentity(
+    { sourceId: input.sourceId, occurredDate: date, anonymousId: input.anonymousId },
+    executor,
+  );
+  const hasSessionAlready = input.includeSessionMetric === false
+    ? true
+    : await hasWebEventIdentity(
+        { sourceId: input.sourceId, occurredDate: date, sessionId: input.sessionId },
+        executor,
+      );
 
   const event = await storeWebEvent({
     source_id: input.sourceId,
@@ -46,7 +64,7 @@ export async function ingestWebsiteEvent(input: WebsiteEventIngestionInput): Pro
     device_type: input.deviceType ?? null,
     properties: input.properties ?? {},
     occurred_at: input.occurredAt,
-  });
+  }, executor);
 
   const metrics = [
     {
@@ -89,7 +107,7 @@ export async function ingestWebsiteEvent(input: WebsiteEventIngestionInput): Pro
       dimensions: { rollup: "daily" } as JsonRecord,
     });
   }
-  if (!hasSessionAlready) {
+  if (input.includeSessionMetric !== false && !hasSessionAlready) {
     metrics.push({
       date,
       sourceId: event.source_id,
@@ -101,6 +119,15 @@ export async function ingestWebsiteEvent(input: WebsiteEventIngestionInput): Pro
     });
   }
 
-  await incrementMetrics(metrics);
+  await incrementMetrics(metrics, executor);
   return event;
+}
+
+export async function ingestWebsiteEvent(
+  input: WebsiteEventIngestionInput,
+  executor?: DatabaseExecutor,
+): Promise<WebEvent> {
+  if (executor) return ingestWebsiteEventWithExecutor(input, executor);
+  if (!isRuntimeDatabaseConfigured()) return ingestWebsiteEventWithExecutor(input);
+  return withDatabaseTransaction((client) => ingestWebsiteEventWithExecutor(input, client));
 }

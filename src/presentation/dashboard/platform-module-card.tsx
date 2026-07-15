@@ -111,11 +111,16 @@ export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", 
           </div>
 
           <div className="mt-1.5">
-            <SparklineChart data={module.sparkline} tone={tone} label={module.platformLabel} compact />
+            <SparklineChart
+              data={module.sparkline}
+              tone={tone}
+              label={`${module.platformLabel} ${module.primaryMetric.label}, ${module.rangeLabel}`}
+              compact
+            />
           </div>
 
           <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-white/[0.07] pt-2 text-[10px] text-slate-500">
-            <span className="truncate">{detailCount} detail signals · {module.sourceModeLabel}</span>
+            <span className="truncate" title={`${detailCount} detail signals`}>{module.rangeLabel} · {module.sourceModeLabel}</span>
             <span className="inline-flex shrink-0 items-center gap-1 text-slate-400">
               Details
               <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" aria-hidden="true" />

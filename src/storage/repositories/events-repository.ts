@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
+import { isRuntimeDatabaseConfigured, queryRows, type DatabaseExecutor } from "@/storage/db/client";
 import type { ConnectorEvent, JsonRecord, WebEvent } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
 import { listSources } from "@/storage/repositories/sources-repository";
+import { endOfAppDateUtc, startOfAppDateUtc } from "@/storage/runtime/app-time";
 
 export async function recordConnectorEvent(input: {
   source_id: string | null;
@@ -67,7 +68,10 @@ export async function listConnectorEvents(limit = 50, options: { dataSpaceId?: s
   );
 }
 
-export async function storeWebEvent(input: Omit<WebEvent, "id" | "created_at">): Promise<WebEvent> {
+export async function storeWebEvent(
+  input: Omit<WebEvent, "id" | "created_at">,
+  executor?: DatabaseExecutor,
+): Promise<WebEvent> {
   const event: WebEvent = {
     id: randomUUID(),
     created_at: new Date().toISOString(),
@@ -123,6 +127,7 @@ export async function storeWebEvent(input: Omit<WebEvent, "id" | "created_at">):
       event.occurred_at,
       event.created_at,
     ],
+    executor,
   );
   return rows[0];
 }
@@ -222,10 +227,10 @@ export async function hasWebEventIdentity(options: {
   occurredDate: string;
   anonymousId?: string;
   sessionId?: string;
-}) {
+}, executor?: DatabaseExecutor) {
   if (!options.anonymousId && !options.sessionId) return false;
-  const start = `${options.occurredDate}T00:00:00.000Z`;
-  const end = `${options.occurredDate}T23:59:59.999Z`;
+  const start = startOfAppDateUtc(options.occurredDate);
+  const end = endOfAppDateUtc(options.occurredDate);
 
   if (!isRuntimeDatabaseConfigured()) {
     return getDemoStore().webEvents.some((event) => {
@@ -257,6 +262,7 @@ export async function hasWebEventIdentity(options: {
       limit 1
     `,
     values,
+    executor,
   );
   return Boolean(rows[0]);
 }
