@@ -269,6 +269,87 @@ describe("platform modules service", () => {
     expect(moonarqTikTok?.sparkline.every((point) => point.value === 67)).toBe(true);
   });
 
+  it("uses the latest Instagram account and media snapshots instead of summing daily snapshots", async () => {
+    process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    const store = getDemoStore();
+    const instagramSource = store.sources.find((source) => source.id === DEMO_SOURCE_IDS.instagram);
+    if (instagramSource) {
+      instagramSource.status = "healthy";
+      instagramSource.metadata = { oauth_connected: true };
+    }
+    store.metricsDaily = store.metricsDaily.filter((metric) => metric.source_id !== DEMO_SOURCE_IDS.instagram);
+
+    await upsertMetrics([
+      {
+        date: "2026-05-01",
+        sourceId: DEMO_SOURCE_IDS.instagram,
+        sourceTypeKey: "instagram",
+        metricKey: "instagram_followers",
+        metricValue: 20,
+        unit: "count",
+        dimensions: { rollup: "snapshot" },
+      },
+      {
+        date: "2026-05-01",
+        sourceId: DEMO_SOURCE_IDS.instagram,
+        sourceTypeKey: "instagram",
+        metricKey: "instagram_engagement_rate",
+        metricValue: 23.1,
+        unit: "percent",
+        dimensions: { rollup: "media_sync_total" },
+      },
+      ...[
+        { date: "2026-07-12", reach: 100, likes: 10, comments: 1 },
+        { date: "2026-07-13", reach: 110, likes: 11, comments: 2 },
+        { date: "2026-07-14", reach: 120, likes: 12, comments: 3 },
+      ].flatMap((snapshot) => [
+        {
+          date: snapshot.date,
+          sourceId: DEMO_SOURCE_IDS.instagram,
+          sourceTypeKey: "instagram" as const,
+          metricKey: "instagram_media_reach",
+          metricValue: snapshot.reach,
+          unit: "count",
+          dimensions: { rollup: "media_sync_total" },
+        },
+        {
+          date: snapshot.date,
+          sourceId: DEMO_SOURCE_IDS.instagram,
+          sourceTypeKey: "instagram" as const,
+          metricKey: "instagram_media_likes",
+          metricValue: snapshot.likes,
+          unit: "count",
+          dimensions: { rollup: "media_sync_total" },
+        },
+        {
+          date: snapshot.date,
+          sourceId: DEMO_SOURCE_IDS.instagram,
+          sourceTypeKey: "instagram" as const,
+          metricKey: "instagram_media_comments",
+          metricValue: snapshot.comments,
+          unit: "count",
+          dimensions: { rollup: "media_sync_total" },
+        },
+      ]),
+    ]);
+
+    const modules = await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq, dataSpaceName: "MoonArq" });
+    const instagram = modules.find((module) => module.sourceTypeKey === "instagram");
+
+    expect(instagram?.primaryMetric.value).toBe(120);
+    expect(instagram?.secondaryMetrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "instagram_followers", value: 20 }),
+      expect.objectContaining({ key: "instagram_media_likes", value: 12 }),
+      expect.objectContaining({ key: "instagram_media_comments", value: 3 }),
+      expect.objectContaining({ key: "instagram_engagement_rate", value: 23.1 }),
+    ]));
+    expect(instagram?.sparkline).toEqual([
+      { date: "2026-07-12", value: 100 },
+      { date: "2026-07-13", value: 110 },
+      { date: "2026-07-14", value: 120 },
+    ]);
+  });
+
   it("compares TikTok end-minus-start growth against the previous period", async () => {
     process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
     const store = getDemoStore();

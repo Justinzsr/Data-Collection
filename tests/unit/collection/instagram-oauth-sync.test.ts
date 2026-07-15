@@ -669,6 +669,7 @@ describe("Auto Lab Instagram OAuth and sync", () => {
       ]),
     );
     expect(autoLabMetrics.find((metric) => metric.metric_key === "instagram_media_reach" && metric.dimensions.rollup === "media_sync_total")?.metric_value).toBe(100);
+    expect(autoLabMetrics.find((metric) => metric.metric_key === "instagram_followers" && metric.dimensions.rollup === "snapshot")?.metric_value).toBe(428);
     expect(store.contentItems.some((item) => item.source_id === AUTO_LAB_INSTAGRAM_SOURCE_ID && item.external_content_id === MEDIA_ID)).toBe(true);
     expect(store.contentMetrics.some((metric) => metric.source_id === AUTO_LAB_INSTAGRAM_SOURCE_ID && metric.metric_key === "instagram_media_likes")).toBe(true);
     expect(store.connectorEvents.some((event) => event.source_id === AUTO_LAB_INSTAGRAM_SOURCE_ID && event.event_type === "instagram_insight_metric_unsupported")).toBe(true);
