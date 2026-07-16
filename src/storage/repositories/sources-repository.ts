@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { listSourceTypes } from "@/collection/connectors/registry";
-import { isRuntimeDatabaseConfigured, query, queryRows } from "@/storage/db/client";
+import { isRuntimeDatabaseConfigured, query, queryRows, type DatabaseExecutor } from "@/storage/db/client";
 import { buildUpdateClause } from "@/storage/db/sql";
 import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import type { JsonRecord, Source, SourceStatus, SourceTypeKey, SyncMode } from "@/storage/db/schema";
@@ -56,7 +56,7 @@ function sourceMatchesScope(source: Source, scope: SourceScope = {}) {
   return !scope.dataSpaceId || source.data_space_id === scope.dataSpaceId;
 }
 
-async function ensureSourceTypeRow(sourceTypeKey: SourceTypeKey) {
+async function ensureSourceTypeRow(sourceTypeKey: SourceTypeKey, executor?: DatabaseExecutor) {
   const sourceType = listSourceTypes().find((item) => item.key === sourceTypeKey);
   if (!sourceType) {
     throw new Error(`Unknown source type: ${sourceTypeKey}`);
@@ -113,6 +113,7 @@ async function ensureSourceTypeRow(sourceTypeKey: SourceTypeKey) {
       sourceType.created_at,
       sourceType.updated_at,
     ],
+    executor,
   );
 }
 
@@ -122,29 +123,29 @@ export function nextAlignedSyncAt(now: Date, frequencyMinutes: number) {
   return new Date(nextBoundaryMs).toISOString();
 }
 
-export async function listSources(scope: SourceScope = {}): Promise<Source[]> {
+export async function listSources(scope: SourceScope = {}, executor?: DatabaseExecutor): Promise<Source[]> {
   if (!isRuntimeDatabaseConfigured()) {
     return [...getDemoStore().sources]
       .filter((source) => sourceMatchesScope(source, scope))
       .sort((a, b) => a.display_name.localeCompare(b.display_name));
   }
   if (scope.dataSpaceId) {
-    return queryRows<Source>("select * from sources where data_space_id = $1 order by display_name asc", [scope.dataSpaceId]);
+    return queryRows<Source>("select * from sources where data_space_id = $1 order by display_name asc", [scope.dataSpaceId], executor);
   }
-  return queryRows<Source>("select * from sources order by display_name asc");
+  return queryRows<Source>("select * from sources order by display_name asc", undefined, executor);
 }
 
-export async function getSource(sourceId: string, scope: SourceScope = {}): Promise<Source | null> {
+export async function getSource(sourceId: string, scope: SourceScope = {}, executor?: DatabaseExecutor): Promise<Source | null> {
   if (!isRuntimeDatabaseConfigured()) {
     return getDemoStore().sources.find((source) => source.id === sourceId && sourceMatchesScope(source, scope)) ?? null;
   }
   const rows = scope.dataSpaceId
-    ? await queryRows<Source>("select * from sources where id = $1 and data_space_id = $2 limit 1", [sourceId, scope.dataSpaceId])
-    : await queryRows<Source>("select * from sources where id = $1 limit 1", [sourceId]);
+    ? await queryRows<Source>("select * from sources where id = $1 and data_space_id = $2 limit 1", [sourceId, scope.dataSpaceId], executor)
+    : await queryRows<Source>("select * from sources where id = $1 limit 1", [sourceId], executor);
   return rows[0] ?? null;
 }
 
-export async function createSource(input: CreateSourceInput): Promise<Source> {
+export async function createSource(input: CreateSourceInput, executor?: DatabaseExecutor): Promise<Source> {
   const now = new Date().toISOString();
   const sourceType = listSourceTypes().find((item) => item.key === input.source_type_key);
   if (!sourceType) throw new Error(`Unknown source type: ${input.source_type_key}`);
@@ -202,7 +203,7 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
     return source;
   }
 
-  await ensureSourceTypeRow(source.source_type_key);
+  await ensureSourceTypeRow(source.source_type_key, executor);
   const rows = await queryRows<Source>(
     `
       insert into sources (
@@ -262,6 +263,7 @@ export async function createSource(input: CreateSourceInput): Promise<Source> {
       source.created_at,
       source.updated_at,
     ],
+    executor,
   );
   return rows[0];
 }
@@ -279,6 +281,7 @@ export async function updateSource(
   sourceId: string,
   patch: SourceUpdatePatch,
   scope: SourceScope = {},
+  executor?: DatabaseExecutor,
 ): Promise<Source | null> {
   assertSafeSourceUpdatePatch(patch);
   if (!isRuntimeDatabaseConfigured()) {
@@ -298,10 +301,11 @@ export async function updateSource(
   };
   const scoped = Boolean(scope.dataSpaceId);
   const { clause, values } = buildUpdateClause(nextPatch, scoped ? 3 : 2);
-  if (!clause) return getSource(sourceId, scope);
+  if (!clause) return getSource(sourceId, scope, executor);
   const rows = await queryRows<Source>(
     `update sources set ${clause} where id = $1${scoped ? " and data_space_id = $2" : ""} returning *`,
     scoped ? [sourceId, scope.dataSpaceId, ...values] : [sourceId, ...values],
+    executor,
   );
   return rows[0] ?? null;
 }

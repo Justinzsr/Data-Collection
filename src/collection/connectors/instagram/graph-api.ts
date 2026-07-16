@@ -218,13 +218,17 @@ export function getInstagramOAuthConfigForSource(
   return config;
 }
 
-export function buildInstagramAuthorizationUrl(config: Pick<InstagramOAuthConfig, "appId" | "graphApiVersion" | "redirectUri">, state: string) {
+export function buildInstagramAuthorizationUrl(
+  config: Pick<InstagramOAuthConfig, "appId" | "graphApiVersion" | "redirectUri">,
+  state: string,
+  scopes: readonly string[] = INSTAGRAM_OAUTH_SCOPES,
+) {
   const url = new URL(`https://www.facebook.com/${config.graphApiVersion}/dialog/oauth`);
   url.searchParams.set("client_id", config.appId);
   url.searchParams.set("redirect_uri", config.redirectUri);
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", INSTAGRAM_OAUTH_SCOPES.join(","));
+  url.searchParams.set("scope", [...new Set(scopes)].join(","));
   return url;
 }
 

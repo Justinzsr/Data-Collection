@@ -395,6 +395,23 @@ describe("Auto Lab Instagram OAuth and sync", () => {
     expect(body.error).toContain("Invalid Instagram OAuth state");
   });
 
+  it("rejects OAuth state signatures with unexpected lengths as invalid state", () => {
+    const state = createInstagramOAuthState({
+      sourceId: MOONARQ_INSTAGRAM_SOURCE_ID,
+      dataSpaceSlug: "moonarq",
+      returnPath: `/w/moonarq/dashboard/sources/${MOONARQ_INSTAGRAM_SOURCE_ID}`,
+      metaAppProfile: "moonarq",
+    });
+    const [payloadPart] = state.split(".");
+
+    for (const signature of ["x", "x".repeat(128)]) {
+      const invalidState = `${payloadPart}.${signature}`;
+      expect(() => validateInstagramOAuthState(invalidState, invalidState)).toThrowError(
+        "Invalid Instagram OAuth state.",
+      );
+    }
+  });
+
   it("rejects expired Instagram OAuth callback state", async () => {
     addMoonArqInstagramSource();
     const expiredState = createInstagramOAuthState(

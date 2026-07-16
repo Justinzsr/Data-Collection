@@ -327,7 +327,7 @@ export function AddSourceWizard({
 
   const platformTypes = useMemo(
     () => sourceTypes
-      .filter((item) => item.key !== "vercel_web_analytics_drain")
+      .filter((item) => item.key !== "vercel_web_analytics_drain" && item.key !== "meta_ads")
       .sort((a, b) => {
         const aIndex = PLATFORM_PRIORITY.indexOf(a.key);
         const bIndex = PLATFORM_PRIORITY.indexOf(b.key);

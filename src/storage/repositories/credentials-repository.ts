@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { decryptSecret, encryptSecret } from "@/storage/credentials/encryption";
 import { maskSecret } from "@/storage/credentials/masking";
-import { isRuntimeDatabaseConfigured, query, queryRows } from "@/storage/db/client";
+import { isRuntimeDatabaseConfigured, query, queryRows, type DatabaseExecutor } from "@/storage/db/client";
 import type { SourceCredential } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
 
-export async function saveCredential(sourceId: string, fieldKey: string, value: string): Promise<SourceCredential> {
+export async function saveCredential(sourceId: string, fieldKey: string, value: string, executor?: DatabaseExecutor): Promise<SourceCredential> {
   const now = new Date().toISOString();
   const encrypted = encryptSecret(value);
 
@@ -52,6 +52,7 @@ export async function saveCredential(sourceId: string, fieldKey: string, value: 
       returning *
     `,
     [randomUUID(), sourceId, fieldKey, encrypted.encryptedValue, encrypted.iv, encrypted.authTag, maskSecret(value), now, now],
+    executor,
   );
   return rows[0];
 }
@@ -78,14 +79,14 @@ export async function listCredentialHints(sourceId: string) {
   );
 }
 
-export async function deleteCredential(sourceId: string, fieldKey: string): Promise<boolean> {
+export async function deleteCredential(sourceId: string, fieldKey: string, executor?: DatabaseExecutor): Promise<boolean> {
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();
     const before = store.credentials.length;
     store.credentials = store.credentials.filter((credential) => credential.source_id !== sourceId || credential.field_key !== fieldKey);
     return store.credentials.length !== before;
   }
-  const result = await query("delete from source_credentials where source_id = $1 and field_key = $2", [sourceId, fieldKey]);
+  const result = await query("delete from source_credentials where source_id = $1 and field_key = $2", [sourceId, fieldKey], executor);
   return (result.rowCount ?? 0) > 0;
 }
 

@@ -7,6 +7,7 @@ export const SHOPIFY_ADMIN_API_VERSION = "2026-07";
 export const SHOPIFY_REQUIRED_SCOPES = ["read_orders"] as const;
 export const SHOPIFY_ORDER_LOOKBACK_DAYS = 60;
 export const SHOPIFY_SHOP_ID_METADATA_KEY = "shopify_shop_id";
+export const SHOPIFY_ATTRIBUTION_VERSION = "customer-journey-v1" as const;
 
 const SHOPIFY_ORDER_PAGE_SIZE = 25;
 const SHOPIFY_MAX_ORDER_PAGES = 100;
@@ -31,6 +32,30 @@ export type ShopifyLineItem = {
   originalUnitPriceSet: ShopifyMoneyBag;
 };
 
+export type ShopifyUtmParameters = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  content: string | null;
+  term: string | null;
+};
+
+export type ShopifyCustomerVisit = {
+  landingPage: string | null;
+  referrerUrl: string | null;
+  source: string;
+  sourceType: string | null;
+  utmParameters: ShopifyUtmParameters | null;
+};
+
+export type ShopifyCustomerJourneySummary = {
+  ready: boolean;
+  daysToConversion: number | null;
+  customerOrderIndex: number | null;
+  firstVisit: ShopifyCustomerVisit | null;
+  lastVisit: ShopifyCustomerVisit | null;
+};
+
 export type ShopifyOrder = {
   id: string;
   createdAt: string;
@@ -41,6 +66,7 @@ export type ShopifyOrder = {
   currentTotalPriceSet: ShopifyMoneyBag;
   netPaymentSet: ShopifyMoneyBag;
   totalRefundedSet: ShopifyMoneyBag;
+  customerJourneySummary: ShopifyCustomerJourneySummary | null;
   lineItems: {
     nodes: ShopifyLineItem[];
     pageInfo: { hasNextPage: boolean };
@@ -57,6 +83,7 @@ export type ShopifyShop = {
 
 export type ShopifySyncSnapshot = {
   kind: "shopify_orders_snapshot";
+  attributionVersion: typeof SHOPIFY_ATTRIBUTION_VERSION;
   fetchedAt: string;
   apiVersion: string;
   lookbackDays: number;
@@ -326,11 +353,84 @@ const ORDERS_QUERY = `#graphql
         currentTotalPriceSet { shopMoney { amount currencyCode } }
         netPaymentSet { shopMoney { amount currencyCode } }
         totalRefundedSet { shopMoney { amount currencyCode } }
+        customerJourneySummary {
+          ready
+          daysToConversion
+          customerOrderIndex
+          firstVisit {
+            landingPage
+            referrerUrl
+            source
+            sourceType
+            utmParameters { source medium campaign content term }
+          }
+          lastVisit {
+            landingPage
+            referrerUrl
+            source
+            sourceType
+            utmParameters { source medium campaign content term }
+          }
+        }
       }
       pageInfo { hasNextPage endCursor }
     }
   }
 `;
+
+function sanitizeAttributionUrl(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().slice(0, 2_048);
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeAttributionText(value: string | null, maxLength = 512) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+function sanitizeShopifyVisit(visit: ShopifyCustomerVisit | null) {
+  if (!visit) return null;
+  return {
+    landingPage: sanitizeAttributionUrl(visit.landingPage),
+    referrerUrl: sanitizeAttributionUrl(visit.referrerUrl),
+    source: sanitizeAttributionText(visit.source) ?? "unknown",
+    sourceType: sanitizeAttributionText(visit.sourceType, 80),
+    utmParameters: visit.utmParameters
+      ? {
+          source: sanitizeAttributionText(visit.utmParameters.source),
+          medium: sanitizeAttributionText(visit.utmParameters.medium),
+          campaign: sanitizeAttributionText(visit.utmParameters.campaign),
+          content: sanitizeAttributionText(visit.utmParameters.content),
+          term: sanitizeAttributionText(visit.utmParameters.term),
+        }
+      : null,
+  } satisfies ShopifyCustomerVisit;
+}
+
+function sanitizeShopifyJourney(journey: ShopifyCustomerJourneySummary | null) {
+  if (!journey) return null;
+  return {
+    ready: journey.ready === true,
+    daysToConversion: Number.isInteger(journey.daysToConversion) && Number(journey.daysToConversion) >= 0
+      ? journey.daysToConversion
+      : null,
+    customerOrderIndex: Number.isInteger(journey.customerOrderIndex) && Number(journey.customerOrderIndex) >= 0
+      ? journey.customerOrderIndex
+      : null,
+    firstVisit: sanitizeShopifyVisit(journey.firstVisit),
+    lastVisit: sanitizeShopifyVisit(journey.lastVisit),
+  } satisfies ShopifyCustomerJourneySummary;
+}
 
 const ORDER_LINE_ITEMS_QUERY = `#graphql
   query MoonArqShopifyOrderLineItems($orderId: ID!, $first: Int!, $after: String) {
@@ -415,7 +515,11 @@ async function fetchShopifyOrders(
       const lineItems = order.test
         ? { nodes: [], pageInfo: { hasNextPage: false } }
         : await fetchShopifyOrderLineItems(shopDomain, accessToken, order.id, fetchImpl);
-      orders.push({ ...order, lineItems });
+      orders.push({
+        ...order,
+        customerJourneySummary: sanitizeShopifyJourney(order.customerJourneySummary),
+        lineItems,
+      });
     }
     if (!connection.pageInfo.hasNextPage) {
       complete = true;
@@ -568,6 +672,7 @@ function zonedStartOfDayUtc(dateKey: string, ianaTimezone: string) {
 export function hashShopifySnapshot(snapshot: ShopifySyncSnapshot) {
   const canonical = {
     apiVersion: snapshot.apiVersion,
+    attributionVersion: snapshot.attributionVersion,
     kind: snapshot.kind,
     lookbackDays: snapshot.lookbackDays,
     orders: snapshot.orders,
@@ -602,6 +707,7 @@ export async function fetchShopifySnapshot(
   const orders = await fetchShopifyOrders(store.shopDomain, token.accessToken, queryStartAt, fetchImpl);
   return {
     kind: "shopify_orders_snapshot",
+    attributionVersion: SHOPIFY_ATTRIBUTION_VERSION,
     fetchedAt: now.toISOString(),
     apiVersion: SHOPIFY_ADMIN_API_VERSION,
     lookbackDays: SHOPIFY_ORDER_LOOKBACK_DAYS,
@@ -615,6 +721,7 @@ export async function fetchShopifySnapshot(
 export function isShopifySnapshot(value: unknown): value is ShopifySyncSnapshot {
   return isRecord(value)
     && value.kind === "shopify_orders_snapshot"
+    && value.attributionVersion === SHOPIFY_ATTRIBUTION_VERSION
     && typeof value.fetchedAt === "string"
     && typeof value.windowStartDate === "string"
     && typeof value.queryStartAt === "string"

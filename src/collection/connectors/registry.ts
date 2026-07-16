@@ -14,6 +14,7 @@ import {
 } from "@/collection/connectors/future-connectors";
 import { shopifyConnector } from "@/collection/connectors/shopify/connector";
 import { instagramConnector } from "@/collection/connectors/instagram/connector";
+import { metaAdsConnector } from "@/collection/connectors/meta-ads/connector";
 import { tiktokConnector } from "@/collection/connectors/tiktok/connector";
 import { xiaohongshuConnector } from "@/collection/connectors/xiaohongshu/connector";
 
@@ -24,6 +25,7 @@ export const connectorRegistry: ConnectorDefinition[] = [
   shopifyConnector,
   tiktokConnector,
   instagramConnector,
+  metaAdsConnector,
   customCsvConnector,
   customApiConnector,
   xiaohongshuConnector,

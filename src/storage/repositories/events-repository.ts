@@ -3,7 +3,7 @@ import { isRuntimeDatabaseConfigured, queryRows, type DatabaseExecutor } from "@
 import type { ConnectorEvent, JsonRecord, WebEvent } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
 import { listSources } from "@/storage/repositories/sources-repository";
-import { endOfAppDateUtc, startOfAppDateUtc } from "@/storage/runtime/app-time";
+import { addDaysToDateKey, dateKeyInAppTimeZone, endOfAppDateUtc, startOfAppDateUtc } from "@/storage/runtime/app-time";
 
 export async function recordConnectorEvent(input: {
   source_id: string | null;
@@ -11,7 +11,7 @@ export async function recordConnectorEvent(input: {
   severity: ConnectorEvent["severity"];
   message: string;
   metadata?: JsonRecord;
-}): Promise<ConnectorEvent> {
+}, executor?: DatabaseExecutor): Promise<ConnectorEvent> {
   const event: ConnectorEvent = {
     id: randomUUID(),
     source_id: input.source_id,
@@ -34,6 +34,7 @@ export async function recordConnectorEvent(input: {
       returning *
     `,
     [event.id, event.source_id, event.event_type, event.severity, event.message, JSON.stringify(event.metadata), event.created_at],
+    executor,
   );
   return rows[0];
 }
@@ -220,6 +221,322 @@ export async function findWebEvents(options: {
     `,
     values,
   );
+}
+
+export type WebEventUtmCounts = {
+  pageViews: number;
+  visitors: number;
+  eligibleReturnDevices1d: number;
+  returningDevices1d: number;
+  eligibleReturnDevices7d: number;
+  returningDevices7d: number;
+};
+
+type ExactUtm = {
+  source: string;
+  medium: string;
+  campaign: string;
+  content: string;
+  term?: string | null;
+};
+
+function utmFromRecord(value: unknown): Partial<ExactUtm> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as JsonRecord;
+  const candidate = {
+    source: typeof record.source === "string" ? record.source : typeof record.utm_source === "string" ? record.utm_source : undefined,
+    medium: typeof record.medium === "string" ? record.medium : typeof record.utm_medium === "string" ? record.utm_medium : undefined,
+    campaign: typeof record.campaign === "string" ? record.campaign : typeof record.utm_campaign === "string" ? record.utm_campaign : undefined,
+    content: typeof record.content === "string" ? record.content : typeof record.utm_content === "string" ? record.utm_content : undefined,
+    term: typeof record.term === "string" ? record.term : typeof record.utm_term === "string" ? record.utm_term : null,
+  };
+  return candidate.source || candidate.medium || candidate.campaign || candidate.content || candidate.term ? candidate : null;
+}
+
+function utmFromParams(params: URLSearchParams | null): Partial<ExactUtm> | null {
+  if (!params) return null;
+  const candidate = {
+    source: params.get("utm_source") ?? undefined,
+    medium: params.get("utm_medium") ?? undefined,
+    campaign: params.get("utm_campaign") ?? undefined,
+    content: params.get("utm_content") ?? undefined,
+    term: params.get("utm_term"),
+  };
+  return candidate.source || candidate.medium || candidate.campaign || candidate.content || candidate.term ? candidate : null;
+}
+
+function eventUtmCandidates(event: WebEvent): Partial<ExactUtm>[] {
+  const candidates: Partial<ExactUtm>[] = [];
+  const attribution = event.properties.attribution;
+  if (attribution && typeof attribution === "object" && !Array.isArray(attribution)) {
+    const utm = (attribution as JsonRecord).utm;
+    const normalized = utmFromRecord(utm);
+    if (normalized) candidates.push(normalized);
+  }
+
+  try {
+    const fromUrl = utmFromParams(new URL(event.url).searchParams);
+    if (fromUrl) candidates.push(fromUrl);
+  } catch {
+    // Legacy drain events may keep query parameters only in properties.
+  }
+  const vercel = event.properties.vercel;
+  const legacy = vercel && typeof vercel === "object" && !Array.isArray(vercel)
+    ? (vercel as JsonRecord).query_params
+    : null;
+  const legacyRecord = utmFromRecord(legacy);
+  if (legacyRecord) candidates.push(legacyRecord);
+  if (typeof legacy === "string" && legacy.trim()) {
+    let candidate = legacy.trim();
+    try {
+      const decoded = JSON.parse(candidate) as unknown;
+      const fromDecoded = utmFromRecord(decoded);
+      if (fromDecoded) candidates.push(fromDecoded);
+      if (typeof decoded === "string") candidate = decoded;
+    } catch {
+      // Plain query strings are supported below.
+    }
+    const fromQuery = utmFromParams(new URLSearchParams(candidate.startsWith("?") ? candidate.slice(1) : candidate));
+    if (fromQuery) candidates.push(fromQuery);
+  }
+  return candidates;
+}
+
+function exactUtmMatch(actual: Partial<ExactUtm>, expected: ExactUtm) {
+  return actual.source?.toLowerCase() === expected.source.toLowerCase()
+    && actual.medium?.toLowerCase() === expected.medium.toLowerCase()
+    && actual.campaign === expected.campaign
+    && actual.content === expected.content
+    && (expected.term == null || actual.term === expected.term);
+}
+
+function isEligibleAnonymousDevice(value: string | null): value is string {
+  return Boolean(value && value !== "vercel-device");
+}
+
+function demoReturnDeviceCounts(options: {
+  sourceId: string;
+  startOccurredAt: string;
+  endOccurredAt: string;
+  utm: ExactUtm;
+}) {
+  const startTimestamp = Date.parse(options.startOccurredAt);
+  const endTimestamp = Date.parse(options.endOccurredAt);
+  const rangeEndDate = dateKeyInAppTimeZone(options.endOccurredAt);
+  const eligibleCutoff1d = addDaysToDateKey(rangeEndDate, -1);
+  const eligibleCutoff7d = addDaysToDateKey(rangeEndDate, -7);
+  const sourcePageViews = getDemoStore().webEvents.filter((event) =>
+    event.source_id === options.sourceId
+    && event.event_name === "page_view"
+    && Date.parse(event.occurred_at) <= endTimestamp);
+  const exactUtmPageViews = sourcePageViews.filter((event) =>
+    eventUtmCandidates(event).some((candidate) => exactUtmMatch(candidate, options.utm)));
+  const firstTouchByDevice = new Map<string, { occurredAt: number; date: string }>();
+  for (const event of exactUtmPageViews) {
+    if (!isEligibleAnonymousDevice(event.anonymous_id)) continue;
+    const occurredAt = Date.parse(event.occurred_at);
+    const existing = firstTouchByDevice.get(event.anonymous_id!);
+    if (!existing || occurredAt < existing.occurredAt) {
+      firstTouchByDevice.set(event.anonymous_id!, {
+        occurredAt,
+        date: dateKeyInAppTimeZone(event.occurred_at),
+      });
+    }
+  }
+
+  const pageViewDatesByDevice = new Map<string, Set<string>>();
+  for (const event of sourcePageViews) {
+    if (!isEligibleAnonymousDevice(event.anonymous_id)) continue;
+    const dates = pageViewDatesByDevice.get(event.anonymous_id!) ?? new Set<string>();
+    dates.add(dateKeyInAppTimeZone(event.occurred_at));
+    pageViewDatesByDevice.set(event.anonymous_id!, dates);
+  }
+
+  let eligibleReturnDevices1d = 0;
+  let returningDevices1d = 0;
+  let eligibleReturnDevices7d = 0;
+  let returningDevices7d = 0;
+  for (const [device, firstTouch] of firstTouchByDevice) {
+    if (firstTouch.occurredAt < startTimestamp || firstTouch.occurredAt > endTimestamp) continue;
+    const pageViewDates = pageViewDatesByDevice.get(device) ?? new Set<string>();
+    const returnedWithin = (days: number) => {
+      const lastReturnDate = addDaysToDateKey(firstTouch.date, days);
+      return [...pageViewDates].some((date) => date > firstTouch.date && date <= lastReturnDate);
+    };
+    if (firstTouch.date <= eligibleCutoff1d) {
+      eligibleReturnDevices1d += 1;
+      if (returnedWithin(1)) returningDevices1d += 1;
+    }
+    if (firstTouch.date <= eligibleCutoff7d) {
+      eligibleReturnDevices7d += 1;
+      if (returnedWithin(7)) returningDevices7d += 1;
+    }
+  }
+  return {
+    eligibleReturnDevices1d,
+    returningDevices1d,
+    eligibleReturnDevices7d,
+    returningDevices7d,
+  };
+}
+
+export async function countWebPageViewsByUtm(options: {
+  sourceId: string;
+  startOccurredAt: string;
+  endOccurredAt: string;
+  utm: ExactUtm;
+  dataSpaceId?: string;
+}): Promise<WebEventUtmCounts> {
+  if (!isRuntimeDatabaseConfigured()) {
+    const startTimestamp = Date.parse(options.startOccurredAt);
+    const endTimestamp = Date.parse(options.endOccurredAt);
+    const matching = getDemoStore().webEvents.filter((event) =>
+      event.source_id === options.sourceId
+      && event.event_name === "page_view"
+      && Date.parse(event.occurred_at) >= startTimestamp
+      && Date.parse(event.occurred_at) <= endTimestamp
+      && eventUtmCandidates(event).some((candidate) => exactUtmMatch(candidate, options.utm)));
+    return {
+      pageViews: matching.length,
+      visitors: new Set(matching.map((event) => event.anonymous_id).filter(isEligibleAnonymousDevice)).size,
+      ...demoReturnDeviceCounts(options),
+    };
+  }
+
+  const exactEventConditions = [
+    "e.source_id = $1",
+    "e.event_name = 'page_view'",
+    "e.occurred_at <= $3",
+  ];
+  const values: unknown[] = [
+    options.sourceId,
+    options.startOccurredAt,
+    options.endOccurredAt,
+    options.utm.source,
+    options.utm.medium,
+    options.utm.campaign,
+    options.utm.content,
+  ];
+  let termParameter: number | null = null;
+  if (options.utm.term != null) {
+    values.push(options.utm.term);
+    termParameter = values.length;
+  }
+  const evidenceGroup = (field: (normalizedKey: string, queryKey: string) => string) => {
+    const predicates = [
+      `lower(${field("source", "utm_source")}) = lower($4)`,
+      `lower(${field("medium", "utm_medium")}) = lower($5)`,
+      `${field("campaign", "utm_campaign")} = $6`,
+      `${field("content", "utm_content")} = $7`,
+    ];
+    if (termParameter) predicates.push(`${field("term", "utm_term")} = $${termParameter}`);
+    return `(${predicates.join(" and ")})`;
+  };
+  exactEventConditions.push(`(
+    ${[
+      evidenceGroup((normalizedKey) => `nullif(e.properties #>> '{attribution,utm,${normalizedKey}}', '')`),
+      evidenceGroup((_normalizedKey, queryKey) => `substring(coalesce(e.url, '') from '[?&]${queryKey}=([^&#]+)')`),
+      evidenceGroup((_normalizedKey, queryKey) => `substring(coalesce(e.properties #>> '{vercel,query_params}', '') from '"${queryKey}"[[:space:]]*:[[:space:]]*"([^"]+)"')`),
+      evidenceGroup((_normalizedKey, queryKey) => `substring(coalesce(e.properties #>> '{vercel,query_params}', '') from '${queryKey}=([^&]+)')`),
+    ].join(" or ")}
+  )`);
+  if (options.dataSpaceId) {
+    values.push(options.dataSpaceId);
+    exactEventConditions.push(`s.data_space_id = $${values.length}`);
+  }
+  const rows = await queryRows<{
+    page_views: string | number;
+    visitors: string | number;
+    eligible_return_devices_1d: string | number;
+    returning_devices_1d: string | number;
+    eligible_return_devices_7d: string | number;
+    returning_devices_7d: string | number;
+  }>(
+    `
+      with exact_utm_events as (
+        select e.source_id, e.anonymous_id, e.occurred_at
+        from web_events e
+        ${options.dataSpaceId ? "join sources s on s.id = e.source_id" : ""}
+        where ${exactEventConditions.join(" and ")}
+      ),
+      range_matches as (
+        select *
+        from exact_utm_events
+        where occurred_at >= $2 and occurred_at <= $3
+      ),
+      first_touch_devices as (
+        select anonymous_id, min(occurred_at) as first_touch_at
+        from exact_utm_events
+        where anonymous_id is not null
+          and anonymous_id <> ''
+          and anonymous_id <> 'vercel-device'
+        group by anonymous_id
+      ),
+      cohort_devices as (
+        select
+          anonymous_id,
+          first_touch_at,
+          (first_touch_at at time zone 'America/Los_Angeles')::date as first_touch_date
+        from first_touch_devices
+        where first_touch_at >= $2 and first_touch_at <= $3
+      ),
+      return_page_view_dates as (
+        select distinct
+          anonymous_id,
+          (occurred_at at time zone 'America/Los_Angeles')::date as return_date
+        from web_events
+        where source_id = $1
+          and event_name = 'page_view'
+          and occurred_at >= $2
+          and occurred_at <= $3
+          and anonymous_id is not null
+          and anonymous_id <> ''
+          and anonymous_id <> 'vercel-device'
+      ),
+      cohort_flags as (
+        select
+          cohort_devices.*,
+          (($3::timestamptz at time zone 'America/Los_Angeles')::date - first_touch_date) >= 1 as eligible_1d,
+          (($3::timestamptz at time zone 'America/Los_Angeles')::date - first_touch_date) >= 7 as eligible_7d,
+          exists (
+            select 1
+            from return_page_view_dates return_event
+            where return_event.anonymous_id = cohort_devices.anonymous_id
+              and (return_event.return_date - first_touch_date) = 1
+          ) as returned_1d,
+          exists (
+            select 1
+            from return_page_view_dates return_event
+            where return_event.anonymous_id = cohort_devices.anonymous_id
+              and (return_event.return_date - first_touch_date) between 1 and 7
+          ) as returned_7d
+        from cohort_devices
+      )
+      select
+        (select count(*) from range_matches) as page_views,
+        (
+          select count(distinct anonymous_id)
+          from range_matches
+          where anonymous_id is not null
+            and anonymous_id <> ''
+            and anonymous_id <> 'vercel-device'
+        ) as visitors,
+        count(*) filter (where eligible_1d) as eligible_return_devices_1d,
+        count(*) filter (where eligible_1d and returned_1d) as returning_devices_1d,
+        count(*) filter (where eligible_7d) as eligible_return_devices_7d,
+        count(*) filter (where eligible_7d and returned_7d) as returning_devices_7d
+      from cohort_flags
+    `,
+    values,
+  );
+  return {
+    pageViews: Number(rows[0]?.page_views ?? 0),
+    visitors: Number(rows[0]?.visitors ?? 0),
+    eligibleReturnDevices1d: Number(rows[0]?.eligible_return_devices_1d ?? 0),
+    returningDevices1d: Number(rows[0]?.returning_devices_1d ?? 0),
+    eligibleReturnDevices7d: Number(rows[0]?.eligible_return_devices_7d ?? 0),
+    returningDevices7d: Number(rows[0]?.returning_devices_7d ?? 0),
+  };
 }
 
 export async function hasWebEventIdentity(options: {

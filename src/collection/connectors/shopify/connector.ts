@@ -21,6 +21,7 @@ import {
   ShopifyApiError,
   type ShopifyMoneyBag,
   type ShopifyOrder,
+  type ShopifyCustomerVisit,
   type ShopifySyncSnapshot,
 } from "@/collection/connectors/shopify/api";
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
@@ -42,6 +43,12 @@ const SHOPIFY_WINDOW_METRIC_KEYS = [
   "net_payment",
   "refunds",
   "top_products",
+  "shopify_attributed_orders",
+  "shopify_attributed_gross_sales",
+  "shopify_attributed_discounts",
+  "shopify_attributed_current_total",
+  "shopify_attributed_refunds",
+  "shopify_attributed_net_revenue",
 ] as const;
 
 function roundMetric(value: number) {
@@ -68,6 +75,42 @@ function grossSales(order: ShopifyOrder, expectedCurrency: string) {
     if (unitPrice === null) throw new Error(`Line item ${item.id} did not include an original price.`);
     return sum + unitPrice * item.quantity;
   }, 0);
+}
+
+function hasUtmAttribution(visit: ShopifyCustomerVisit) {
+  const utm = visit.utmParameters;
+  return utm !== null && [utm.source, utm.medium, utm.campaign, utm.content, utm.term].some(Boolean);
+}
+
+function attributionDimensions(
+  snapshot: ShopifySyncSnapshot,
+  order: ShopifyOrder,
+  visit: ShopifyCustomerVisit,
+  attributionModel: "first_visit" | "last_visit",
+): JsonRecord {
+  const journey = order.customerJourneySummary;
+  const utm = visit.utmParameters;
+  return {
+    rollup: "order_utm_attribution",
+    attribution_ready: journey?.ready === true,
+    attribution_model: attributionModel,
+    utm_source: utm?.source ?? null,
+    utm_medium: utm?.medium ?? null,
+    utm_campaign: utm?.campaign ?? null,
+    utm_content: utm?.content ?? null,
+    utm_term: utm?.term ?? null,
+    order_id: order.id,
+    currency: snapshot.shop.currencyCode,
+    store: snapshot.shop.myshopifyDomain,
+    timezone: snapshot.shop.ianaTimezone,
+    visit_source: visit.source,
+    visit_source_type: visit.sourceType,
+    landing_page: visit.landingPage,
+    referrer_url: visit.referrerUrl,
+    days_to_conversion: journey?.daysToConversion ?? null,
+    customer_order_index: journey?.customerOrderIndex ?? null,
+    definition_version: "shopify-order-utm-v1",
+  };
 }
 
 export function shopifyDateKey(value: string, ianaTimezone: string) {
@@ -133,6 +176,7 @@ function normalizeSnapshot(snapshot: ShopifySyncSnapshot, source: Source) {
   const endDate = shopifyDateKey(snapshot.fetchedAt, snapshot.shop.ianaTimezone);
   const summaries = new Map(enumerateDateKeys(startDate, endDate).map((date) => [date, emptySummary()]));
   const productMetrics: NormalizedMetric[] = [];
+  const attributionMetrics: NormalizedMetric[] = [];
 
   for (const order of snapshot.orders) {
     if (order.test) continue;
@@ -147,6 +191,60 @@ function normalizeSnapshot(snapshot: ShopifySyncSnapshot, source: Source) {
     summary.netPayment += moneyValue(order.netPaymentSet, currency, `Order ${order.id} net payment`) ?? 0;
     summary.refunds += moneyValue(order.totalRefundedSet, currency, `Order ${order.id} refunds`) ?? 0;
     summaries.set(date, summary);
+
+    if (order.customerJourneySummary?.ready === true) {
+      const attributedVisits = [
+        ["first_visit", order.customerJourneySummary.firstVisit],
+        ["last_visit", order.customerJourneySummary.lastVisit],
+      ] as const;
+      for (const [attributionModel, visit] of attributedVisits) {
+        if (!visit || !hasUtmAttribution(visit)) continue;
+        const dimensions = attributionDimensions(snapshot, order, visit, attributionModel);
+        attributionMetrics.push(
+          metric(date, source, "shopify_attributed_orders", 1, "count", dimensions),
+          metric(
+            date,
+            source,
+            "shopify_attributed_gross_sales",
+            grossSales(order, currency),
+            unit,
+            dimensions,
+          ),
+          metric(
+            date,
+            source,
+            "shopify_attributed_discounts",
+            moneyValue(order.totalDiscountsSet, currency, `Order ${order.id} attributed discounts`) ?? 0,
+            unit,
+            dimensions,
+          ),
+          metric(
+            date,
+            source,
+            "shopify_attributed_current_total",
+            moneyValue(order.currentTotalPriceSet, currency, `Order ${order.id} attributed current total`) ?? 0,
+            unit,
+            dimensions,
+          ),
+          metric(
+            date,
+            source,
+            "shopify_attributed_refunds",
+            moneyValue(order.totalRefundedSet, currency, `Order ${order.id} attributed refunds`) ?? 0,
+            unit,
+            dimensions,
+          ),
+          metric(
+            date,
+            source,
+            "shopify_attributed_net_revenue",
+            moneyValue(order.netPaymentSet, currency, `Order ${order.id} attributed net payment`) ?? 0,
+            unit,
+            dimensions,
+          ),
+        );
+      }
+    }
 
     for (const item of order.lineItems.nodes) {
       if (!Number.isInteger(item.quantity) || item.quantity < 0) {
@@ -178,7 +276,7 @@ function normalizeSnapshot(snapshot: ShopifySyncSnapshot, source: Source) {
       metric(date, source, "refunds", summary.refunds, unit, dimensions),
     ];
   });
-  return [...dailyMetrics, ...productMetrics];
+  return [...dailyMetrics, ...productMetrics, ...attributionMetrics];
 }
 
 function connectionError(error: unknown): ConnectionTestResult {

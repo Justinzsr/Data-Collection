@@ -38,10 +38,71 @@ function parseJsonObject(input: string | undefined) {
   if (!input) return {};
   try {
     const parsed = JSON.parse(input);
-    return typeof parsed === "object" && parsed !== null ? (parsed as JsonRecord) : {};
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as JsonRecord) : {};
   } catch {
     return { raw: input };
   }
+}
+
+const UTM_PROPERTY_KEYS = {
+  utm_source: "source",
+  utm_medium: "medium",
+  utm_campaign: "campaign",
+  utm_content: "content",
+  utm_term: "term",
+} as const;
+
+type ParsedQueryParams = {
+  entries: Array<[string, string]>;
+  utm: JsonRecord | null;
+};
+
+function queryParamScalar(value: unknown) {
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function parseVercelQueryParams(input: unknown): ParsedQueryParams {
+  if (typeof input !== "string") return { entries: [], utm: null };
+
+  const trimmed = input.trim();
+  if (!trimmed) return { entries: [], utm: null };
+
+  let parsedInput: unknown = trimmed;
+  if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith('"')) {
+    try {
+      parsedInput = JSON.parse(trimmed);
+    } catch {
+      // A payload that looks like JSON but is malformed is retained verbatim in
+      // properties.vercel.query_params, but is not promoted into a URL or attribution.
+      return { entries: [], utm: null };
+    }
+  }
+
+  let entries: Array<[string, string]> = [];
+  if (typeof parsedInput === "string") {
+    const queryString = parsedInput.startsWith("?") ? parsedInput.slice(1) : parsedInput;
+    entries = Array.from(new URLSearchParams(queryString).entries());
+  } else if (typeof parsedInput === "object" && parsedInput !== null && !Array.isArray(parsedInput)) {
+    entries = Object.entries(parsedInput).flatMap(([key, value]) => {
+      const scalar = queryParamScalar(value);
+      return scalar === null ? [] : [[key, scalar] as [string, string]];
+    });
+  }
+
+  const utm: JsonRecord = {};
+  for (const [rawKey, rawValue] of entries) {
+    const key = rawKey.trim().toLowerCase() as keyof typeof UTM_PROPERTY_KEYS;
+    const propertyKey = UTM_PROPERTY_KEYS[key];
+    const value = rawValue.trim();
+    if (propertyKey && value && utm[propertyKey] === undefined) {
+      utm[propertyKey] = value;
+    }
+  }
+
+  return { entries, utm: Object.keys(utm).length > 0 ? utm : null };
 }
 
 function parseBody(rawBody: string) {
@@ -109,6 +170,9 @@ function assertVercelDrainPayload(rawBody: string) {
     if (event.eventData !== undefined && typeof event.eventData !== "string") {
       throw new VercelDrainIngestionError("Vercel Drain eventData must be a JSON string.", 400);
     }
+    if (event.queryParams !== undefined && typeof event.queryParams !== "string") {
+      throw new VercelDrainIngestionError("Vercel Drain queryParams must be a JSON or query string.", 400);
+    }
   }
 }
 
@@ -161,22 +225,44 @@ export function readVercelDrainWebhookPayload(payload: JsonRecord | null | undef
 }
 
 function resolvedUrl(event: VercelDrainEvent, source: Source) {
+  const queryParams = parseVercelQueryParams(event.queryParams);
+  let baseUrl: string;
   if (event.origin && event.path) {
     try {
-      return new URL(event.path, event.origin).toString();
+      baseUrl = new URL(event.path, event.origin).toString();
     } catch {
-      return `${event.origin}${event.path}`;
+      baseUrl = `${event.origin}${event.path}`;
     }
-  }
-  if (event.origin) return event.origin;
-  if (source.normalized_url) {
+  } else if (event.origin) {
+    baseUrl = event.origin;
+  } else if (source.normalized_url) {
     try {
-      return new URL(event.path ?? "/", source.normalized_url).toString();
+      baseUrl = new URL(event.path ?? "/", source.normalized_url).toString();
     } catch {
-      return source.normalized_url;
+      baseUrl = source.normalized_url;
     }
+  } else {
+    baseUrl = "https://moonarqstudio.com";
   }
-  return "https://moonarqstudio.com";
+
+  if (queryParams.entries.length === 0) return baseUrl;
+
+  try {
+    const url = new URL(baseUrl);
+    const replacedKeys = new Set<string>();
+    for (const [key, value] of queryParams.entries) {
+      if (!replacedKeys.has(key)) {
+        url.searchParams.delete(key);
+        replacedKeys.add(key);
+      }
+      url.searchParams.append(key, value);
+    }
+    return url.toString();
+  } catch {
+    const queryString = new URLSearchParams(queryParams.entries).toString();
+    if (!queryString) return baseUrl;
+    return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}${queryString}`;
+  }
 }
 
 function eventName(event: VercelDrainEvent) {
@@ -184,7 +270,16 @@ function eventName(event: VercelDrainEvent) {
 }
 
 function eventProperties(event: VercelDrainEvent) {
+  const eventData = parseJsonObject(event.eventData);
+  const queryParams = parseVercelQueryParams(event.queryParams);
+  const rawAttribution = eventData.attribution;
+  const attribution =
+    typeof rawAttribution === "object" && rawAttribution !== null && !Array.isArray(rawAttribution)
+      ? (rawAttribution as JsonRecord)
+      : {};
+
   return {
+    ...eventData,
     vercel: {
       schema: event.schema ?? "vercel.analytics.v2",
       project_id: event.projectId ?? null,
@@ -202,7 +297,14 @@ function eventProperties(event: VercelDrainEvent) {
       sdk_version: event.sdkVersion ?? null,
       deployment: event.deployment ?? null,
     },
-    ...parseJsonObject(event.eventData),
+    ...(queryParams.utm
+      ? {
+          attribution: {
+            ...attribution,
+            utm: queryParams.utm,
+          },
+        }
+      : {}),
   } as JsonRecord;
 }
 

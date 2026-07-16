@@ -31,15 +31,84 @@ for (const width of [390, 320]) {
       await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", true);
     }
 
+    const instagram = page.locator("details.overview-social-card").filter({
+      has: page.getByText("Instagram Graph API", { exact: true }),
+    });
+    await instagram.locator("summary").first().click();
+    await expect(instagram).toHaveJSProperty("open", true);
+    const paidPanel = page.getByTestId("instagram-paid-ads-panel");
+    await expect(paidPanel).toBeVisible();
+    await expect(paidPanel.getByText("Paid Story attribution", { exact: true })).toBeVisible();
+    await expect(paidPanel.getByText("Connect Ads", { exact: true })).toBeVisible();
+    await expect(paidPanel.getByRole("link", { name: "Connect Meta Ads" })).toBeVisible();
+    await expect(paidPanel.getByText(
+      "utm_source=instagram&utm_medium=paid_social&utm_campaign=bracelet_grid_jul2026&utm_content=story_v1",
+      { exact: true },
+    )).toBeVisible();
+
+    for (const testId of [
+      "paid-raw-efficiency",
+      "paid-budget-pacing",
+      "paid-memory-economics",
+      "paid-attribution-reconciliation",
+      "paid-creative-diagnostics",
+    ]) {
+      const detail = paidPanel.getByTestId(testId);
+      await detail.locator("summary").click();
+      await expect(detail).toHaveJSProperty("open", true);
+    }
+
     const layout = await page.evaluate(() => ({
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       chartRights: Array.from(document.querySelectorAll<HTMLElement>("[data-overview-chart='true']")).map((element) => element.getBoundingClientRect().right),
+      paidPanel: (() => {
+        const element = document.querySelector<HTMLElement>("[data-testid='instagram-paid-ads-panel']");
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          overflow: element.scrollWidth - element.clientWidth,
+        };
+      })(),
+      aidmaStageRects: Array.from(document.querySelectorAll<HTMLElement>("[data-aidma-stage]")).map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, width: rect.width };
+      }),
       viewportWidth: document.documentElement.clientWidth,
     }));
     expect(layout.overflow).toBeLessThanOrEqual(1);
     expect(layout.chartRights.every((right) => right <= layout.viewportWidth + 1)).toBe(true);
+    expect(layout.paidPanel).not.toBeNull();
+    expect(layout.paidPanel!.left).toBeGreaterThanOrEqual(-1);
+    expect(layout.paidPanel!.right).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.paidPanel!.overflow).toBeLessThanOrEqual(1);
+    expect(layout.aidmaStageRects).toHaveLength(5);
+    expect(layout.aidmaStageRects.every((rect) => rect.left >= -1 && rect.right <= layout.viewportWidth + 1 && rect.width > 0)).toBe(true);
   });
 }
+
+test("AIDMA stages use five columns on desktop and two columns on tablet", async ({ page }) => {
+  await page.goto("/w/moonarq/dashboard");
+  const instagram = page.locator("details.overview-social-card").filter({
+    has: page.getByText("Instagram Graph API", { exact: true }),
+  });
+  await instagram.locator("summary").first().click();
+
+  for (const expectation of [
+    { width: 1440, columns: 5 },
+    { width: 1024, columns: 2 },
+    { width: 768, columns: 2 },
+  ]) {
+    await page.setViewportSize({ width: expectation.width, height: 900 });
+    const tops = await page.locator("[data-aidma-stage]").evaluateAll((elements) =>
+      elements.map((element) => Math.round(element.getBoundingClientRect().top)),
+    );
+    expect(new Set(tops.slice(0, expectation.columns)).size).toBe(1);
+    if (expectation.columns < 5) expect(tops[expectation.columns]).toBeGreaterThan(tops[0]);
+    else expect(new Set(tops).size).toBe(1);
+  }
+});
 
 for (const path of [
   "/w/moonarq/dashboard/sources",
