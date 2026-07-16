@@ -33,11 +33,24 @@ export function LinkButton({
   variant = "secondary",
   href,
   children,
+  prefetch,
   ...props
-}: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; variant?: Variant; children: ReactNode }) {
+}: AnchorHTMLAttributes<HTMLAnchorElement> & {
+  href: string;
+  variant?: Variant;
+  children: ReactNode;
+  prefetch?: boolean | "auto" | null;
+}) {
+  const resolvedPrefetch = prefetch !== undefined
+    ? prefetch
+    : href.startsWith("/api/")
+      ? false
+      : undefined;
+
   return (
     <Link
       href={href}
+      prefetch={resolvedPrefetch}
       className={cn(
         "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-cyan-300/40",
         variants[variant],
