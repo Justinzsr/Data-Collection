@@ -58,6 +58,48 @@ test("platform modules keep the overview visible and disclose detail on demand",
   await expect(website).toHaveJSProperty("open", false);
 });
 
+test("Instagram detail exposes the paid Story attribution and a stable no-data Meta connection state", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard");
+
+  const instagram = page.locator("details.overview-social-card").filter({
+    has: page.getByText("Instagram Graph API", { exact: true }),
+  });
+  const paidPanel = page.getByTestId("instagram-paid-ads-panel");
+  await expect(instagram).toHaveJSProperty("open", false);
+  await expect(paidPanel).toBeHidden();
+
+  await instagram.locator("summary").first().click();
+  await expect(instagram).toHaveJSProperty("open", true);
+  await expect(paidPanel).toBeVisible();
+  await expect(paidPanel.getByText("Paid Story attribution", { exact: true })).toBeVisible();
+  await expect(paidPanel.getByText("MoonArq_IGStory_Traffic_BraceletGrid_Jul2026", { exact: true })).toBeVisible();
+  await expect(paidPanel.getByText(
+    "utm_source=instagram&utm_medium=paid_social&utm_campaign=bracelet_grid_jul2026&utm_content=story_v1",
+    { exact: true },
+  )).toBeVisible();
+  await expect(paidPanel.getByText("Connect Ads", { exact: true })).toBeVisible();
+  await expect(instagram.getByText("Spend —", { exact: true })).toBeVisible();
+  await expect(instagram.getByText("Revenue —", { exact: true })).toBeVisible();
+  await expect(instagram.getByText("ROAS —", { exact: true })).toBeVisible();
+  await expect(paidPanel.getByRole("link", { name: "Connect Meta Ads" })).toHaveAttribute(
+    "href",
+    /\/api\/oauth\/meta-ads\/start\?instagramSourceId=.*dataSpaceSlug=moonarq/,
+  );
+  await expect(paidPanel.getByText("Connect Meta Ads to begin", { exact: true })).toBeVisible();
+  await expect(paidPanel.getByText("Creative UTM unknown", { exact: true })).toBeVisible();
+  await expect(paidPanel.getByText("AIDMA paid measurement · Memory proxies", { exact: true })).toBeVisible();
+  await expect(paidPanel.getByTestId("aidma-details")).toHaveJSProperty("open", true);
+  await expect(paidPanel.getByRole("list", { name: "AIDMA paid media measurement ladder" })).toBeVisible();
+  for (const stage of ["Attention", "Interest", "Desire", "Memory", "Action"]) {
+    await expect(paidPanel.getByRole("listitem", { name: `${stage} stage` })).toBeVisible();
+  }
+  await expect(paidPanel.getByText(/behavioral proxies, not a direct measurement of human memory/)).toBeVisible();
+  await expect(paidPanel.getByTestId("paid-raw-efficiency")).toHaveJSProperty("open", false);
+  await expect(paidPanel.getByTestId("paid-budget-pacing")).toHaveJSProperty("open", false);
+  await expect(paidPanel.getByTestId("paid-memory-economics")).toHaveJSProperty("open", false);
+});
+
 test("Shopify CTA opens the official connector directly and keeps credentials empty", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard/sources/new?template=shopify");

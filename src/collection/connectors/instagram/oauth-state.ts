@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const INSTAGRAM_OAUTH_STATE_COOKIE = "moonarq_instagram_oauth";
 export const SECURE_INSTAGRAM_OAUTH_STATE_COOKIE = "__Host-moonarq_instagram_oauth";
@@ -12,6 +12,7 @@ type InstagramOAuthStatePayload = {
   dataSpaceSlug: string;
   returnPath: string;
   metaAppProfile?: InstagramMetaAppProfileKey;
+  connectMetaAds?: boolean;
   nonce: string;
   iat: number;
   exp: number;
@@ -46,11 +47,19 @@ function sign(payloadPart: string, secret: string) {
   return createHmac("sha256", secret).update(payloadPart).digest("base64url");
 }
 
+function signaturesMatch(provided: string, expected: string) {
+  const providedBytes = Buffer.from(provided, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  return providedBytes.length === expectedBytes.length && timingSafeEqual(providedBytes, expectedBytes);
+}
+
 function verifySignedState(state: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
   if (!state) throw new InstagramOAuthStateError("Missing Instagram OAuth state.");
   const [payloadPart, signature] = state.split(".");
   if (!payloadPart || !signature) throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
-  if (sign(payloadPart, signingSecret(env)) !== signature) throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
+  if (!signaturesMatch(signature, sign(payloadPart, signingSecret(env)))) {
+    throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
+  }
   let payload: Partial<InstagramOAuthStatePayload>;
   try {
     payload = JSON.parse(base64UrlDecode(payloadPart)) as Partial<InstagramOAuthStatePayload>;
@@ -65,7 +74,8 @@ function verifySignedState(state: string | null | undefined, env: NodeJS.Process
     !payload.dataSpaceSlug ||
     typeof payload.returnPath !== "string" ||
     !payload.returnPath.startsWith("/") ||
-    (payload.metaAppProfile !== undefined && payload.metaAppProfile !== "default" && payload.metaAppProfile !== "moonarq")
+    (payload.metaAppProfile !== undefined && payload.metaAppProfile !== "default" && payload.metaAppProfile !== "moonarq") ||
+    (payload.connectMetaAds !== undefined && typeof payload.connectMetaAds !== "boolean")
   ) {
     throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
   }
@@ -76,7 +86,7 @@ function verifySignedState(state: string | null | undefined, env: NodeJS.Process
 }
 
 export function createInstagramOAuthState(
-  input: { sourceId: string; dataSpaceSlug: string; returnPath: string; metaAppProfile?: InstagramMetaAppProfileKey } | string,
+  input: { sourceId: string; dataSpaceSlug: string; returnPath: string; metaAppProfile?: InstagramMetaAppProfileKey; connectMetaAds?: boolean } | string,
   env: NodeJS.ProcessEnv = process.env,
   now = Date.now(),
 ) {
@@ -90,6 +100,7 @@ export function createInstagramOAuthState(
     dataSpaceSlug: payloadInput.dataSpaceSlug,
     returnPath: payloadInput.returnPath,
     metaAppProfile: payloadInput.metaAppProfile,
+    connectMetaAds: payloadInput.connectMetaAds,
     nonce: randomBytes(16).toString("base64url"),
     iat: issuedAt,
     exp: issuedAt + INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,

@@ -118,6 +118,118 @@ describe("Vercel Analytics Drain ingress security", () => {
     expect((await listWebEvents(100)).length).toBe(before);
   });
 
+  it("normalizes the exact paid Instagram UTM tuple and preserves it in the resolved URL", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    const queryParams =
+      "utm_source=instagram&utm_medium=paid_social&utm_campaign=bracelet_grid_jul2026&utm_content=story_v1";
+    const rawBody = JSON.stringify({
+      ...JSON.parse(RAW_BODY),
+      path: "/collections/bracelets?variant=moon",
+      queryParams,
+      eventData: JSON.stringify({
+        attribution: { utm: { source: "untrusted-event-data" }, note: "preserved" },
+        campaignMarker: "first-story",
+      }),
+    });
+
+    const response = await postDrain(source.id, signature(rawBody), rawBody);
+
+    expect(response.status).toBe(200);
+    const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
+    expect(event).toBeDefined();
+    expect(event?.properties).toMatchObject({
+      campaignMarker: "first-story",
+      attribution: {
+        note: "preserved",
+        utm: {
+          source: "instagram",
+          medium: "paid_social",
+          campaign: "bracelet_grid_jul2026",
+          content: "story_v1",
+        },
+      },
+      vercel: { query_params: queryParams },
+    });
+    const url = new URL(event?.url ?? "https://invalid.local");
+    expect(Object.fromEntries(url.searchParams.entries())).toEqual({
+      variant: "moon",
+      utm_source: "instagram",
+      utm_medium: "paid_social",
+      utm_campaign: "bracelet_grid_jul2026",
+      utm_content: "story_v1",
+    });
+  });
+
+  it("normalizes JSON-encoded query params including utm_term without discarding raw fields", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    const queryParams = JSON.stringify({
+      utm_source: "instagram",
+      utm_medium: "paid_social",
+      utm_campaign: "bracelet_grid_jul2026",
+      utm_content: "story_v1",
+      utm_term: "pink_bracelet",
+      preview: true,
+    });
+    const rawBody = JSON.stringify({
+      ...JSON.parse(RAW_BODY),
+      path: "/products/story-bracelet",
+      queryParams,
+    });
+
+    const response = await postDrain(source.id, signature(rawBody), rawBody);
+
+    expect(response.status).toBe(200);
+    const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
+    expect(event?.properties).toMatchObject({
+      attribution: {
+        utm: {
+          source: "instagram",
+          medium: "paid_social",
+          campaign: "bracelet_grid_jul2026",
+          content: "story_v1",
+          term: "pink_bracelet",
+        },
+      },
+      vercel: { query_params: queryParams },
+    });
+    const url = new URL(event?.url ?? "https://invalid.local");
+    expect(url.searchParams.get("preview")).toBe("true");
+    expect(url.searchParams.get("utm_term")).toBe("pink_bracelet");
+  });
+
+  it("retains malformed queryParams as raw evidence without promoting them", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    const queryParams = '{"utm_source":"instagram"';
+    const rawBody = JSON.stringify({ ...JSON.parse(RAW_BODY), queryParams });
+
+    const response = await postDrain(source.id, signature(rawBody), rawBody);
+
+    expect(response.status).toBe(200);
+    const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
+    expect(event?.properties).not.toHaveProperty("attribution");
+    expect(event?.properties).toMatchObject({ vercel: { query_params: queryParams } });
+    expect(new URL(event?.url ?? "https://invalid.local").search).toBe("");
+  });
+
+  it("keeps ordinary non-UTM query params in the URL without creating attribution", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    const queryParams = "ref=homepage&sort=featured";
+    const rawBody = JSON.stringify({ ...JSON.parse(RAW_BODY), queryParams });
+
+    const response = await postDrain(source.id, signature(rawBody), rawBody);
+
+    expect(response.status).toBe(200);
+    const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
+    expect(event?.properties).not.toHaveProperty("attribution");
+    expect(event?.properties).toMatchObject({ vercel: { query_params: queryParams } });
+    const url = new URL(event?.url ?? "https://invalid.local");
+    expect(Object.fromEntries(url.searchParams.entries())).toEqual({ ref: "homepage", sort: "featured" });
+  });
+
   it("rejects oversized raw bodies before creating a sync run", async () => {
     const source = await createDrainSource();
     await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);

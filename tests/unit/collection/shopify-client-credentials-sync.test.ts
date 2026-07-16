@@ -5,6 +5,8 @@ import {
   fetchShopifySnapshot,
   hashShopifySnapshot,
   normalizeShopifyStoreUrl,
+  type ShopifyCustomerJourneySummary,
+  type ShopifyCustomerVisit,
   type ShopifyOrder,
   type ShopifySyncSnapshot,
 } from "@/collection/connectors/shopify/api";
@@ -30,6 +32,23 @@ function money(amount: string, currencyCode = "USD") {
   return { shopMoney: { amount, currencyCode } };
 }
 
+function visit(input: Partial<ShopifyCustomerVisit> = {}): ShopifyCustomerVisit {
+  return {
+    landingPage: "https://www.moonarqstudio.com/collections/bracelets",
+    referrerUrl: "https://l.instagram.com/",
+    source: "Instagram",
+    sourceType: "AD",
+    utmParameters: {
+      source: "instagram",
+      medium: "paid_social",
+      campaign: "bracelet_grid_jul2026",
+      content: "story_v1",
+      term: null,
+    },
+    ...input,
+  };
+}
+
 function order(input: Partial<ShopifyOrder> & Pick<ShopifyOrder, "id" | "createdAt">): ShopifyOrder {
   const { id, createdAt, ...overrides } = input;
   return {
@@ -42,6 +61,7 @@ function order(input: Partial<ShopifyOrder> & Pick<ShopifyOrder, "id" | "created
     currentTotalPriceSet: money("85.00"),
     netPaymentSet: money("80.00"),
     totalRefundedSet: money("5.00"),
+    customerJourneySummary: null,
     lineItems: {
       nodes: [
         {
@@ -68,6 +88,7 @@ function orderWithoutLineItems(value: ShopifyOrder): Omit<ShopifyOrder, "lineIte
     currentTotalPriceSet: value.currentTotalPriceSet,
     netPaymentSet: value.netPaymentSet,
     totalRefundedSet: value.totalRefundedSet,
+    customerJourneySummary: value.customerJourneySummary,
   };
 }
 
@@ -110,11 +131,16 @@ type MockOptions = {
   lineItemPagination?: boolean;
   lineItemMissingCursor?: boolean;
   omitFirstOrder?: boolean;
+  firstOrderJourney?: ShopifyCustomerJourneySummary | null;
 };
 
 function mockShopifyApi(options: MockOptions = {}) {
   const requests: Array<{ url: string; init?: RequestInit; body?: Record<string, unknown> }> = [];
-  const firstOrder = order({ id: "gid://shopify/Order/1", createdAt: "2026-07-14T05:30:00.000Z" });
+  const firstOrder = order({
+    id: "gid://shopify/Order/1",
+    createdAt: "2026-07-14T05:30:00.000Z",
+    customerJourneySummary: options.firstOrderJourney ?? null,
+  });
   const testOrder = order({ id: "gid://shopify/Order/2", createdAt: "2026-07-14T07:00:00.000Z", test: true });
   const secondOrder = order({
     id: "gid://shopify/Order/3",
@@ -251,8 +277,13 @@ function mockShopifyApi(options: MockOptions = {}) {
 }
 
 describe("Shopify client-credentials connector", () => {
-  beforeEach(() => resetDemoStore());
+  beforeEach(() => {
+    resetDemoStore();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -460,7 +491,18 @@ describe("Shopify client-credentials connector", () => {
     expect(normalized.metrics.find((item) => item.dimensions?.product_name === "Moon Bracelet")?.metricValue).toBe(2);
 
     const raw = JSON.stringify(sync.rawPayloads);
-    for (const forbidden of [CLIENT_SECRET, ACCESS_TOKEN, "customer", "email", "phone", "address", "ipAddress", "paymentGatewayNames"]) {
+    for (const forbidden of [
+      CLIENT_SECRET,
+      ACCESS_TOKEN,
+      "email",
+      "phone",
+      "address",
+      "ipAddress",
+      "clientIp",
+      "paymentGatewayNames",
+      "billingAddress",
+      "shippingAddress",
+    ]) {
       expect(raw.toLowerCase()).not.toContain(forbidden.toLowerCase());
     }
     const orderQueries = requests.filter((request) => typeof request.body?.query === "string" && String(request.body.query).includes("MoonArqShopifyOrders"));
@@ -469,6 +511,164 @@ describe("Shopify client-credentials connector", () => {
     expect(orderQueries[0].body?.variables).toMatchObject({ search: "created_at:>='2026-05-16T07:00:00.000Z'" });
     expect(JSON.stringify(orderQueries)).not.toContain("read_all_orders");
     expect(JSON.stringify(orderQueries)).not.toContain("read_customers");
+  });
+
+  it("stores privacy-safe first/last journeys and emits exact order-level UTM attribution tuples", async () => {
+    const firstVisit = visit({
+      source: "Facebook",
+      utmParameters: {
+        source: "facebook",
+        medium: "paid_social",
+        campaign: "bracelet_grid_jul2026",
+        content: "feed_v1",
+        term: "moon bracelet",
+      },
+    });
+    const lastVisit = visit({
+      landingPage: "https://www.moonarqstudio.com/collections/bracelets?utm_source=instagram&email=private%40example.com#details",
+      referrerUrl: "https://l.instagram.com/?u=encoded-product-url&click_token=secret-click-token",
+    });
+    const { requests } = mockShopifyApi({
+      firstOrderJourney: {
+        ready: true,
+        daysToConversion: 2,
+        customerOrderIndex: 1,
+        firstVisit,
+        lastVisit,
+      },
+    });
+    const connector = getConnector("shopify");
+    const source = shopifySource();
+    const sync = await connector.sync({
+      source,
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    });
+    const normalized = await connector.normalize(sync.rawPayloads, source);
+    const attributedOrders = normalized.metrics.filter((item) => item.metricKey === "shopify_attributed_orders");
+    const attributedGrossSales = normalized.metrics.filter((item) => item.metricKey === "shopify_attributed_gross_sales");
+    const attributedDiscounts = normalized.metrics.filter((item) => item.metricKey === "shopify_attributed_discounts");
+    const attributedCurrentTotal = normalized.metrics.filter((item) => item.metricKey === "shopify_attributed_current_total");
+    const attributedRefunds = normalized.metrics.filter((item) => item.metricKey === "shopify_attributed_refunds");
+    const attributedRevenue = normalized.metrics.filter((item) => item.metricKey === "shopify_attributed_net_revenue");
+
+    expect(attributedOrders).toHaveLength(2);
+    expect(attributedGrossSales).toHaveLength(2);
+    expect(attributedDiscounts).toHaveLength(2);
+    expect(attributedCurrentTotal).toHaveLength(2);
+    expect(attributedRefunds).toHaveLength(2);
+    expect(attributedRevenue).toHaveLength(2);
+    expect(attributedOrders.filter((item) => item.dimensions?.attribution_model === "first_visit")).toHaveLength(1);
+    expect(attributedOrders.filter((item) => item.dimensions?.attribution_model === "last_visit")).toHaveLength(1);
+    expect(attributedOrders.find((item) => item.dimensions?.attribution_model === "last_visit")).toMatchObject({
+      date: "2026-07-13",
+      metricValue: 1,
+      unit: "count",
+      dimensions: {
+        attribution_ready: true,
+        attribution_model: "last_visit",
+        utm_source: "instagram",
+        utm_medium: "paid_social",
+        utm_campaign: "bracelet_grid_jul2026",
+        utm_content: "story_v1",
+        utm_term: null,
+        order_id: "gid://shopify/Order/1",
+        currency: "USD",
+      },
+    });
+    expect(attributedRevenue.find((item) => item.dimensions?.attribution_model === "last_visit")).toMatchObject({
+      metricValue: 80,
+      unit: "usd",
+    });
+    expect(attributedGrossSales.find((item) => item.dimensions?.attribution_model === "last_visit")).toMatchObject({
+      metricValue: 100,
+      unit: "usd",
+    });
+    expect(attributedDiscounts.find((item) => item.dimensions?.attribution_model === "last_visit")).toMatchObject({
+      metricValue: 10,
+      unit: "usd",
+    });
+    expect(attributedCurrentTotal.find((item) => item.dimensions?.attribution_model === "last_visit")).toMatchObject({
+      metricValue: 85,
+      unit: "usd",
+    });
+    expect(attributedRefunds.find((item) => item.dimensions?.attribution_model === "last_visit")).toMatchObject({
+      metricValue: 5,
+      unit: "usd",
+    });
+    expect(normalized.replaceMetricWindow?.metricKeys).toEqual(expect.arrayContaining([
+      "shopify_attributed_orders",
+      "shopify_attributed_gross_sales",
+      "shopify_attributed_discounts",
+      "shopify_attributed_current_total",
+      "shopify_attributed_refunds",
+      "shopify_attributed_net_revenue",
+    ]));
+
+    const snapshot = sync.rawPayloads[0].payload as unknown as ShopifySyncSnapshot;
+    expect(snapshot.attributionVersion).toBe("customer-journey-v1");
+    const journey = snapshot.orders.find((item) => item.id === "gid://shopify/Order/1")?.customerJourneySummary;
+    expect(journey).toMatchObject({
+      ready: true,
+      daysToConversion: 2,
+      customerOrderIndex: 1,
+      lastVisit: {
+        landingPage: "https://www.moonarqstudio.com/collections/bracelets",
+        referrerUrl: "https://l.instagram.com/",
+      },
+    });
+    expect(JSON.stringify(journey)).not.toContain("private@example.com");
+    expect(JSON.stringify(journey)).not.toContain("secret-click-token");
+
+    const orderQuery = requests.find((request) => String(request.body?.query).includes("MoonArqShopifyOrders"));
+    expect(String(orderQuery?.body?.query)).toContain("customerJourneySummary");
+    for (const selectedField of [
+      "ready",
+      "daysToConversion",
+      "customerOrderIndex",
+      "firstVisit",
+      "lastVisit",
+      "landingPage",
+      "referrerUrl",
+      "sourceType",
+      "utmParameters",
+    ]) {
+      expect(String(orderQuery?.body?.query)).toContain(selectedField);
+    }
+    expect(String(orderQuery?.body?.query)).not.toMatch(/\b(email|phone|clientIp|billingAddress|shippingAddress)\b/u);
+  });
+
+  it("keeps null and not-ready journeys in raw data without inventing attribution metrics", async () => {
+    mockShopifyApi({
+      firstOrderJourney: {
+        ready: false,
+        daysToConversion: null,
+        customerOrderIndex: null,
+        firstVisit: null,
+        lastVisit: null,
+      },
+    });
+    const connector = getConnector("shopify");
+    const source = shopifySource();
+    const sync = await connector.sync({
+      source,
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    });
+    const normalized = await connector.normalize(sync.rawPayloads, source);
+
+    expect(normalized.metrics.some((item) => item.metricKey.startsWith("shopify_attributed_"))).toBe(false);
+    const snapshot = sync.rawPayloads[0].payload as unknown as ShopifySyncSnapshot;
+    expect(snapshot.orders.find((item) => item.id === "gid://shopify/Order/1")?.customerJourneySummary).toEqual({
+      ready: false,
+      daysToConversion: null,
+      customerOrderIndex: null,
+      firstVisit: null,
+      lastVisit: null,
+    });
+    expect(snapshot.orders.find((item) => item.id === "gid://shopify/Order/3")?.customerJourneySummary).toBeNull();
   });
 
   it("keeps an unchanged same-day replay idempotent in raw storage and daily metrics", async () => {
@@ -564,6 +764,7 @@ describe("Shopify client-credentials connector", () => {
   it("uses a canonical content hash that ignores fetch time", () => {
     const snapshot: ShopifySyncSnapshot = {
       kind: "shopify_orders_snapshot",
+      attributionVersion: "customer-journey-v1",
       fetchedAt: NOW.toISOString(),
       apiVersion: "2026-07",
       lookbackDays: 60,

@@ -2,6 +2,7 @@ import { ArrowRight, Bookmark, Camera, Car, ChevronDown, ExternalLink, Eye, File
 import { notFound } from "next/navigation";
 import { getDailyReport } from "@/aggregation/services/daily-report-service";
 import { getInstagramDashboardSummary, type InstagramDashboardSummary } from "@/aggregation/services/instagram-dashboard-service";
+import { getInstagramPaidAdsSummary, type InstagramPaidAdsSummary, type PaidMetricValue } from "@/aggregation/services/meta-ads-attribution-service";
 import { getTikTokDashboardSummary, type TikTokDashboardSummary } from "@/aggregation/services/tiktok-dashboard-service";
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
 import { getGlobalPlatformHealth, getPlatformModules } from "@/aggregation/services/platform-modules-service";
@@ -15,6 +16,7 @@ import { PlatformTrendChart } from "@/presentation/charts/platform-trend-chart";
 import { CommandCenterHeader } from "@/presentation/dashboard/command-center-header";
 import { GlobalHealthStrip } from "@/presentation/dashboard/global-health-strip";
 import { PlatformModuleCard } from "@/presentation/dashboard/platform-module-card";
+import { InstagramPaidAdsPanel } from "@/presentation/dashboard/instagram-paid-ads-panel";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +66,34 @@ function statusLabel(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function paidStateLabel(state: InstagramPaidAdsSummary["state"]) {
+  if (state === "not_connected") return "Connect Ads";
+  if (state === "needs_account") return "Select account";
+  if (state === "first_sync") return "First sync pending";
+  if (state === "no_delivery") return "No matching delivery";
+  if (state === "ready") return "Live";
+  if (state === "stale") return "Source warning";
+  return "Sync error";
+}
+
+function compactPaidMetric(metric: PaidMetricValue) {
+  if (metric.state !== "ready" || metric.value === null) return "—";
+  if (metric.unit === "ratio") return `${metric.value.toFixed(2)}×`;
+  if (metric.unit === "percent") return `${metric.value.toFixed(1)}%`;
+  if (/^[a-z]{3}$/i.test(metric.unit)) {
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: metric.unit.toUpperCase(),
+        maximumFractionDigits: 2,
+      }).format(metric.value);
+    } catch {
+      return `${metric.unit.toUpperCase()} ${metric.value.toFixed(2)}`;
+    }
+  }
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(metric.value);
+}
+
 function InstagramMetricTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
@@ -85,7 +115,12 @@ function TikTokMetricTile({ label, value, detail }: { label: string; value: stri
   );
 }
 
-function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashboardSummary; basePath: string }) {
+function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
+  summary: InstagramDashboardSummary;
+  paid: InstagramPaidAdsSummary | null;
+  basePath: string;
+  dataSpaceSlug: string;
+}) {
   if (summary.sources.length === 0) return null;
   const primary = summary.sources[0];
   const media = primary.media;
@@ -103,7 +138,17 @@ function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashb
               <h2 className="mt-0.5 truncate text-sm font-semibold text-white">
                 {primary.username ? `@${primary.username}` : primary.displayName}
               </h2>
-              <p className="mt-0.5 truncate text-xs text-slate-500">{displayCount(primary.stats.followers)} followers · {displayCount(primary.stats.reach)} reach · {media.length} posts</p>
+              <p className="mt-0.5 truncate text-xs text-slate-500">
+                {displayCount(primary.stats.followers)} followers · {displayCount(primary.stats.reach)} reach · {media.length} posts
+              </p>
+              {paid ? (
+                <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5 text-[10px] text-slate-400">
+                  <span className="rounded border border-fuchsia-300/15 bg-fuchsia-300/[0.05] px-1.5 py-0.5 text-fuchsia-100">Ads: {paidStateLabel(paid.state)}</span>
+                  <span className="rounded border border-white/10 bg-black/20 px-1.5 py-0.5">Spend {compactPaidMetric(paid.outcomes.spend)}</span>
+                  <span className="rounded border border-white/10 bg-black/20 px-1.5 py-0.5">Revenue {compactPaidMetric(paid.outcomes.attributedNetRevenue)}</span>
+                  <span className="rounded border border-white/10 bg-black/20 px-1.5 py-0.5">ROAS {compactPaidMetric(paid.outcomes.shopifyRoas)}</span>
+                </div>
+              ) : null}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -114,6 +159,21 @@ function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashb
       </summary>
 
       <div className="grid gap-4 border-t border-white/10 p-3 sm:p-4">
+        {paid ? (
+          <InstagramPaidAdsPanel
+            summary={paid}
+            instagramSourceId={primary.sourceId}
+            dataSpaceSlug={dataSpaceSlug}
+            returnPath={`${basePath}/sources/${primary.sourceId}`}
+          />
+        ) : null}
+
+        <details className="group rounded-xl border border-white/10 bg-black/10">
+          <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 text-xs font-medium text-slate-300">
+            <span>Organic account &amp; media details</span>
+            <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="grid gap-4 border-t border-white/10 p-3">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <InstagramMetricTile label="Followers" value={displayCount(primary.stats.followers)} detail="Account snapshot" />
           <InstagramMetricTile label="Account media" value={displayCount(primary.stats.accountMediaCount)} detail={`${displayCount(primary.stats.fetchedMediaCount)} fetched`} />
@@ -205,6 +265,8 @@ function InstagramInsightsPanel({ summary, basePath }: { summary: InstagramDashb
             </div>
           )}
         </div>
+          </div>
+        </details>
       </div>
     </details>
   );
@@ -387,13 +449,23 @@ export default async function DataSpaceDashboardPage({
   const range = parseRange(query?.range);
   const basePath = dashboardPath(dataSpace.slug);
   const yesterday = addDaysToDateKey(dateKeyInAppTimeZone(), -1);
-  const [modules, health, yesterdayReport, sources, instagramSummary, tiktokSummary] = await Promise.all([
+  const instagramSummaryPromise = getInstagramDashboardSummary({ dataSpaceId: dataSpace.id });
+  const instagramPaidSummaryPromise = dataSpace.slug === "moonarq"
+    ? instagramSummaryPromise.then((summary) => {
+        const primaryInstagramSourceId = summary.sources[0]?.sourceId;
+        return primaryInstagramSourceId
+          ? getInstagramPaidAdsSummary({ dataSpaceId: dataSpace.id, instagramSourceId: primaryInstagramSourceId, rangeKey: range })
+          : null;
+      })
+    : Promise.resolve(null);
+  const [modules, health, yesterdayReport, sources, instagramSummary, tiktokSummary, instagramPaidSummary] = await Promise.all([
     getPlatformModules(range, { dataSpaceId: dataSpace.id, dataSpaceName: dataSpace.display_name }),
     getGlobalPlatformHealth(range, { dataSpaceId: dataSpace.id, dataSpaceName: dataSpace.display_name }),
     getDailyReport(yesterday, dataSpace),
     listSources({ dataSpaceId: dataSpace.id }),
-    getInstagramDashboardSummary({ dataSpaceId: dataSpace.id }),
+    instagramSummaryPromise,
     getTikTokDashboardSummary({ dataSpaceId: dataSpace.id }),
+    instagramPaidSummaryPromise,
   ]);
   const futureModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "custom_api" || platformModule.sourceTypeKey === "custom_csv");
   const autoLabEmpty = isAutoLabDataSpace(dataSpace) && sources.length === 0;
@@ -423,7 +495,7 @@ export default async function DataSpaceDashboardPage({
 
       {!autoLabEmpty && (hasDirectInstagramPanel || hasDirectTikTokPanel) ? (
         <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 xl:grid-cols-2" aria-label="Social platform detail modules">
-          {hasDirectInstagramPanel ? <InstagramInsightsPanel summary={instagramSummary} basePath={basePath} /> : null}
+          {hasDirectInstagramPanel ? <InstagramInsightsPanel summary={instagramSummary} paid={instagramPaidSummary} basePath={basePath} dataSpaceSlug={dataSpace.slug} /> : null}
           {hasDirectTikTokPanel ? <TikTokInsightsPanel summary={tiktokSummary} basePath={basePath} /> : null}
         </section>
       ) : null}
