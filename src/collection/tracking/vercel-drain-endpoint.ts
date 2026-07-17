@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { RawPayload } from "@/collection/connectors/types";
 import type { WebsiteEventIngestionInput } from "@/collection/tracking/website-event-ingestion";
 import type { JsonRecord, Source } from "@/storage/db/schema";
@@ -308,6 +308,23 @@ function eventProperties(event: VercelDrainEvent) {
   } as JsonRecord;
 }
 
+function deterministicEventId(sourceId: string, event: VercelDrainEvent, index: number) {
+  const bytes = Buffer.from(
+    createHash("sha256")
+      .update(sourceId)
+      .update("\0")
+      .update(JSON.stringify(event))
+      .update("\0")
+      .update(String(index))
+      .digest()
+      .subarray(0, 16),
+  );
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function prepareVercelAnalyticsDrain(input: {
   source: Source;
   rawBody: string;
@@ -325,10 +342,15 @@ export function prepareVercelAnalyticsDrain(input: {
     cursor: { timestamp: event.timestamp ?? null },
   }));
 
-  const webEvents: WebsiteEventIngestionInput[] = events.map((event) => {
+  const webEvents: WebsiteEventIngestionInput[] = events.map((event, index) => {
     const occurredAt =
       typeof event.timestamp === "number" ? new Date(event.timestamp).toISOString() : new Date().toISOString();
+    const properties = eventProperties(event);
+    const attribution = properties.attribution;
     return {
+      eventId: deterministicEventId(input.source.id, event, index),
+      schemaVersion: "vercel.analytics.v2",
+      eventSource: "vercel_drain",
       sourceTypeKey: "vercel_web_analytics_drain",
       sourceId: input.source.id,
       publicTrackingKey: null,
@@ -342,8 +364,16 @@ export function prepareVercelAnalyticsDrain(input: {
       userAgent: event.clientName ? `${event.clientName}${event.clientVersion ? ` ${event.clientVersion}` : ""}` : null,
       country: event.country ?? null,
       deviceType: event.deviceType ?? null,
-      properties: eventProperties(event),
+      properties,
+      attributionContext: attribution && typeof attribution === "object" && !Array.isArray(attribution)
+        ? attribution as JsonRecord
+        : {},
+      consentStatus: { analytics: "unknown", marketing: "unknown" },
+      clientContext: {
+        device_category: event.deviceType ?? event.clientType ?? "unknown",
+      },
       occurredAt,
+      receivedAt: fetchedAt,
     };
   });
 

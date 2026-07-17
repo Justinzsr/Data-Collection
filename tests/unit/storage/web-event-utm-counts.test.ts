@@ -15,6 +15,9 @@ function webEvent(
 ): WebEvent {
   return {
     id,
+    event_id: id,
+    schema_version: "legacy",
+    event_source: "first_party_tracker",
     source_id: sourceId,
     public_tracking_key: null,
     anonymous_id: anonymousId,
@@ -29,7 +32,11 @@ function webEvent(
     country: null,
     device_type: null,
     properties,
+    attribution_context: {},
+    consent_status: { analytics: "unknown", marketing: "unknown" },
+    client_context: {},
     occurred_at: occurredAt,
+    received_at: occurredAt,
     created_at: occurredAt,
   };
 }

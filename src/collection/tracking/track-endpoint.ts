@@ -1,149 +1,152 @@
-import { createHash } from "node:crypto";
-import { z } from "zod";
+import { createHmac } from "node:crypto";
 import { getSourceOperationBlockReason } from "@/collection/connectors/registry";
+import { normalizeWebsiteEventPayload } from "@/collection/tracking/website-event-contract";
 import { ingestWebsiteEvent } from "@/collection/tracking/website-event-ingestion";
-import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
+import { consumeWebsiteTrackingRateLimit } from "@/collection/tracking/website-rate-limit";
 import type { JsonRecord, Source } from "@/storage/db/schema";
-import { storeWebEvent } from "@/storage/repositories/events-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
-
-export const trackEventSchema = z.object({
-  source_id: z.string().uuid().optional(),
-  public_tracking_key: z.string().min(4).max(120).optional(),
-  anonymous_id: z.string().min(1).max(160),
-  session_id: z.string().min(1).max(160),
-  user_id: z.string().max(160).nullable().optional(),
-  event_name: z.string().min(1).max(80).regex(/^[a-zA-Z0-9_.:-]+$/),
-  path: z.string().min(1).max(500),
-  url: z.string().url().max(1200),
-  referrer: z.string().max(1200).nullable().optional(),
-  user_agent: z.string().max(1000).nullable().optional(),
-  properties: z.record(z.string(), z.unknown()).default({}),
-  occurred_at: z.string().datetime().optional(),
-});
-
-export type TrackEventInput = z.infer<typeof trackEventSchema>;
 
 export class TrackingIngestionError extends Error {
   constructor(
     message: string,
     public readonly statusCode = 400,
+    public readonly responseHeaders: Record<string, string> = {},
   ) {
     super(message);
     this.name = "TrackingIngestionError";
   }
 }
 
-function propertiesAreSmall(properties: Record<string, unknown>) {
-  return Buffer.byteLength(JSON.stringify(properties), "utf8") <= 8192;
-}
-
 function hashIp(ip: string | null | undefined) {
-  if (!ip) return null;
-  return createHash("sha256").update(`${process.env.APP_ENCRYPTION_KEY ?? "demo"}:${ip}`).digest("hex");
+  const salt = process.env.APP_ENCRYPTION_KEY?.trim();
+  if (!ip || !salt) return null;
+  return createHmac("sha256", salt)
+    .update("website-event-ip\0")
+    .update(ip)
+    .digest("hex");
 }
 
-function findTrackingSource(input: TrackEventInput, sources: Source[]): Source | null {
-  if (input.source_id) return sources.find((source) => source.id === input.source_id) ?? null;
-  if (input.public_tracking_key) {
-    return (
-      sources.find((source) => source.metadata.public_tracking_key === input.public_tracking_key) ??
-      null
-    );
+function publicTrackingKey(source: Source) {
+  const value = source.metadata.public_tracking_key;
+  return typeof value === "string" ? value : null;
+}
+
+function findTrackingSource(input: { sourceId: string | null; publicTrackingKey: string | null }, sources: Source[]) {
+  if (input.sourceId) {
+    const source = sources.find((candidate) => candidate.id === input.sourceId) ?? null;
+    if (!source) return null;
+    if (input.publicTrackingKey && publicTrackingKey(source) !== input.publicTrackingKey) return null;
+    return source;
   }
-  return null;
+  if (!input.publicTrackingKey) return null;
+  return sources.find((source) => publicTrackingKey(source) === input.publicTrackingKey) ?? null;
+}
+
+function allowedOrigins(source: Source) {
+  const configured = source.metadata.allowed_origins;
+  if (!Array.isArray(configured)) return [];
+  return configured.flatMap((value) => {
+    if (typeof value !== "string") return [];
+    try {
+      const url = new URL(value.trim());
+      return [url.origin];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function assertAllowedOrigin(source: Source, origin: string | null) {
-  const allowed = source.metadata.allowed_origins;
-  if (process.env.NODE_ENV === "production" && (!origin || !Array.isArray(allowed) || allowed.length === 0)) {
-    throw new TrackingIngestionError("Allowed origins must be configured for this website tracker source.", 403);
+  const allowed = allowedOrigins(source);
+  if (process.env.NODE_ENV === "production" && (!origin || allowed.length === 0)) {
+    throw new TrackingIngestionError("This website tracker is not configured for the request origin.", 403);
   }
-  if (!origin || !Array.isArray(allowed) || allowed.length === 0) return;
-  if (!allowed.includes(origin)) {
-    throw new TrackingIngestionError("Origin is not allowed for this website source.", 403);
+  if (!origin || allowed.length === 0) return;
+  let normalizedOrigin: string;
+  try {
+    normalizedOrigin = new URL(origin).origin;
+  } catch {
+    throw new TrackingIngestionError("This website tracker is not configured for the request origin.", 403);
+  }
+  if (!allowed.includes(normalizedOrigin)) {
+    throw new TrackingIngestionError("This website tracker is not configured for the request origin.", 403);
   }
 }
 
-function shouldSuppressTrackerPageViewRollup(input: {
-  source: Source | null;
-  sources: Source[];
-  eventName: string;
-}) {
-  if (!input.source || input.source.source_type_key !== "website" || input.eventName !== "page_view") {
-    return false;
+function normalizeContract(input: unknown, receivedAt: Date) {
+  try {
+    return normalizeWebsiteEventPayload(input, { receivedAt });
+  } catch (error) {
+    const tooLarge = error instanceof Error && /(too large|too many|string that is too long)/iu.test(error.message);
+    throw new TrackingIngestionError(
+      tooLarge ? "Tracking payload is too large." : "Tracking payload is invalid.",
+      tooLarge ? 413 : 400,
+    );
   }
-  const primaryWebsiteSource = resolvePrimaryWebsiteSource(input.sources);
-  return Boolean(
-    primaryWebsiteSource &&
-      primaryWebsiteSource.id !== input.source.id &&
-      primaryWebsiteSource.source_type_key === "vercel_web_analytics_drain",
-  );
 }
 
-export async function ingestTrackEvent(input: unknown, meta: { origin?: string | null; ip?: string | null; userAgent?: string | null }) {
-  const parsed = trackEventSchema.parse(input);
-  if (!propertiesAreSmall(parsed.properties)) {
-    throw new Error("Event properties are too large. Limit is 8KB.");
-  }
-  if (!parsed.source_id && !parsed.public_tracking_key) {
-    throw new TrackingIngestionError("source_id or public_tracking_key is required.", 401);
-  }
+export async function ingestTrackEvent(
+  input: unknown,
+  meta: {
+    origin?: string | null;
+    ip?: string | null;
+    userAgent?: string | null;
+    receivedAt?: Date;
+  },
+) {
+  const receivedAt = meta.receivedAt ?? new Date();
+  const event = normalizeContract(input, receivedAt);
   const sources = await listSources();
-  const source = findTrackingSource(parsed, sources);
+  const source = findTrackingSource(event, sources);
   if (!source) {
-    throw new TrackingIngestionError("Website tracker source was not found.", 404);
+    throw new TrackingIngestionError("Tracking source credentials are invalid.", 403);
   }
   const blocked = getSourceOperationBlockReason(source);
   if (blocked) {
     throw new TrackingIngestionError(blocked, 409);
   }
   if (source.source_type_key !== "website") {
-    throw new TrackingIngestionError("The selected source does not accept website tracker events.", 404);
+    throw new TrackingIngestionError("The selected source does not accept first-party website events.", 403);
   }
   assertAllowedOrigin(source, meta.origin ?? null);
-  const occurredAt = parsed.occurred_at ?? new Date().toISOString();
-  if (shouldSuppressTrackerPageViewRollup({ source, sources, eventName: parsed.event_name })) {
-    return storeWebEvent({
-      source_id: source.id,
-      public_tracking_key: parsed.public_tracking_key ?? null,
-      anonymous_id: parsed.anonymous_id,
-      session_id: parsed.session_id,
-      user_id: parsed.user_id ?? null,
-      event_name: parsed.event_name,
-      path: parsed.path,
-      url: parsed.url,
-      referrer: parsed.referrer ?? null,
-      user_agent: parsed.user_agent ?? meta.userAgent ?? null,
-      ip_hash: hashIp(meta.ip),
-      country: null,
-      device_type: null,
-      properties: {
-        ...parsed.properties,
-        moonarq_ingestion: {
-          suppressed_rollup: true,
-          reason: "vercel_drain_primary",
-        },
-      } satisfies JsonRecord,
-      occurred_at: occurredAt,
+
+  const rateLimit = consumeWebsiteTrackingRateLimit({
+    sourceId: source.id,
+    ip: meta.ip,
+    anonymousId: event.anonymousId,
+    now: receivedAt.getTime(),
+  });
+  if (!rateLimit.allowed) {
+    throw new TrackingIngestionError("Tracking rate limit exceeded.", 429, {
+      "retry-after": String(rateLimit.retryAfterSeconds),
     });
   }
+
   return ingestWebsiteEvent({
+    eventId: event.eventId,
+    schemaVersion: event.schemaVersion,
+    eventSource: "first_party_tracker",
     sourceTypeKey: "website",
     sourceId: source.id,
-    publicTrackingKey: parsed.public_tracking_key ?? null,
-    anonymousId: parsed.anonymous_id,
-    sessionId: parsed.session_id,
-    userId: parsed.user_id ?? null,
-    eventName: parsed.event_name,
-    path: parsed.path,
-    url: parsed.url,
-    referrer: parsed.referrer ?? null,
-    userAgent: parsed.user_agent ?? meta.userAgent ?? null,
+    publicTrackingKey: event.publicTrackingKey,
+    anonymousId: event.anonymousId,
+    sessionId: event.sessionId,
+    userId: event.userId,
+    eventName: event.eventName,
+    path: event.path,
+    url: event.url,
+    referrer: event.referrer,
+    // Only a legacy body field that passed contract/PII validation may be
+    // retained. The raw HTTP header is untrusted transport metadata.
+    userAgent: event.schemaVersion === "legacy" ? event.userAgent : null,
     ipHash: hashIp(meta.ip),
     country: null,
-    deviceType: null,
-    properties: parsed.properties as JsonRecord,
-    occurredAt,
+    deviceType: event.clientContext.device_category ?? null,
+    properties: event.properties,
+    attributionContext: event.attributionContext as JsonRecord,
+    consentStatus: event.consentStatus as JsonRecord,
+    clientContext: event.clientContext as JsonRecord,
+    occurredAt: event.occurredAt,
+    receivedAt: event.receivedAt,
   });
 }

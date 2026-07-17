@@ -234,7 +234,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
               <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
             </summary>
             <div className="border-t border-white/10 p-4 sm:p-5">
-              <CredentialForm sourceId={source.id} title="Encrypted credentials" dataSpaceSlug={dataSpace.slug} />
+              <CredentialForm sourceId={source.id} title="Credentials and settings" dataSpaceSlug={dataSpace.slug} />
               {credentials.length > 0 ? (
                 <p className="mt-4 text-xs text-slate-500">Saved hints: {credentials.map((item) => `${item.field_key} ${item.value_hint ?? "saved"}`).join(", ")}</p>
               ) : null}
@@ -478,8 +478,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
 
       {source.source_type_key === "website" ? (
         <div className="grid gap-5 xl:grid-cols-2">
-          <SnippetCard title="Lightweight JavaScript snippet" description="Copy into your website to auto-send page_view and expose window.moonarqTrack." code={generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey })} />
-          <SnippetCard title="React / Next.js helper" description="Use usePageViewTracking() and trackEvent(name, properties) inside a Next app." code={generateReactHelper({ endpoint, publicTrackingKey: trackingKey })} />
+          <SnippetCard title="Lightweight JavaScript snippet" description="Copy into your website to auto-send versioned page_view events and expose window.moonarqTrack." code={generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey, sourceId: source.id })} />
+          <SnippetCard title="React / Next.js helper" description="Use usePageViewTracking() and trackEvent(name, properties) with the v1 event contract inside a Next app." code={generateReactHelper({ endpoint, publicTrackingKey: trackingKey, sourceId: source.id })} />
         </div>
       ) : source.source_type_key === "vercel_web_analytics_drain" ? (
         <GlassPanel className="p-4 sm:p-5">

@@ -72,22 +72,29 @@ export async function listConnectorEvents(limit = 50, options: { dataSpaceId?: s
 export async function storeWebEvent(
   input: Omit<WebEvent, "id" | "created_at">,
   executor?: DatabaseExecutor,
-): Promise<WebEvent> {
+): Promise<{ event: WebEvent; inserted: boolean }> {
   const event: WebEvent = {
     id: randomUUID(),
-    created_at: new Date().toISOString(),
+    created_at: input.received_at,
     ...input,
   };
 
   if (!isRuntimeDatabaseConfigured()) {
+    const existing = getDemoStore().webEvents.find(
+      (candidate) => candidate.source_id === event.source_id && candidate.event_id === event.event_id,
+    );
+    if (existing) return { event: existing, inserted: false };
     getDemoStore().webEvents.unshift(event);
-    return event;
+    return { event, inserted: true };
   }
 
   const rows = await queryRows<WebEvent>(
     `
       insert into web_events (
         id,
+        event_id,
+        schema_version,
+        event_source,
         source_id,
         public_tracking_key,
         anonymous_id,
@@ -102,15 +109,24 @@ export async function storeWebEvent(
         country,
         device_type,
         properties,
+        attribution_context,
+        consent_status,
+        client_context,
         occurred_at,
+        received_at,
         created_at
       ) values (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb,
+        $19::jsonb, $20::jsonb, $21::jsonb, $22, $23, $24
       )
+      on conflict (source_id, event_id) do nothing
       returning *
     `,
     [
       event.id,
+      event.event_id,
+      event.schema_version,
+      event.event_source,
       event.source_id,
       event.public_tracking_key,
       event.anonymous_id,
@@ -125,12 +141,29 @@ export async function storeWebEvent(
       event.country,
       event.device_type,
       JSON.stringify(event.properties),
+      JSON.stringify(event.attribution_context),
+      JSON.stringify(event.consent_status),
+      JSON.stringify(event.client_context),
       event.occurred_at,
+      event.received_at,
       event.created_at,
     ],
     executor,
   );
-  return rows[0];
+  if (rows[0]) return { event: rows[0], inserted: true };
+  const existing = await queryRows<WebEvent>(
+    `
+      select *
+      from web_events
+      where source_id is not distinct from $1
+        and event_id = $2
+      limit 1
+    `,
+    [event.source_id, event.event_id],
+    executor,
+  );
+  if (!existing[0]) throw new Error("Duplicate web event could not be resolved after idempotent insert.");
+  return { event: existing[0], inserted: false };
 }
 
 export async function listWebEvents(limit = 100, options: { dataSpaceId?: string } = {}): Promise<WebEvent[]> {
@@ -267,7 +300,9 @@ function utmFromParams(params: URLSearchParams | null): Partial<ExactUtm> | null
 
 function eventUtmCandidates(event: WebEvent): Partial<ExactUtm>[] {
   const candidates: Partial<ExactUtm>[] = [];
-  const attribution = event.properties.attribution;
+  const attribution = Object.keys(event.attribution_context).length > 0
+    ? event.attribution_context
+    : event.properties.attribution;
   if (attribution && typeof attribution === "object" && !Array.isArray(attribution)) {
     const utm = (attribution as JsonRecord).utm;
     const normalized = utmFromRecord(utm);
@@ -434,7 +469,8 @@ export async function countWebPageViewsByUtm(options: {
   };
   exactEventConditions.push(`(
     ${[
-      evidenceGroup((normalizedKey) => `nullif(e.properties #>> '{attribution,utm,${normalizedKey}}', '')`),
+      evidenceGroup((normalizedKey, queryKey) => `coalesce(nullif(e.attribution_context #>> '{utm,${normalizedKey}}', ''), nullif(e.attribution_context #>> '{utm,${queryKey}}', ''))`),
+      evidenceGroup((normalizedKey, queryKey) => `coalesce(nullif(e.properties #>> '{attribution,utm,${normalizedKey}}', ''), nullif(e.properties #>> '{attribution,utm,${queryKey}}', ''))`),
       evidenceGroup((_normalizedKey, queryKey) => `substring(coalesce(e.url, '') from '[?&]${queryKey}=([^&#]+)')`),
       evidenceGroup((_normalizedKey, queryKey) => `substring(coalesce(e.properties #>> '{vercel,query_params}', '') from '"${queryKey}"[[:space:]]*:[[:space:]]*"([^"]+)"')`),
       evidenceGroup((_normalizedKey, queryKey) => `substring(coalesce(e.properties #>> '{vercel,query_params}', '') from '${queryKey}=([^&]+)')`),

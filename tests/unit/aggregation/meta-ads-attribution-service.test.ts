@@ -62,6 +62,9 @@ function metricRow(sourceTypeKey: SourceTypeKey, metricKey: string, metricValue:
 function event(id: string, anonymousId: string, properties: JsonRecord, url = "https://www.moonarqstudio.com/core-collection"): WebEvent {
   return {
     id,
+    event_id: id,
+    schema_version: "legacy",
+    event_source: "vercel_drain",
     source_id: "website-source",
     public_tracking_key: null,
     anonymous_id: anonymousId,
@@ -76,7 +79,11 @@ function event(id: string, anonymousId: string, properties: JsonRecord, url = "h
     country: null,
     device_type: null,
     properties,
+    attribution_context: {},
+    consent_status: { analytics: "unknown", marketing: "unknown" },
+    client_context: {},
     occurred_at: "2026-07-15T20:00:00.000Z",
+    received_at: "2026-07-15T20:00:01.000Z",
     created_at: "2026-07-15T20:00:01.000Z",
   };
 }
@@ -450,6 +457,29 @@ describe("Meta Ads and UTM attribution service", () => {
 
     expect(result.metaAdsSourceId).toBeNull();
     expect(result.state).toBe("not_connected");
+  });
+
+  it("does not use a linked Vercel Drain as first-party attribution evidence", async () => {
+    getDemoStore().sources.push(
+      source("meta_ads", {
+        metadata: {
+          oauth_connected: true,
+          linked_instagram_source_id: "instagram-source",
+          linked_website_source_id: "drain-source",
+          tracked_utm: MOONARQ_FIRST_STORY_UTM,
+        },
+      }),
+      source("vercel_web_analytics_drain", { id: "drain-source" }),
+    );
+
+    const result = await getInstagramPaidAdsSummary({
+      dataSpaceId: "space",
+      instagramSourceId: "instagram-source",
+      rangeKey: "30d",
+    });
+
+    expect(result.funnel.utmPageViews).toMatchObject({ value: null, state: "unavailable" });
+    expect(result.funnel.utmVisitors).toMatchObject({ value: null, state: "unavailable" });
   });
 
   it("keeps Shopify outcomes provisional while an in-range customer journey is still preparing", async () => {

@@ -3,6 +3,7 @@
 Metrics are defined in `src/aggregation/metric-definitions/definitions.ts`.
 
 Primary MVP KPIs:
+
 - `page_views`
 - `unique_visitors`
 - `custom_events`
@@ -11,6 +12,30 @@ Primary MVP KPIs:
 - `active_sources`
 - `last_sync_status`
 - `sync_errors`
+
+## Website event metrics
+
+First-party Website Tracker events are authoritative for browser funnel metrics:
+
+- `page_views`: stored first-party events with `event_name = 'page_view'`.
+- `custom_events`: stored first-party events whose event name is not `page_view`.
+- `unique_visitors`: distinct first-party `anonymous_id` values per reporting day.
+- `sessions`: distinct first-party `session_id` values per reporting day.
+- `events_by_path`: first-party event count grouped by path and reporting day.
+- `events_by_referrer`: first-party event count grouped by normalized referrer and reporting day.
+
+Website event-day grouping uses `occurred_at`, not `received_at`. Idempotent duplicates with the same `(source_id, event_id)` do not increment these metrics. `received_at` is reserved for ingestion latency and operational verification.
+
+Vercel Drain events remain available as auxiliary request and infrastructure evidence but must not be added to these first-party funnel totals. Raw first-party events are retained even when Drain reports a related request.
+
+## Source-of-truth policy
+
+- First-party MoonArq tracker: funnel behavior, pseudonymous identity, sessions, and attribution context.
+- Vercel Drain: infrastructure and request-level diagnostics.
+- Shopify: orders, commerce state, payments, refunds, and revenue.
+- Meta: paid media delivery and spend; Meta-attributed outcomes remain platform-reported attribution.
+
+Never sum overlapping source observations into one metric. Choose the authoritative source for the metric, preserve auxiliary raw evidence, and label source-specific attribution estimates.
 
 Shopify commerce metrics use non-test orders from the latest overlapping 60-day window and are grouped by the store's IANA time zone:
 
