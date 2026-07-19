@@ -138,7 +138,7 @@ with function_state as (
     pg_get_function_result(procedures.oid) as result_type,
     languages.lanname as language_name,
     coalesce(array_to_string(procedures.proconfig, ','), '') as function_config,
-    regexp_replace(btrim(procedures.prosrc), '\s+', ' ', 'g') as normalized_body
+    btrim(regexp_replace(procedures.prosrc, '\s+', ' ', 'g')) as normalized_body
   from pg_proc procedures
   join pg_language languages on languages.oid = procedures.prolang
   where procedures.oid = to_regprocedure('public.set_web_event_contract_defaults()')
@@ -463,6 +463,8 @@ with target_roles as (
     when roles.rolname = 'service_role' then
       not has_table_privilege(roles.oid, 'public.web_events'::regclass, 'SELECT')
       or not has_table_privilege(roles.oid, 'public.web_events'::regclass, 'INSERT')
+      or has_table_privilege(roles.oid, 'public.web_events'::regclass, 'SELECT WITH GRANT OPTION')
+      or has_table_privilege(roles.oid, 'public.web_events'::regclass, 'INSERT WITH GRANT OPTION')
       or has_table_privilege(roles.oid, 'public.web_events'::regclass, 'UPDATE')
       or has_table_privilege(roles.oid, 'public.web_events'::regclass, 'DELETE')
       or has_table_privilege(roles.oid, 'public.web_events'::regclass, 'TRUNCATE')
@@ -525,6 +527,8 @@ with target_roles as (
     and (
       not has_column_privilege(roles.oid, 'public.web_events'::regclass, columns.attnum, 'SELECT')
       or not has_column_privilege(roles.oid, 'public.web_events'::regclass, columns.attnum, 'INSERT')
+      or has_column_privilege(roles.oid, 'public.web_events'::regclass, columns.attnum, 'SELECT WITH GRANT OPTION')
+      or has_column_privilege(roles.oid, 'public.web_events'::regclass, columns.attnum, 'INSERT WITH GRANT OPTION')
       or has_column_privilege(roles.oid, 'public.web_events'::regclass, columns.attnum, 'UPDATE')
       or has_column_privilege(roles.oid, 'public.web_events'::regclass, columns.attnum, 'REFERENCES')
     )
@@ -536,6 +540,66 @@ select
     and not exists (select 1 from browser_effective_access)
     and not exists (select 1 from service_role_mismatch),
   'Browser roles have no column access; service_role has SELECT/INSERT and no UPDATE/REFERENCES on every column.';
+
+insert into verification_0009_checks
+with dependencies as (
+  select table_class.oid, table_class.relowner, table_class.relacl
+  from pg_class table_class
+  join pg_namespace table_namespace on table_namespace.oid = table_class.relnamespace
+  where table_namespace.nspname = 'public'
+    and table_class.relname in ('sources', 'data_spaces', 'metrics_daily')
+), service_role_state as (
+  select roles.oid
+  from pg_roles roles
+  where roles.rolname = 'service_role'
+), direct_acl as (
+  select expanded.privilege_type, expanded.is_grantable
+  from dependencies
+  cross join lateral aclexplode(
+    coalesce(dependencies.relacl, acldefault('r', dependencies.relowner))
+  ) expanded
+  where expanded.grantee = (select oid from service_role_state)
+), effective_privilege_mismatch as (
+  select 1
+  from dependencies
+  cross join service_role_state
+  where not has_table_privilege(service_role_state.oid, dependencies.oid, 'SELECT')
+    or has_table_privilege(service_role_state.oid, dependencies.oid, 'SELECT WITH GRANT OPTION')
+    or has_table_privilege(service_role_state.oid, dependencies.oid, 'INSERT')
+    or has_table_privilege(service_role_state.oid, dependencies.oid, 'UPDATE')
+    or has_table_privilege(service_role_state.oid, dependencies.oid, 'DELETE')
+    or has_table_privilege(service_role_state.oid, dependencies.oid, 'TRUNCATE')
+    or has_table_privilege(service_role_state.oid, dependencies.oid, 'REFERENCES')
+    or has_table_privilege(service_role_state.oid, dependencies.oid, 'TRIGGER')
+    or case when current_setting('server_version_num')::integer >= 170000
+      then has_table_privilege(service_role_state.oid, dependencies.oid, 'MAINTAIN')
+      else false
+    end
+    or has_any_column_privilege(
+      service_role_state.oid,
+      dependencies.oid,
+      'SELECT WITH GRANT OPTION'
+    )
+    or has_any_column_privilege(service_role_state.oid, dependencies.oid, 'INSERT')
+    or has_any_column_privilege(service_role_state.oid, dependencies.oid, 'UPDATE')
+    or has_any_column_privilege(service_role_state.oid, dependencies.oid, 'REFERENCES')
+)
+select
+  'service_role_dependency_acl',
+  (select count(*) from dependencies) = 3
+    and (select count(*) from service_role_state) = 1
+    and coalesce((
+      select has_schema_privilege(oid, 'public', 'USAGE')
+        and has_schema_privilege(oid, 'reporting', 'USAGE')
+      from service_role_state
+    ), false)
+    and count(*) = 3
+    and count(*) filter (
+      where privilege_type = 'SELECT' and not is_grantable
+    ) = 3
+    and not exists (select 1 from effective_privilege_mismatch),
+  'service_role has direct, non-grantable SELECT only on the three reporting dependencies and no effective write, maintenance, reference, trigger, column-level write, or grant-option privilege.'
+from direct_acl;
 
 insert into verification_0009_checks
 with views as (
@@ -578,6 +642,7 @@ with views as (
       end
     when roles.rolname = 'service_role' then
       not has_table_privilege(roles.oid, views.oid, 'SELECT')
+      or has_table_privilege(roles.oid, views.oid, 'SELECT WITH GRANT OPTION')
       or has_table_privilege(roles.oid, views.oid, 'INSERT')
       or has_table_privilege(roles.oid, views.oid, 'UPDATE')
       or has_table_privilege(roles.oid, views.oid, 'DELETE')
@@ -588,6 +653,10 @@ with views as (
         then has_table_privilege(roles.oid, views.oid, 'MAINTAIN')
         else false
       end
+      or has_any_column_privilege(roles.oid, views.oid, 'SELECT WITH GRANT OPTION')
+      or has_any_column_privilege(roles.oid, views.oid, 'INSERT')
+      or has_any_column_privilege(roles.oid, views.oid, 'UPDATE')
+      or has_any_column_privilege(roles.oid, views.oid, 'REFERENCES')
     else true
   end
 )
@@ -662,6 +731,68 @@ insert into verification_0009_checks values (
   'runtime_role_reporting_view_execution',
   true,
   'The connected runtime role executed zero-row reads against both reporting views.'
+);
+
+-- SET ROLE changes current_user for subsequent permission checks. These reads
+-- therefore exercise the exact server runtime role, not only the migration role.
+do $verification$
+begin
+  if not pg_has_role(session_user, 'service_role', 'SET') then
+    raise exception 'Verification session cannot assume the server runtime role.';
+  end if;
+  execute 'set local role service_role';
+  execute 'select * from reporting.platform_website_daily limit 0';
+  execute 'select * from reporting.moonarq_website_daily limit 0';
+  execute 'reset role';
+exception when others then
+  execute 'reset role';
+  raise;
+end
+$verification$;
+
+insert into verification_0009_checks values (
+  'service_role_reporting_view_execution',
+  true,
+  'service_role executed zero-row reads against both security-invoker reporting views.'
+);
+
+-- Assume each browser role successfully before testing the protected objects,
+-- so a SET ROLE failure cannot be mistaken for an access denial.
+do $verification$
+declare
+  browser_role name;
+  protected_relation text;
+begin
+  foreach browser_role in array array['anon'::name, 'authenticated'::name] loop
+    if not pg_has_role(session_user, browser_role, 'SET') then
+      raise exception 'Verification session cannot assume a browser role.';
+    end if;
+    foreach protected_relation in array array[
+      'public.web_events',
+      'reporting.platform_website_daily',
+      'reporting.moonarq_website_daily'
+    ] loop
+      execute format('set local role %I', browser_role);
+      begin
+        execute format('select 1 from %s limit 0', protected_relation);
+      exception when insufficient_privilege then
+        execute 'reset role';
+        continue;
+      end;
+      execute 'reset role';
+      raise exception 'A browser role unexpectedly read a protected website object.';
+    end loop;
+  end loop;
+exception when others then
+  execute 'reset role';
+  raise;
+end
+$verification$;
+
+insert into verification_0009_checks values (
+  'browser_role_protected_object_denial',
+  true,
+  'anon and authenticated were denied zero-row reads of raw events and both reporting views.'
 );
 
 select check_name, passed, expectation

@@ -85,9 +85,11 @@ The migration runner wraps every planned file and its `schema_migrations` insert
 
 Before 0009, run [`scripts/sql/capture-0009-website-event-baseline.sql`](../scripts/sql/capture-0009-website-event-baseline.sql) through a protected `psql` session with `baseline_cutoff` set to the saved UTC cutoff. The script returns only counts, occurrence bounds, and SHA-256 fingerprints; it hashes raw URLs, identifiers, dimensions, and keys inside PostgreSQL and never returns their values. Save the single result outside Git. Run the same file with the exact same cutoff after 0009 and require every returned value to match.
 
-After 0009, run [`scripts/sql/verify-0009-website-event-contract-v1.sql`](../scripts/sql/verify-0009-website-event-contract-v1.sql) using the exact runtime/migration role and pass the same saved cutoff as `-v baseline_cutoff='<SETTLED_BASELINE_CUTOFF_ISO>'`. PostgreSQL does not permit creating its session-local results table inside a read-only transaction, so the script uses a normal transaction, writes only to that temporary scratch table, never mutates a production object, and ends with `ROLLBACK`. It fails closed unless all of these are exact: migration phase, column types/defaults/nullability, validated CHECK expressions, compatibility function and trigger, fixed-cutoff deterministic backfills, source classification, scoped event-ID uniqueness, full index definitions and validity, direct/effective table and column ACLs, RLS policies, security-invoker view ACLs, runtime-role RLS compatibility, and actual zero-row reads from both reporting views.
+Never reuse an earlier release-readiness baseline. The previously observed change from 1,411 to 1,404 metric rows was expected live operational drift, not a code defect or a value to repair. After this patch is finalized, capture a fresh protected backup and fresh fixed-cutoff event and metric baseline immediately before the eventual production 0009 run, while no sync is in flight. This task's production-like backup is restore-test input only and is not a final production baseline.
 
-Finally, run [`scripts/sql/probe-0009-legacy-writes.sql`](../scripts/sql/probe-0009-legacy-writes.sql) using that same role. It inserts one old-shape Website Tracker row and one old-shape Vercel Drain row, validates their defaults and source classification, and unconditionally rolls the transaction back. `ON_ERROR_STOP` is mandatory; any SQL error, missing source, failed assertion, or missing final `ROLLBACK` is a failed compatibility check. The probe must never be edited to commit.
+After 0009, run [`scripts/sql/verify-0009-website-event-contract-v1.sql`](../scripts/sql/verify-0009-website-event-contract-v1.sql) using the exact runtime/migration role and pass the same saved cutoff as `-v baseline_cutoff='<SETTLED_BASELINE_CUTOFF_ISO>'`. PostgreSQL does not permit creating its session-local results table inside a read-only transaction, so the script uses a normal transaction, writes only to that temporary scratch table, never mutates a production object, and ends with `ROLLBACK`. It fails closed unless all of these are exact: migration phase, column types/defaults/nullability, validated CHECK expressions, compatibility function and trigger, fixed-cutoff deterministic backfills, source classification, scoped event-ID uniqueness, full index definitions and validity, direct/effective table and column ACLs, RLS policies, security-invoker view ACLs, runtime-role RLS compatibility, exact SELECT-only service-role grants on reporting dependencies, actual service-role view execution, and actual browser-role denial.
+
+Finally, run [`scripts/sql/probe-0009-legacy-writes.sql`](../scripts/sql/probe-0009-legacy-writes.sql) using that same role. It requires the seeded Website and Vercel Drain source-type catalog entries and the MoonArq data space, but it does not require either source to be configured. Inside a named savepoint it creates two minimal disabled source fixtures with no credentials, keys, origins, URLs, webhook configuration, or metadata; inserts one old-shape event for each; and validates every 0009 default and source classification. It rolls the fixture savepoint back, proves the fixture source, event, credential, and metric rows are absent, and requires full source/event counts and fingerprints to match their before-state before the final outer `ROLLBACK`. `ON_ERROR_STOP` is mandatory; any SQL error, missing prerequisite, failed assertion, or missing rollback is a failed compatibility check. The probe must never be edited to commit.
 
 Before applying 0009, choose a UTC cutoff older than the maximum request execution lifetime plus an operational buffer. This ensures all writes whose `created_at` precedes the cutoff have settled. Replace `<SETTLED_BASELINE_CUTOFF_ISO>` with that exact timestamp and save the timestamp and results outside the migration transaction. Reuse the same timestamp after 0009; do not recompute it.
 
@@ -276,9 +278,30 @@ select
 from pg_roles roles
 where roles.rolname in ('anon', 'authenticated', 'service_role')
 order by roles.rolname;
+
+select
+  table_class.relname as dependency,
+  has_table_privilege('service_role', table_class.oid, 'SELECT') as can_select,
+  has_table_privilege(
+    'service_role',
+    table_class.oid,
+    'SELECT WITH GRANT OPTION'
+  ) as can_grant_select,
+  has_table_privilege('service_role', table_class.oid, 'INSERT') as can_insert,
+  has_table_privilege('service_role', table_class.oid, 'UPDATE') as can_update,
+  has_table_privilege('service_role', table_class.oid, 'DELETE') as can_delete,
+  has_table_privilege('service_role', table_class.oid, 'TRUNCATE') as can_truncate,
+  has_table_privilege('service_role', table_class.oid, 'REFERENCES') as can_reference,
+  has_table_privilege('service_role', table_class.oid, 'TRIGGER') as can_trigger,
+  has_table_privilege('service_role', table_class.oid, 'MAINTAIN') as can_maintain
+from pg_class table_class
+join pg_namespace table_namespace on table_namespace.oid = table_class.relnamespace
+where table_namespace.nspname = 'public'
+  and table_class.relname in ('sources', 'data_spaces', 'metrics_daily')
+order by table_class.relname;
 ```
 
-`relrowsecurity` must be true. If `service_role` exists, `pg_policies` must include exactly `web_events_service_role_select` (`SELECT`, `qual = true`) and `web_events_service_role_insert` (`INSERT`, `with_check = true`) for it; an environment without that role should not list those policies. Any additional policy requires explicit review. `PUBLIC`, `anon`, and `authenticated` must have no raw-table or website-view ACL rows, and the effective-privilege checks for `anon` and `authenticated` must all be false. When `service_role` exists, only its effective `SELECT` and `INSERT` table privileges should be true; `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, and `TRIGGER` must remain false, and it should be able to select both views. Both views' `reloptions` must include `security_invoker=true`. Never expose a service-role key to a browser.
+`relrowsecurity` must be true. If `service_role` exists, `pg_policies` must include exactly `web_events_service_role_select` (`SELECT`, `qual = true`) and `web_events_service_role_insert` (`INSERT`, `with_check = true`) for it; an environment without that role should not list those policies. Any additional policy requires explicit review. `PUBLIC`, `anon`, and `authenticated` must have no raw-table or website-view ACL rows, and the effective-privilege checks for `anon` and `authenticated` must all be false. When `service_role` exists, it must have only non-grantable `SELECT`/`INSERT` on `web_events`, only non-grantable `SELECT` on `sources`, `data_spaces`, `metrics_daily`, and both reporting views, and no effective write, maintenance, trigger, reference, column-level write, or grant-option privilege beyond raw-event `INSERT`. The executable verifier uses `SET LOCAL ROLE service_role` to run both security-invoker views and `SET LOCAL ROLE anon`/`authenticated` to prove both browser roles are denied raw-event and reporting-view reads. Both views' `reloptions` must include `security_invoker=true`. Never expose a service-role key to a browser.
 
 After 0010, reconcile all six first-party metric families against raw events. The query hashes path/referrer dimensions before returning them so verification output does not reveal raw URLs. Differences from the pre-migration derived metrics are expected only when previously retained events are now included by the authoritative first-party policy; the post-migration query itself must return no rows.
 

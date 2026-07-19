@@ -40,15 +40,21 @@ describe("Website Event Contract production verification artifacts", () => {
       "row_level_security_policies",
       "table_acl",
       "column_acl",
+      "service_role_dependency_acl",
       "reporting_view_security_and_acl",
       "runtime_role_rls_and_acl_compatibility",
       "runtime_role_reporting_view_execution",
+      "service_role_reporting_view_execution",
+      "browser_role_protected_object_denial",
     ]) {
       expect(verification).toContain(checkName);
     }
     expect(verification).toContain("create temporary table verification_0009_checks");
     expect(verification).toContain(":'baseline_cutoff'::timestamptz");
     expect(verification).toContain("pg_get_indexdef");
+    expect(verification).toContain(
+      "btrim(regexp_replace(procedures.prosrc, '\\s+', ' ', 'g')) as normalized_body",
+    );
     expect(verification).toContain("on commit drop");
     expect(verification).toContain("rollback;");
     expect(verification).not.toMatch(/(?:insert|update|delete)\s+(?:into\s+)?public\./u);
@@ -57,14 +63,37 @@ describe("Website Event Contract production verification artifacts", () => {
     expect(verification).toContain("'truncate'");
     expect(verification).toContain("'trigger'");
     expect(verification).toContain("'maintain'");
+    expect(verification).toContain("'select with grant option'");
+    expect(verification).toContain("set local role service_role");
+    expect(verification).toContain("array['anon'::name, 'authenticated'::name]");
+    expect(verification).toContain("format('set local role %i', browser_role)");
+    expect(verification).toContain("when insufficient_privilege");
     expect(verification).toContain("raise exception 'post-0009 verification failed");
   });
 
-  it("keeps both legacy insert probes rollback-only and omits every new column", () => {
-    expect(legacyProbe).toContain("source_type_key = 'website'");
-    expect(legacyProbe).toContain("source_type_key = 'vercel_web_analytics_drain'");
+  it("keeps self-contained legacy probes rollback-only, residue-free, and old-shaped", () => {
+    expect(legacyProbe).toContain("key = 'website'");
+    expect(legacyProbe).toContain("key = 'vercel_web_analytics_drain'");
+    expect(legacyProbe).toContain("slug = 'moonarq'");
+    expect(legacyProbe).toContain("create temporary table verification_0009_probe_state");
+    expect(legacyProbe).toContain("set transaction isolation level repeatable read");
+    expect(legacyProbe).toContain("savepoint legacy_probe_fixtures");
+    expect(legacyProbe).toContain("rollback to savepoint legacy_probe_fixtures");
+    expect(legacyProbe).toContain("release savepoint legacy_probe_fixtures");
+    expect(legacyProbe).toContain("source_event_fingerprints_unchanged");
+    expect(legacyProbe).toContain("from public.source_credentials");
+    expect(legacyProbe).toContain("from public.metrics_daily");
     expect(legacyProbe).toContain("rollback;");
     expect(legacyProbe).not.toMatch(/\bcommit\s*;/u);
+
+    const sourceFixtureColumns = legacyProbe.match(
+      /insert into public\.sources\s*\(([^)]+)\)/u,
+    )?.[1];
+    expect(sourceFixtureColumns).toBeDefined();
+    expect(sourceFixtureColumns).not.toMatch(
+      /input_url|normalized_url|external_account_id|webhook|metadata|tracking|origin|credential/u,
+    );
+    expect(legacyProbe).not.toMatch(/(?:insert|update)\s+(?:into\s+)?public\.source_credentials/u);
 
     const insertColumnLists = [...legacyProbe.matchAll(/insert into public\.web_events\s*\(([^)]+)\)/gu)];
     expect(insertColumnLists).toHaveLength(2);
@@ -73,6 +102,13 @@ describe("Website Event Contract production verification artifacts", () => {
         /event_id|schema_version|event_source|attribution_context|consent_status|client_context|received_at/u,
       );
     }
+
+    const savepointRollback = legacyProbe.indexOf("rollback to savepoint legacy_probe_fixtures");
+    const residueAssertion = legacyProbe.indexOf("legacy compatibility probe left fixture rows");
+    const finalRollback = legacyProbe.lastIndexOf("rollback;");
+    expect(savepointRollback).toBeGreaterThan(legacyProbe.indexOf("insert into public.sources"));
+    expect(residueAssertion).toBeGreaterThan(savepointRollback);
+    expect(finalRollback).toBeGreaterThan(residueAssertion);
   });
 
   it("uses one shared planner, a bounded read-only preflight, and success logs after commit", () => {

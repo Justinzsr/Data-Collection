@@ -122,6 +122,22 @@ describe("Website Event Contract migrations", () => {
     expect(compactExpandMigration).not.toMatch(
       /create policy [^;']+ on public\.web_events for all to service_role/,
     );
+
+    expect(compactExpandMigration).toContain("grant usage on schema public to service_role");
+    for (const dependency of ["public.sources", "public.data_spaces", "public.metrics_daily"]) {
+      expect(compactExpandMigration).toContain(
+        `revoke all privileges on table ${dependency} from service_role`,
+      );
+      expect(compactExpandMigration).toContain(
+        `grant select on table ${dependency} to service_role`,
+      );
+    }
+    expect(compactExpandMigration).not.toMatch(
+      /grant [^;']*(?:insert|update|delete|truncate|references|trigger|maintain)[^;']* on table public\.(?:sources|data_spaces|metrics_daily) to service_role/,
+    );
+    expect(compactExpandMigration).not.toMatch(
+      /(?:grant|revoke) [^;']* on table public\.(?:source_credentials|raw_ingestions) (?:to|from) service_role/,
+    );
   });
 
   it("rebuilds all six website metrics from first-party tracker events only", () => {

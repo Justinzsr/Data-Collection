@@ -173,6 +173,13 @@ begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
     execute 'revoke all privileges on table public.web_events from service_role';
     execute 'grant select, insert on table public.web_events to service_role';
+    execute 'grant usage on schema public to service_role';
+    execute 'revoke all privileges on table public.sources from service_role';
+    execute 'revoke all privileges on table public.data_spaces from service_role';
+    execute 'revoke all privileges on table public.metrics_daily from service_role';
+    execute 'grant select on table public.sources to service_role';
+    execute 'grant select on table public.data_spaces to service_role';
+    execute 'grant select on table public.metrics_daily to service_role';
     execute 'grant usage on schema reporting to service_role';
     execute 'revoke all privileges on table reporting.platform_website_daily from service_role';
     execute 'revoke all privileges on table reporting.moonarq_website_daily from service_role';
