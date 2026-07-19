@@ -18,6 +18,16 @@ const compactExpandMigration = compactSql(expandMigration);
 const compactRebuildMigration = compactSql(rebuildMigration);
 
 describe("Website Event Contract migrations", () => {
+  it("uses bounded local timeouts inside the migration runner transaction", () => {
+    expect(compactExpandMigration).toContain("set local lock_timeout = '10s'");
+    expect(compactExpandMigration).toContain("set local statement_timeout = '15min'");
+    expect(compactRebuildMigration).toContain("set local lock_timeout = '10s'");
+    expect(compactRebuildMigration).toContain("set local statement_timeout = '15min'");
+
+    const migrationRunner = compactSql(readFileSync("scripts/db-migrate.ts", "utf8"));
+    expect(migrationRunner).toContain("await withdatabasetransaction(async (client) =>");
+  });
+
   it("adds the v1 storage columns and source/event idempotency constraint", () => {
     for (const columnDefinition of [
       "event_id uuid",

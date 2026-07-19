@@ -118,7 +118,7 @@ describe("Vercel Analytics Drain ingress security", () => {
     expect((await listWebEvents(100)).length).toBe(before);
   });
 
-  it("normalizes the exact paid Instagram UTM tuple and preserves it in the resolved URL", async () => {
+  it("normalizes the exact paid Instagram UTM tuple without retaining arbitrary event or URL data", async () => {
     const source = await createDrainSource("healthy");
     await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
     const queryParams =
@@ -139,9 +139,7 @@ describe("Vercel Analytics Drain ingress security", () => {
     const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
     expect(event).toBeDefined();
     expect(event?.properties).toMatchObject({
-      campaignMarker: "first-story",
       attribution: {
-        note: "preserved",
         utm: {
           source: "instagram",
           medium: "paid_social",
@@ -149,19 +147,24 @@ describe("Vercel Analytics Drain ingress security", () => {
           content: "story_v1",
         },
       },
-      vercel: { query_params: queryParams },
+      vercel: {
+        query_parameters: { received: 4, retained: 4, discarded: 0, malformed: false },
+        event_data_discarded: true,
+      },
     });
+    expect(event?.properties).not.toHaveProperty("campaignMarker");
+    expect(event?.properties.vercel).not.toHaveProperty("query_params");
     const url = new URL(event?.url ?? "https://invalid.local");
     expect(Object.fromEntries(url.searchParams.entries())).toEqual({
-      variant: "moon",
       utm_source: "instagram",
       utm_medium: "paid_social",
       utm_campaign: "bracelet_grid_jul2026",
       utm_content: "story_v1",
     });
+    expect(event?.path).toBe("/collections/bracelets");
   });
 
-  it("normalizes JSON-encoded query params including utm_term without discarding raw fields", async () => {
+  it("normalizes only allowlisted JSON-encoded UTM values", async () => {
     const source = await createDrainSource("healthy");
     await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
     const queryParams = JSON.stringify({
@@ -192,14 +195,17 @@ describe("Vercel Analytics Drain ingress security", () => {
           term: "pink_bracelet",
         },
       },
-      vercel: { query_params: queryParams },
+      vercel: {
+        query_parameters: { received: 6, retained: 5, discarded: 1, malformed: false },
+      },
     });
+    expect(event?.properties.vercel).not.toHaveProperty("query_params");
     const url = new URL(event?.url ?? "https://invalid.local");
-    expect(url.searchParams.get("preview")).toBe("true");
+    expect(url.searchParams.get("preview")).toBeNull();
     expect(url.searchParams.get("utm_term")).toBe("pink_bracelet");
   });
 
-  it("retains malformed queryParams as raw evidence without promoting them", async () => {
+  it("discards malformed queryParams without persisting their contents", async () => {
     const source = await createDrainSource("healthy");
     await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
     const queryParams = '{"utm_source":"instagram"';
@@ -210,11 +216,14 @@ describe("Vercel Analytics Drain ingress security", () => {
     expect(response.status).toBe(200);
     const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
     expect(event?.properties).not.toHaveProperty("attribution");
-    expect(event?.properties).toMatchObject({ vercel: { query_params: queryParams } });
+    expect(event?.properties).toMatchObject({
+      vercel: { query_parameters: { received: 1, retained: 0, discarded: 1, malformed: true } },
+    });
+    expect(JSON.stringify(event?.properties)).not.toContain(queryParams);
     expect(new URL(event?.url ?? "https://invalid.local").search).toBe("");
   });
 
-  it("keeps ordinary non-UTM query params in the URL without creating attribution", async () => {
+  it("discards ordinary non-UTM query params from every persisted URL", async () => {
     const source = await createDrainSource("healthy");
     await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
     const queryParams = "ref=homepage&sort=featured";
@@ -225,9 +234,173 @@ describe("Vercel Analytics Drain ingress security", () => {
     expect(response.status).toBe(200);
     const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
     expect(event?.properties).not.toHaveProperty("attribution");
-    expect(event?.properties).toMatchObject({ vercel: { query_params: queryParams } });
+    expect(event?.properties).toMatchObject({
+      vercel: { query_parameters: { received: 2, retained: 0, discarded: 2, malformed: false } },
+    });
     const url = new URL(event?.url ?? "https://invalid.local");
-    expect(Object.fromEntries(url.searchParams.entries())).toEqual({ ref: "homepage", sort: "featured" });
+    expect(Object.fromEntries(url.searchParams.entries())).toEqual({});
+  });
+
+  it("sanitizes PII, secrets, high-entropy values, raw payloads, and diagnostic URLs before persistence", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    const email = "buyer@example.com";
+    const encodedEmail = "buyer%40example.com";
+    const phone = "+1 (415) 555-0199";
+    const address = "123 Main Street";
+    const bearer = "Bearer abcdefghijklmnopqrstuvwxyz123456";
+    const highEntropyValue = "mJ7pQ2vX9cL4sN8wR6tY1uK5aD3fH0zB";
+    const password = "MoonArq!private-password";
+    const rawBody = JSON.stringify({
+      ...JSON.parse(RAW_BODY),
+      deviceId: email,
+      sessionId: phone,
+      origin: `https://moonarqstudio.com?authorization=${encodeURIComponent(bearer)}`,
+      path: `/checkout/${encodedEmail}?token=${highEntropyValue}`,
+      referrer: `https://referrer.example/${encodeURIComponent(address)}?cookie=session-cookie-value`,
+      clientName: `Browser ${email}`,
+      vercelUrl: `https://deployment.vercel.app/health?password=${encodeURIComponent(password)}`,
+      queryParams: JSON.stringify({
+        utm_source: "instagram",
+        utm_medium: "paid_social",
+        utm_campaign: highEntropyValue,
+        utm_content: "story_v1",
+        utm_term: encodedEmail,
+        email,
+        phone,
+        address,
+        authorization: bearer,
+        cookie: "session-cookie-value",
+        token: highEntropyValue,
+        password,
+      }),
+      eventData: JSON.stringify({
+        email,
+        phone,
+        shipping_address: address,
+        cookie: "session-cookie-value",
+        authorization: bearer,
+        access_token: highEntropyValue,
+        password,
+        nested: { uncontrolled: { url: `https://example.com/?token=${highEntropyValue}` } },
+      }),
+      authorization: bearer,
+      cookie: "session-cookie-value",
+    });
+
+    const response = await postDrain(source.id, signature(rawBody), rawBody);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain(highEntropyValue);
+    const store = getDemoStore();
+    const raw = store.rawIngestions.find((item) => item.source_id === source.id);
+    const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
+    const change = store.platformChangeEvents.find((item) => item.source_id === source.id);
+    const persisted = JSON.stringify({
+      rawPayload: raw?.payload,
+      rawExternalId: raw?.external_id,
+      webEvent: event,
+      changePayload: change?.payload,
+      changeExternalId: change?.external_record_id,
+    });
+    for (const sensitiveValue of [email, encodedEmail, phone, address, bearer, highEntropyValue, password, "session-cookie-value"]) {
+      expect(persisted).not.toContain(sensitiveValue);
+    }
+    expect(raw?.payload).not.toHaveProperty("eventData");
+    expect(raw?.payload).not.toHaveProperty("queryParams");
+    expect(raw?.payload).not.toHaveProperty("sessionId");
+    expect(raw?.payload.deviceId).toMatch(/^vercel-device-[a-f0-9]{32}$/u);
+    expect(raw?.payload).toMatchObject({
+      path: "/[redacted]",
+      queryParameters: { received: 12, retained: 3, discarded: 9, malformed: false },
+      eventDataDiscarded: true,
+      utm: { source: "instagram", medium: "paid_social", content: "story_v1" },
+    });
+    expect(event?.anonymous_id).toMatch(/^vercel-device-[a-f0-9]{32}$/u);
+    expect(event?.path).toBe("/[redacted]");
+    expect(new URL(event?.referrer ?? "https://invalid.local")).toMatchObject({ search: "", pathname: "/[redacted]" });
+    expect(Object.fromEntries(new URL(event?.url ?? "https://invalid.local").searchParams.entries())).toEqual({
+      utm_source: "instagram",
+      utm_medium: "paid_social",
+      utm_content: "story_v1",
+    });
+    expect(event?.properties).not.toHaveProperty("eventData");
+    expect(event?.properties.vercel).not.toHaveProperty("query_params");
+    expect(event?.properties).toMatchObject({
+      attribution: { utm: { source: "instagram", medium: "paid_social", content: "story_v1" } },
+      vercel: {
+        client_name: "[redacted]",
+        query_parameters: { received: 12, retained: 3, discarded: 9, malformed: false },
+        event_data_discarded: true,
+      },
+    });
+  });
+
+  it("removes IPv6 hosts and IPv4-with-port literals from every persisted surface", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    const ipLiterals = ["2001:db8::1", "2001:db8::2", "203.0.113.7", "203.0.113.8"];
+    const rawBody = JSON.stringify({
+      ...JSON.parse(RAW_BODY),
+      origin: "https://[2001:db8::1]:8443/security",
+      referrer: "https://[2001:db8::2]:9443/source",
+      vercelUrl: "https://203.0.113.7:443/deployment",
+      queryParams: "utm_source=203.0.113.8%3A443&utm_medium=paid_social",
+    });
+
+    const response = await postDrain(source.id, signature(rawBody), rawBody);
+
+    expect(response.status).toBe(200);
+    const store = getDemoStore();
+    const raw = store.rawIngestions.find((item) => item.source_id === source.id);
+    const event = (await listWebEvents(100)).find((item) => item.source_id === source.id);
+    const change = store.platformChangeEvents.find((item) => item.source_id === source.id);
+    const persisted = JSON.stringify({ raw: raw?.payload, event, change: change?.payload });
+    for (const ipLiteral of ipLiterals) expect(persisted).not.toContain(ipLiteral);
+    expect(event?.referrer).toBeNull();
+    expect(event?.properties).toMatchObject({
+      attribution: { utm: { medium: "paid_social" } },
+      vercel: { vercel_url: null, query_parameters: { received: 2, retained: 1, discarded: 1 } },
+    });
+    expect(new URL(event?.url ?? "https://invalid.local").hostname).toBe("moonarqstudio.com");
+  });
+
+  it("rejects overly deep, key-heavy, and oversized embedded payloads before persistence", async () => {
+    const source = await createDrainSource("healthy");
+    await saveCredential(source.id, "drain_signature_secret", SIGNATURE_SECRET);
+    const store = getDemoStore();
+    const before = {
+      rawIngestions: store.rawIngestions.length,
+      syncRuns: store.syncRuns.length,
+      webEvents: store.webEvents.length,
+    };
+    const deeplyNestedBody = JSON.stringify({
+      ...JSON.parse(RAW_BODY),
+      diagnostic: { one: { two: { three: { four: { five: { six: { seven: true } } } } } } },
+    });
+    const keyHeavyBody = JSON.stringify({
+      ...JSON.parse(RAW_BODY),
+      queryParams: new URLSearchParams(
+        Array.from({ length: 33 }, (_, index) => [`diagnostic_${index}`, String(index)]),
+      ).toString(),
+    });
+    const embeddedOversizeBody = JSON.stringify({
+      ...JSON.parse(RAW_BODY),
+      eventData: "x".repeat(16 * 1024 + 1),
+    });
+
+    const responses = await Promise.all([
+      postDrain(source.id, signature(deeplyNestedBody), deeplyNestedBody),
+      postDrain(source.id, signature(keyHeavyBody), keyHeavyBody),
+      postDrain(source.id, signature(embeddedOversizeBody), embeddedOversizeBody),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([413, 413, 413]);
+    expect({
+      rawIngestions: store.rawIngestions.length,
+      syncRuns: store.syncRuns.length,
+      webEvents: store.webEvents.length,
+    }).toEqual(before);
   });
 
   it("rejects oversized raw bodies before creating a sync run", async () => {
