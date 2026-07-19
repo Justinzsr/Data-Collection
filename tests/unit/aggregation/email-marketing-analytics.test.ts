@@ -19,9 +19,12 @@ function signup(id: string, patch: Partial<EmailMarketingRecord> = {}): EmailMar
   return {
     id,
     email: `${id}@example.com`,
+    email_normalized: `${id}@example.com`,
     source: "website_popup",
     discount_code: null,
     consent_email_marketing: false,
+    page_url: null,
+    referrer: null,
     utm_source: null,
     utm_medium: null,
     utm_campaign: null,
@@ -43,15 +46,40 @@ function sortedIds(rows: EmailMarketingRecord[]) {
 }
 
 describe("email marketing analytics", () => {
-  it("classifies sent, pending, and ineligible promo states with sent taking precedence", () => {
-    const sent = signup("sent", { consent_email_marketing: false, promo_email_sent: true });
+  it("keeps raw sent classification for the table while requiring consent for the eligible pie", () => {
+    const eligibleSent = signup("eligible-sent", { consent_email_marketing: true, promo_email_sent: true });
+    const anomalousSent = signup("anomalous-sent", { consent_email_marketing: false, promo_email_sent: true });
     const pending = signup("pending", { consent_email_marketing: true });
     const ineligible = signup("ineligible");
 
-    expect(classifyPromoStatus(sent)).toBe("sent");
+    expect(classifyPromoStatus(eligibleSent)).toBe("sent");
+    expect(classifyPromoStatus(anomalousSent)).toBe("sent");
     expect(classifyPromoStatus(pending)).toBe("pending");
     expect(classifyPromoStatus(ineligible)).toBe("not_eligible");
-    expect(buildPromoStatusBreakdown([sent, pending, ineligible])).toEqual([
+    expect(buildPromoStatusBreakdown([eligibleSent, anomalousSent, pending, ineligible])).toEqual([
+      { key: "sent", label: "Sent", value: 1 },
+      { key: "pending", label: "Pending", value: 1 },
+    ]);
+  });
+
+  it("uses only consented sent records for send rate and the eligible promo pie", () => {
+    const rows = [
+      signup("eligible-sent", { consent_email_marketing: true, promo_email_sent: true }),
+      signup("pending", { consent_email_marketing: true, promo_email_sent: false }),
+      signup("anomalous-sent", { consent_email_marketing: false, promo_email_sent: true }),
+    ];
+
+    const kpis = calculateEmailMarketingKpis(rows, NOW);
+
+    expect(kpis).toMatchObject({
+      totalSignups: 3,
+      consentedSignups: 2,
+      promoEmailsSent: 2,
+      pendingPromoEmails: 1,
+      promoEmailSendRate: 50,
+    });
+    expect(kpis.promoEmailSendRate).toBeLessThanOrEqual(100);
+    expect(buildPromoStatusBreakdown(rows)).toEqual([
       { key: "sent", label: "Sent", value: 1 },
       { key: "pending", label: "Pending", value: 1 },
     ]);
@@ -93,10 +121,10 @@ describe("email marketing analytics", () => {
     });
   });
 
-  it("returns a zero send rate when there are no consented signups", () => {
-    expect(calculateEmailMarketingKpis([signup("not-consented")], NOW)).toMatchObject({
+  it("returns a zero send rate when there are no consented signups, even if a raw sent flag exists", () => {
+    expect(calculateEmailMarketingKpis([signup("not-consented", { promo_email_sent: true })], NOW)).toMatchObject({
       consentedSignups: 0,
-      promoEmailsSent: 0,
+      promoEmailsSent: 1,
       pendingPromoEmails: 0,
       promoEmailSendRate: 0,
     });
@@ -227,7 +255,7 @@ describe("email marketing analytics", () => {
     ]);
   });
 
-  it("removes normalized email and page-level fields from presentation records while preserving optional UTMs", () => {
+  it("preserves the complete 16-field email signup contract in snapshot records", () => {
     const row: EmailSignup = {
       ...signup("converted", { utm_source: null, utm_medium: null, utm_campaign: null }),
       email_normalized: "converted@example.com",
@@ -235,13 +263,26 @@ describe("email marketing analytics", () => {
       referrer: "https://www.google.com/",
     };
 
-    expect(toEmailMarketingRecord(row)).toEqual(signup("converted", {
-      utm_source: null,
-      utm_medium: null,
-      utm_campaign: null,
-    }));
-    expect(toEmailMarketingRecord(row)).not.toHaveProperty("email_normalized");
-    expect(toEmailMarketingRecord(row)).not.toHaveProperty("page_url");
-    expect(toEmailMarketingRecord(row)).not.toHaveProperty("referrer");
+    const record = toEmailMarketingRecord(row);
+
+    expect(record).toEqual(row);
+    expect(Object.keys(record).sort()).toEqual([
+      "consent_email_marketing",
+      "created_at",
+      "discount_code",
+      "email",
+      "email_normalized",
+      "id",
+      "page_url",
+      "promo_email_sent",
+      "referrer",
+      "shopify_customer_id",
+      "source",
+      "updated_at",
+      "utm_campaign",
+      "utm_medium",
+      "utm_source",
+      "zapier_sent_at",
+    ]);
   });
 });

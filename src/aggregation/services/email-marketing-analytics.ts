@@ -1,7 +1,7 @@
 import type { EmailSignup } from "@/collection/connectors/supabase/email-signups-adapter";
 import { addDaysToDateKey, dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
 
-export type EmailMarketingRecord = Omit<EmailSignup, "email_normalized" | "page_url" | "referrer">;
+export type EmailMarketingRecord = EmailSignup;
 
 export type EmailMarketingKpis = {
   totalSignups: number;
@@ -65,6 +65,14 @@ export function classifyPromoStatus(row: EmailMarketingRecord): PromoStatus {
   return "not_eligible";
 }
 
+function isEligiblePromoEmailSent(row: EmailMarketingRecord) {
+  return row.consent_email_marketing && row.promo_email_sent;
+}
+
+function isPendingPromoEmail(row: EmailMarketingRecord) {
+  return row.consent_email_marketing && !row.promo_email_sent;
+}
+
 export function calculateEmailMarketingKpis(
   rows: EmailMarketingRecord[],
   now: Date = new Date(),
@@ -76,13 +84,14 @@ export function calculateEmailMarketingKpis(
   };
   const consentedSignups = rows.filter((row) => row.consent_email_marketing).length;
   const promoEmailsSent = rows.filter((row) => row.promo_email_sent).length;
+  const eligiblePromoEmailsSent = rows.filter(isEligiblePromoEmailSent).length;
 
   return {
     totalSignups: rows.length,
     consentedSignups,
     promoEmailsSent,
-    pendingPromoEmails: rows.filter((row) => classifyPromoStatus(row) === "pending").length,
-    promoEmailSendRate: consentedSignups === 0 ? 0 : (promoEmailsSent / consentedSignups) * 100,
+    pendingPromoEmails: rows.filter(isPendingPromoEmail).length,
+    promoEmailSendRate: consentedSignups === 0 ? 0 : (eligiblePromoEmailsSent / consentedSignups) * 100,
     shopifyLinkedCustomers: rows.filter((row) => Boolean(row.shopify_customer_id)).length,
     signupsLast24Hours: rows.filter((row) => within(row.created_at, 24 * 60 * 60 * 1_000)).length,
     signupsLast7Days: rows.filter((row) => within(row.created_at, 7 * 24 * 60 * 60 * 1_000)).length,
@@ -116,8 +125,8 @@ export function buildDailyEmailSignupSeries(
 
 export function buildPromoStatusBreakdown(rows: EmailMarketingRecord[]) {
   return [
-    { key: "sent" as const, label: "Sent", value: rows.filter((row) => classifyPromoStatus(row) === "sent").length },
-    { key: "pending" as const, label: "Pending", value: rows.filter((row) => classifyPromoStatus(row) === "pending").length },
+    { key: "sent" as const, label: "Sent", value: rows.filter(isEligiblePromoEmailSent).length },
+    { key: "pending" as const, label: "Pending", value: rows.filter(isPendingPromoEmail).length },
   ];
 }
 
@@ -189,9 +198,12 @@ export function toEmailMarketingRecord(row: EmailSignup): EmailMarketingRecord {
   return {
     id: row.id,
     email: row.email,
+    email_normalized: row.email_normalized,
     source: row.source,
     discount_code: row.discount_code,
     consent_email_marketing: row.consent_email_marketing,
+    page_url: row.page_url,
+    referrer: row.referrer,
     utm_source: row.utm_source,
     utm_medium: row.utm_medium,
     utm_campaign: row.utm_campaign,

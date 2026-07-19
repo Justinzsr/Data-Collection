@@ -31,17 +31,55 @@ const DATA_SPACE: DataSpace = {
   updated_at: "2026-07-18T18:00:00.000Z",
 };
 
+const EMAIL_SIGNUP_FIELDS = [
+  "id",
+  "email",
+  "email_normalized",
+  "source",
+  "discount_code",
+  "consent_email_marketing",
+  "page_url",
+  "referrer",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "promo_email_sent",
+  "zapier_sent_at",
+  "shopify_customer_id",
+  "created_at",
+  "updated_at",
+] as const;
+
 const SNAPSHOT: EmailMarketingSnapshot = {
-  rows: [],
+  rows: [
+    {
+      id: "signup-one",
+      email: "person@example.com",
+      email_normalized: "person@example.com",
+      source: "website_popup",
+      discount_code: "WELCOME",
+      consent_email_marketing: true,
+      page_url: "https://www.moonarqstudio.com/newsletter",
+      referrer: "https://www.google.com/",
+      utm_source: "google",
+      utm_medium: "organic",
+      utm_campaign: "newsletter",
+      promo_email_sent: true,
+      zapier_sent_at: "2026-07-18T17:02:00.000Z",
+      shopify_customer_id: "gid://shopify/Customer/101",
+      created_at: "2026-07-18T17:00:00.000Z",
+      updated_at: "2026-07-18T17:02:00.000Z",
+    },
+  ],
   kpis: {
-    totalSignups: 0,
-    consentedSignups: 0,
-    promoEmailsSent: 0,
+    totalSignups: 1,
+    consentedSignups: 1,
+    promoEmailsSent: 1,
     pendingPromoEmails: 0,
-    promoEmailSendRate: 0,
-    shopifyLinkedCustomers: 0,
-    signupsLast24Hours: 0,
-    signupsLast7Days: 0,
+    promoEmailSendRate: 100,
+    shopifyLinkedCustomers: 1,
+    signupsLast24Hours: 1,
+    signupsLast7Days: 1,
   },
   fetchedAt: "2026-07-18T18:00:00.000Z",
   source: {
@@ -120,7 +158,9 @@ describe("email signups authenticated API route", () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ snapshot: SNAPSHOT });
+    const body = (await response.json()) as { snapshot: EmailMarketingSnapshot };
+    expect(body).toEqual({ snapshot: SNAPSHOT });
+    expect(Object.keys(body.snapshot.rows[0]).sort()).toEqual([...EMAIL_SIGNUP_FIELDS].sort());
     expect(loadSnapshot).toHaveBeenCalledOnce();
     expect(loadSnapshot).toHaveBeenCalledWith(DATA_SPACE.id);
     expectNoStore(response);

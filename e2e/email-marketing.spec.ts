@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { EmailMarketingSnapshot } from "@/aggregation/services/email-marketing-service";
 import { loginDashboard } from "./auth";
 
 const EMAIL_SIGNUPS_API = "**/api/metrics/email-signups?**";
@@ -8,9 +9,12 @@ const snapshot = {
     {
       id: "signup-sent",
       email: "sent@example.com",
+      email_normalized: "sent@example.com",
       source: "newsletter-popup",
       discount_code: "WELCOME",
       consent_email_marketing: true,
+      page_url: "https://www.moonarqstudio.com/newsletter",
+      referrer: "https://www.instagram.com/",
       utm_source: "instagram",
       utm_medium: "social",
       utm_campaign: "summer",
@@ -23,9 +27,12 @@ const snapshot = {
     {
       id: "signup-pending",
       email: "pending@example.com",
+      email_normalized: "pending@example.com",
       source: "newsletter-popup",
       discount_code: "WELCOME",
       consent_email_marketing: true,
+      page_url: "https://www.moonarqstudio.com/newsletter",
+      referrer: "https://www.google.com/",
       utm_source: "google",
       utm_medium: "cpc",
       utm_campaign: "brand",
@@ -38,9 +45,12 @@ const snapshot = {
     {
       id: "signup-not-eligible",
       email: "browse@example.com",
+      email_normalized: "browse@example.com",
       source: "footer",
       discount_code: null,
       consent_email_marketing: false,
+      page_url: "https://www.moonarqstudio.com/",
+      referrer: null,
       utm_source: null,
       utm_medium: null,
       utm_campaign: null,
@@ -68,7 +78,7 @@ const snapshot = {
     table: "email_signups",
     connection: "direct_supabase",
   },
-};
+} satisfies EmailMarketingSnapshot;
 
 async function mockEmailSignups(page: Page) {
   let requestCount = 0;

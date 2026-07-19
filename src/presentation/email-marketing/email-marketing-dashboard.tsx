@@ -499,7 +499,7 @@ export function EmailMarketingDashboardView({
             <KpiCard label="Marketing-consented signups" value={snapshot.kpis.consentedSignups} source="consent" />
             <KpiCard label="Promo emails sent" value={snapshot.kpis.promoEmailsSent} source="Supabase" />
             <KpiCard label="Pending promo emails" value={snapshot.kpis.pendingPromoEmails} source="consented + unsent" />
-            <KpiCard label="Promo email send rate" value={formatPercent(snapshot.kpis.promoEmailSendRate)} source="sent / consented" />
+            <KpiCard label="Promo email send rate" value={formatPercent(snapshot.kpis.promoEmailSendRate)} source="eligible sent / consented" />
             <KpiCard label="Shopify-linked customers" value={snapshot.kpis.shopifyLinkedCustomers} source="Shopify ID" />
             <KpiCard label="Signups in last 24 hours" value={snapshot.kpis.signupsLast24Hours} source="created_at" />
             <KpiCard label="Signups in last 7 days" value={snapshot.kpis.signupsLast7Days} source="created_at" />

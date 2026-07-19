@@ -19,6 +19,12 @@ It is a read-only child view of the existing MoonArq Supabase module. The view r
 
 No new environment variables are required when the existing monitored MoonArq Supabase source and encrypted credential are configured. The ambiguous global Supabase variables in `.env.example` are not used for this view.
 
+## Dataset and metric contract
+
+The authenticated API snapshot preserves all 16 source fields: `id`, `email`, `email_normalized`, `source`, `discount_code`, `consent_email_marketing`, `page_url`, `referrer`, `utm_source`, `utm_medium`, `utm_campaign`, `promo_email_sent`, `zapier_sent_at`, `shopify_customer_id`, `created_at`, and `updated_at`. The UI table intentionally displays only its existing subset.
+
+`Promo emails sent` counts every source row whose raw `promo_email_sent` flag is true. `Pending promo emails` counts consented, unsent rows. The send rate and eligible promo-status chart use only consented records: sent means consented and sent, pending means consented and not sent. An anomalous sent flag on a non-consented row remains visible as raw source data but does not enter the eligible rate or pie chart.
+
 ## Refresh behavior
 
 The client fetches immediately, then refreshes every 60 seconds while the view is mounted and the browser tab is visible. Polling pauses while hidden, prevents overlapping requests, and cleans up its interval and active request on unmount. Manual refresh uses the same internal endpoint.
