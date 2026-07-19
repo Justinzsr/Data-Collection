@@ -1,6 +1,7 @@
 import { aggregateMetrics, listMetrics } from "@/storage/repositories/metrics-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { listSyncRuns } from "@/storage/repositories/sync-runs-repository";
+import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import { getDemoNow } from "@/storage/seed/demo-data";
 import { getAppDateRange } from "@/storage/runtime/app-time";
 
@@ -30,13 +31,17 @@ export async function getDashboardSummary(range: DateRangeKey = "30d", options: 
   const activeSources = sources.filter((source) => source.status !== "disabled").length;
   const syncErrors = syncRuns.filter((run) => run.status === "error").length;
   const latestRun = syncRuns[0] ?? null;
+  const websiteSource = resolvePrimaryWebsiteSource(sources);
+  const websiteMetrics = websiteSource
+    ? metrics.filter((metric) => metric.source_id === websiteSource.id)
+    : [];
   return {
     range,
     ...dateRange,
     kpis: [
-      { key: "page_views", label: "Page views", value: aggregateMetrics(metrics, "page_views"), unit: "count", source: "Website", demo: true },
-      { key: "unique_visitors", label: "Unique visitors", value: aggregateMetrics(metrics, "unique_visitors"), unit: "count", source: "Website", demo: true },
-      { key: "custom_events", label: "Custom events", value: aggregateMetrics(metrics, "custom_events"), unit: "count", source: "Website", demo: true },
+      { key: "page_views", label: "Page views", value: aggregateMetrics(websiteMetrics, "page_views"), unit: "count", source: "Website", demo: true },
+      { key: "unique_visitors", label: "Unique visitors", value: aggregateMetrics(websiteMetrics, "unique_visitors"), unit: "count", source: "Website", demo: true },
+      { key: "custom_events", label: "Custom events", value: aggregateMetrics(websiteMetrics, "custom_events"), unit: "count", source: "Website", demo: true },
       { key: "signups", label: "Signups", value: aggregateMetrics(metrics, "signups"), unit: "count", source: "Supabase", demo: true },
       { key: "users_total", label: "Users total", value: latestMetricValue(snapshotMetrics, "users_total"), unit: "count", source: "Supabase", demo: true },
       { key: "active_sources", label: "Active sources", value: activeSources, unit: "count", source: "System", demo: true },

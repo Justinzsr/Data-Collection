@@ -25,12 +25,12 @@ function metric(
 }
 
 export const metricDefinitions: MetricDefinition[] = [
-  metric("page_views", "Page views", "Tracked website page view events.", "website", "Website"),
-  metric("unique_visitors", "Unique visitors", "Distinct anonymous visitors observed by first-party tracking.", "website", "Website"),
-  metric("sessions", "Sessions", "Distinct visitor sessions observed by first-party tracking.", "website", "Website"),
-  metric("custom_events", "Custom events", "Named product or marketing events sent to /api/track.", "website", "Website"),
-  metric("events_by_path", "Events by path", "Website events grouped by path.", "website", "Website"),
-  metric("events_by_referrer", "Events by referrer", "Website events grouped by referrer.", "website", "Website"),
+  metric("page_views", "Page views", "Authoritative first-party page_view events, grouped by occurred_at reporting day.", "website", "Website"),
+  metric("unique_visitors", "Unique visitors", "Distinct first-party anonymous_id values per occurred_at reporting day.", "website", "Website"),
+  metric("sessions", "Sessions", "Distinct first-party session_id values per occurred_at reporting day.", "website", "Website"),
+  metric("custom_events", "Custom events", "Authoritative non-page_view events sent to /api/track, deduplicated by source and event ID.", "website", "Website"),
+  metric("events_by_path", "Events by path", "Authoritative first-party events grouped by path and occurred_at reporting day.", "website", "Website"),
+  metric("events_by_referrer", "Events by referrer", "Authoritative first-party events grouped by referrer and occurred_at reporting day.", "website", "Website"),
   metric("signups", "Signups", "New user signups from public profiles or Supabase Auth admin mode.", "supabase", "Users"),
   metric("users_total", "Total users", "Total known users from public profiles or server-side admin fallback.", "supabase", "Users"),
   metric("confirmed_users", "Confirmed users", "Users with confirmed email or equivalent profile state when available.", "supabase", "Users"),

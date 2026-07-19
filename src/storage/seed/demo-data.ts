@@ -254,8 +254,12 @@ function makeEvents(): WebEvent[] {
   const referrers = [null, "https://google.com", "https://x.com", "https://linkedin.com", "direct"];
   return Array.from({ length: 90 }, (_, index) => {
     const occurred = new Date(getDemoNow().getTime() - index * 41 * 60_000);
+    const id = randomUUID();
     return {
-      id: randomUUID(),
+      id,
+      event_id: id,
+      schema_version: "legacy",
+      event_source: "first_party_tracker",
       source_id: DEMO_SOURCE_IDS.website,
       public_tracking_key: "mq_demo_public_website",
       anonymous_id: `anon_${index % 34}`,
@@ -270,7 +274,11 @@ function makeEvents(): WebEvent[] {
       country: index % 4 === 0 ? "US" : null,
       device_type: index % 3 === 0 ? "mobile" : "desktop",
       properties: { demo: true, campaign: index % 6 === 0 ? "launch" : "organic" },
+      attribution_context: {},
+      consent_status: { analytics: "unknown", marketing: "unknown" },
+      client_context: { device_category: index % 3 === 0 ? "mobile" : "desktop" },
       occurred_at: iso(occurred),
+      received_at: iso(occurred),
       created_at: iso(occurred),
     };
   });

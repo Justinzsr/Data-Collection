@@ -28,6 +28,8 @@ export type SyncMode = "webhook" | "hourly" | "manual" | "hybrid";
 export type SyncTrigger = "webhook" | "cron" | "manual" | "initial" | "retry";
 export type SyncRunStatus = "queued" | "running" | "success" | "error" | "skipped";
 export type ConnectorEventSeverity = "info" | "warning" | "error";
+export type WebEventSchemaVersion = "legacy" | "1.0" | "vercel.analytics.v2";
+export type WebEventSource = "first_party_tracker" | "vercel_drain";
 
 export interface DataSpace {
   id: string;
@@ -202,6 +204,9 @@ export interface ContentMetric {
 
 export interface WebEvent {
   id: string;
+  event_id: string;
+  schema_version: WebEventSchemaVersion;
+  event_source: WebEventSource;
   source_id: string | null;
   public_tracking_key: string | null;
   anonymous_id: string;
@@ -216,7 +221,11 @@ export interface WebEvent {
   country: string | null;
   device_type: string | null;
   properties: JsonRecord;
+  attribution_context: JsonRecord;
+  consent_status: JsonRecord;
+  client_context: JsonRecord;
   occurred_at: string;
+  received_at: string;
   created_at: string;
 }
 

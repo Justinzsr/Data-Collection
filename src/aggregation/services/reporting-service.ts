@@ -1,9 +1,11 @@
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
-import type { MetricDaily, Source, SourceTypeKey, WebEvent } from "@/storage/db/schema";
+import type { MetricDaily, Source, WebEvent } from "@/storage/db/schema";
 import { findWebEvents } from "@/storage/repositories/events-repository";
 import { listMetrics } from "@/storage/repositories/metrics-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { endOfAppDateUtc, formatAppDateTime, startOfAppDateUtc } from "@/storage/runtime/app-time";
+import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
+import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 
 export type WebsiteDailyReportRow = {
   data_space_id?: string;
@@ -49,10 +51,6 @@ function normalizeDate(value: unknown) {
 
 function isMissingReportingViewError(error: unknown) {
   return Boolean(error && typeof error === "object" && "code" in error && (error.code === "42P01" || error.code === "3F000"));
-}
-
-function websiteSourceType(source: Source | null): SourceTypeKey {
-  return source?.source_type_key === "vercel_web_analytics_drain" ? "vercel_web_analytics_drain" : "website";
 }
 
 function sumMetric(rows: MetricDaily[], metricKey: string, source?: Source | null) {
@@ -127,8 +125,13 @@ function normalizeSupabase(row: SupabaseDailyReportRow): SupabaseDailyReportRow 
 }
 
 export async function listWebsiteDailyReportingRows(options: { startDate?: string; endDate?: string; limit?: number; dataSpaceId?: string; dataSpaceSlug?: string } = {}) {
-  const dataSpaceId = options.dataSpaceId;
+  const resolvedDataSpace = options.dataSpaceId
+    ? null
+    : await getDataSpaceBySlug(options.dataSpaceSlug ?? "moonarq");
+  const dataSpaceId = options.dataSpaceId ?? resolvedDataSpace?.id;
   const dataSpaceSlug = options.dataSpaceSlug;
+  const source = resolvePrimaryWebsiteSource(await listSources({ dataSpaceId }));
+  if (!source) return [];
   if (isRuntimeDatabaseConfigured()) {
     const values: unknown[] = [];
     const where: string[] = [];
@@ -147,6 +150,8 @@ export async function listWebsiteDailyReportingRows(options: { startDate?: strin
       values.push(dataSpaceSlug);
       where.push(`data_space_slug = $${values.length}`);
     }
+    values.push(source.id);
+    where.push(`source_id = $${values.length}`);
     values.push(options.limit ?? 90);
     try {
       const viewName = dataSpaceId || dataSpaceSlug ? "reporting.platform_website_daily" : "reporting.moonarq_website_daily";
@@ -161,17 +166,16 @@ export async function listWebsiteDailyReportingRows(options: { startDate?: strin
     }
   }
 
-  const source = (await listSources({ dataSpaceId })).find((item) => item.source_type_key === "website" || item.source_type_key === "vercel_web_analytics_drain") ?? null;
-  const metrics = await listMetrics({ sourceId: source?.id, sourceTypeKey: websiteSourceType(source), startDate: options.startDate, endDate: options.endDate, dataSpaceId });
+  const metrics = await listMetrics({ sourceId: source.id, sourceTypeKey: "website", startDate: options.startDate, endDate: options.endDate, dataSpaceId });
   const dates = [...new Set(metrics.map((metric) => metric.date))].sort().reverse().slice(0, options.limit ?? 90);
   return Promise.all(dates.map(async (date) => {
     const dayMetrics = metrics.filter((metric) => metric.date === date);
-    const events = source ? await findWebEvents({ sourceId: source.id, startOccurredAt: startOfAppDateUtc(date), endOccurredAt: endOfAppDateUtc(date), limit: 2000, dataSpaceId }) : [];
+    const events = await findWebEvents({ sourceId: source.id, startOccurredAt: startOfAppDateUtc(date), endOccurredAt: endOfAppDateUtc(date), limit: 2000, dataSpaceId });
     return normalizeWebsite({
       date_pt: date,
-      source_id: source?.id ?? null,
-      source_name: source?.display_name ?? "MoonArq Website / Vercel",
-      source_mode: source?.source_type_key === "vercel_web_analytics_drain" ? "Vercel Drain" : "Website Tracker",
+      source_id: source.id,
+      source_name: source.display_name,
+      source_mode: "Website Tracker",
       unique_visitors: sumMetric(dayMetrics, "unique_visitors", source),
       page_views: sumMetric(dayMetrics, "page_views", source),
       sessions: sumMetric(dayMetrics, "sessions", source),
@@ -181,7 +185,7 @@ export async function listWebsiteDailyReportingRows(options: { startDate?: strin
       top_country: topEvent(events, (event) => event.country, "Unknown"),
       top_device: topEvent(events, (event) => event.device_type, "Unknown"),
       last_event_at_pt: events[0]?.occurred_at ? formatAppDateTime(events[0].occurred_at) : null,
-      last_sync_at_pt: source?.last_success_at ? formatAppDateTime(source.last_success_at) : null,
+      last_sync_at_pt: source.last_success_at ? formatAppDateTime(source.last_success_at) : null,
     });
   }));
 }

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
 import { getWebsiteModeLabel, resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import { getMetricTimeseries } from "@/aggregation/services/timeseries-service";
-import { listWebEvents } from "@/storage/repositories/events-repository";
+import { findWebEvents } from "@/storage/repositories/events-repository";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { getPublicAppUrl, getPublicAppUrlWarning } from "@/storage/runtime/app-config";
@@ -22,21 +22,27 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
   const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
   if (!dataSpace) notFound();
 
-  const [sources, events, trend] = await Promise.all([
+  const [sources, trend] = await Promise.all([
     listSources({ dataSpaceId: dataSpace.id }),
-    listWebEvents(30, { dataSpaceId: dataSpace.id }),
     getMetricTimeseries({ metricKey: "page_views", dataSpaceId: dataSpace.id }),
   ]);
   const basePath = dashboardPath(dataSpace.slug);
   const website = resolvePrimaryWebsiteSource(sources);
+  const events = website
+    ? await findWebEvents({ sourceId: website.id, dataSpaceId: dataSpace.id, limit: 30 })
+    : [];
   const drainSource = sources.find((source) => source.source_type_key === "vercel_web_analytics_drain");
   const trackerSource = sources.find((source) => source.source_type_key === "website" && typeof source.metadata.public_tracking_key === "string" && source.status !== "disabled");
   const trackingKey = typeof trackerSource?.metadata.public_tracking_key === "string" ? trackerSource.metadata.public_tracking_key : null;
   const publicAppUrl = getPublicAppUrl();
   const publicAppUrlWarning = getPublicAppUrlWarning();
   const endpoint = `${publicAppUrl ?? "http://localhost:4000"}/api/track`;
-  const snippet = trackingKey ? generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey }) : null;
-  const helper = trackingKey ? generateReactHelper({ endpoint, publicTrackingKey: trackingKey }) : null;
+  const snippet = trackingKey && trackerSource
+    ? generateTrackingSnippet({ endpoint, publicTrackingKey: trackingKey, sourceId: trackerSource.id })
+    : null;
+  const helper = trackingKey && trackerSource
+    ? generateReactHelper({ endpoint, publicTrackingKey: trackingKey, sourceId: trackerSource.id })
+    : null;
   const byPath = events.reduce<Record<string, number>>((acc, event) => {
     acc[event.path] = (acc[event.path] ?? 0) + 1;
     return acc;
@@ -47,7 +53,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
       <SectionHeader
         eyebrow="Website connector"
         title={`${dataSpace.display_name} Event dashboard`}
-        description="Website event reads are scoped to the current data space. Vercel Drain remains source-id driven, while tracker snippets only appear for sources in this space."
+        description="Authoritative first-party event reads are scoped to this data space. Vercel Drain remains retained as auxiliary request evidence."
       />
       {publicAppUrlWarning ? (
         <GlassPanel className="p-4 sm:p-5">
@@ -61,7 +67,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
       <MetricTrendChart
         data={trend}
         title="Website page views"
-        description={website?.source_type_key === "vercel_web_analytics_drain" ? "Live Vercel Drain metrics" : `${dataSpace.display_name} website metrics`}
+        description={website ? `${dataSpace.display_name} first-party tracker metrics` : "First-party tracker setup required; Drain remains auxiliary"}
       />
       <details className="group glass min-w-0 overflow-hidden rounded-2xl">
         <summary className="flex cursor-pointer items-center justify-between gap-4 p-4 transition hover:bg-white/[0.025] sm:p-5">
@@ -79,7 +85,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
           {sources.length ? (
             <ol className="grid gap-2 text-sm leading-6 text-slate-300">
               <li>1. Save a website source in this data space.</li>
-              <li>2. Configure a drain, webhook, tracker, or manual sync path for that source only.</li>
+              <li>2. Install the Website Tracker for authoritative funnel events; keep Drain optional and auxiliary.</li>
               <li>3. Keep source credentials isolated by source and server-side.</li>
             </ol>
           ) : (
@@ -111,7 +117,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Webhook className="h-4 w-4 text-cyan-200" />
           <h2 className="text-base font-semibold text-white">Current {dataSpace.display_name} website mode</h2>
-          <Badge tone="cyan">{getWebsiteModeLabel(website)}</Badge>
+          <Badge tone="cyan">{website ? getWebsiteModeLabel(website) : "Needs tracker"}</Badge>
         </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
@@ -127,12 +133,12 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
       </GlassPanel>
       {snippet && helper ? (
         <div className="grid gap-5 xl:grid-cols-2">
-          <SnippetCard title="Lightweight JavaScript snippet" description="Fallback/helper: auto page_view plus window.moonarqTrack(eventName, properties)." code={snippet} />
-          <SnippetCard title="React / Next.js helper" description="Fallback/helper: usePageViewTracking() and trackEvent(name, properties)." code={helper} />
+          <SnippetCard title="Lightweight JavaScript snippet" description="Authoritative v1 page_view tracking plus window.moonarqTrack(eventName, properties)." code={snippet} />
+          <SnippetCard title="React / Next.js helper" description="Authoritative v1 usePageViewTracking() and trackEvent(name, properties)." code={helper} />
         </div>
       ) : (
         <GlassPanel className="p-4 sm:p-5">
-          <h2 className="mb-2 text-base font-semibold text-white">Website Tracker fallback is not installed</h2>
+          <h2 className="mb-2 text-base font-semibold text-white">Website Tracker is not installed</h2>
           <p className="text-sm leading-6 text-slate-300">
             Create or enable a Website Tracker source inside {dataSpace.display_name} before installing a snippet. No tracking key from another data space is shown here.
           </p>
@@ -142,7 +148,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
       </details>
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
         <GlassPanel className="p-4 sm:p-5">
-          <h2 className="mb-4 text-base font-semibold text-white">Events by path</h2>
+          <h2 className="mb-4 text-base font-semibold text-white">First-party events by path</h2>
           {Object.entries(byPath).length ? (
             <div className="grid gap-2">
               {Object.entries(byPath).map(([path, count]) => (
@@ -157,7 +163,7 @@ export default async function EventsPage({ params }: { params: Promise<{ dataSpa
           )}
         </GlassPanel>
         <GlassPanel className="p-4 sm:p-5">
-          <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-white"><Activity className="h-4 w-4 text-cyan-200" />Event stream</h2>
+          <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-white"><Activity className="h-4 w-4 text-cyan-200" />First-party event stream</h2>
           {events.length ? (
             <div className="grid max-h-[30rem] gap-2 overflow-auto pr-1">
               {events.map((event) => (

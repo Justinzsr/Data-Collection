@@ -437,7 +437,7 @@ function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsit
       return {
         label: "Needs setup",
         severity: "warning",
-        message: `Add a ${dataSpaceName} website source and choose either Vercel Drain or Website Tracker as the primary ingestion mode.`,
+        message: `Add a ${dataSpaceName} Website Tracker for authoritative funnel and attribution events. Vercel Drain can remain auxiliary.`,
       };
     }
     if (moduleKey === "supabase") {
@@ -463,9 +463,9 @@ function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsit
   if (source.status === "healthy") {
     if (moduleKey === "website" && secondaryWebsiteSources.length > 0) {
       return {
-        label: "Primary mode active",
+        label: "Source roles active",
         severity: "ok",
-        message: `${getWebsiteModeLabel(source)} is the active website ingestion mode. Keep the secondary website source idle to avoid double counting.`,
+        message: `${getWebsiteModeLabel(source)} is authoritative. Auxiliary website sources remain stored separately and are excluded from authoritative rollups.`,
       };
     }
     return { label: "Connected", severity: "ok", message: `This monitored ${dataSpaceName} source is live and syncing through the shared engine.` };
@@ -478,7 +478,7 @@ function setupState(source: Source | null, moduleKey: ModuleKey, secondaryWebsit
         moduleKey === "supabase"
           ? "Save the MoonArq Supabase service role key server-side, or finish the public.profiles webhook setup."
           : moduleKey === "website"
-            ? "Choose Vercel Drain or Website Tracker and finish that setup path so private website metrics can land."
+            ? "Finish the first-party Website Tracker setup so authoritative website metrics can land."
             : "Finish the connector setup before expecting private metrics.",
     };
   }
@@ -659,9 +659,9 @@ export async function getPlatformModules(
     moduleKey: "website",
     source: websiteSource,
     metricSourceTypeKey: websiteSource?.source_type_key ?? "website",
-    currentRows,
-    previousRows,
-    latestRows,
+    currentRows: websiteSource ? currentRows : [],
+    previousRows: websiteSource ? previousRows : [],
+    latestRows: websiteSource ? latestRows : [],
     range,
     secondaryWebsiteSources,
     sourceModeLabel: getWebsiteModeLabel(websiteSource),
@@ -734,12 +734,16 @@ export async function getGlobalPlatformHealth(rangeKey: DateRangeKey = "30d", op
     .sort()
     .at(-1) ?? null;
   const sourceTotals = await listMetrics({ startDate: getDateRange(rangeKey).startDate, endDate: getDateRange(rangeKey).endDate, dataSpaceId: options.dataSpaceId });
+  const authoritativeWebsiteSourceId = modules.find((item) => item.sourceTypeKey === "website")?.sourceId;
+  const authoritativeWebsiteTotals = authoritativeWebsiteSourceId
+    ? sourceTotals.filter((row) => row.source_id === authoritativeWebsiteSourceId)
+    : [];
   return {
     activeSources: connected.length,
     syncErrors: errors,
     lastSuccessfulSync,
     dataFreshness: lastSuccessfulSync ? "Fresh" : "No sync yet",
     modeLabel: modules.some((item) => item.status === "demo" || item.status === "needs_credentials") ? "Setup + live monitoring" : "Live monitoring",
-    trackedEvents: aggregateMetrics(sourceTotals, "page_views") + aggregateMetrics(sourceTotals, "custom_events"),
+    trackedEvents: aggregateMetrics(authoritativeWebsiteTotals, "page_views") + aggregateMetrics(authoritativeWebsiteTotals, "custom_events"),
   };
 }

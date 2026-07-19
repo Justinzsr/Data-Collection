@@ -14,7 +14,7 @@ function websiteMetricDefinitions(): MetricDefinition[] {
 export const vercelWebAnalyticsDrainConnector: ConnectorDefinition = {
   key: "vercel_web_analytics_drain",
   displayName: "Vercel Web Analytics Drain",
-  description: "Official Vercel Web Analytics Drain endpoint for MoonArq's existing Vercel-hosted website analytics.",
+  description: "Auxiliary Vercel request and infrastructure analytics source; not the authority for MoonArq funnels, sessions, identity, or attribution.",
   category: "Website",
   icon: "Orbit",
   availability: "live",
@@ -144,7 +144,7 @@ export const vercelWebAnalyticsDrainConnector: ConnectorDefinition = {
       `Drain endpoint: ${source?.webhook_url ?? "/api/webhooks/vercel/analytics-drain/{sourceId}"}`,
       "In Vercel, add a Web Analytics Drain with JSON or NDJSON delivery and point it at the endpoint above.",
       "Set a Signature Verification Secret in Vercel and save the same secret here as a required encrypted per-source credential. Unsigned requests are rejected.",
-      "If Vercel Drain mode is active, keep the Website Tracker fallback disabled for this monitored source to avoid double counting.",
+      "Keep the first-party Website Tracker enabled as the authoritative funnel and attribution source. Aggregation keeps Drain metrics auxiliary to avoid double counting.",
     ];
   },
 };
