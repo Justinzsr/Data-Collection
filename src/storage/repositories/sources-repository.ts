@@ -147,12 +147,12 @@ export async function getSource(sourceId: string, scope: SourceScope = {}, execu
 
 export async function createSource(input: CreateSourceInput, executor?: DatabaseExecutor): Promise<Source> {
   const now = new Date().toISOString();
+  const databaseConfigured = isRuntimeDatabaseConfigured();
   const sourceType = listSourceTypes().find((item) => item.key === input.source_type_key);
   if (!sourceType) throw new Error(`Unknown source type: ${input.source_type_key}`);
-  const metadata: JsonRecord = {
-    demo: !isRuntimeDatabaseConfigured(),
-    ...input.metadata,
-  };
+  const metadata: JsonRecord = input.source_type_key === "website"
+    ? { ...input.metadata, demo: !databaseConfigured }
+    : { demo: !databaseConfigured, ...input.metadata };
   const supportsWebhook = input.supports_webhook ?? sourceType.capabilities.supportsWebhook;
   const syncFrequencyMinutes = input.sync_frequency_minutes ?? sourceType.capabilities.recommendedSyncFrequencyMinutes;
   const source: Source = {
@@ -198,7 +198,7 @@ export async function createSource(input: CreateSourceInput, executor?: Database
     }/${source.id}`;
   }
 
-  if (!isRuntimeDatabaseConfigured()) {
+  if (!databaseConfigured) {
     getDemoStore().sources.unshift(source);
     return source;
   }

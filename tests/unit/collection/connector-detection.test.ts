@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { detectSource, getConnector, listSourceTypes } from "@/collection/connectors/registry";
+import {
+  connectorRegistry,
+  detectSource,
+  getConnector,
+  getInitialSourceStatus,
+  listSourceTypes,
+} from "@/collection/connectors/registry";
 
 describe("connector detection", () => {
   it("detects Supabase URLs", () => {
@@ -99,5 +105,20 @@ describe("connector detection", () => {
       "shopify_client_id",
       "shopify_client_secret",
     ]);
+  });
+
+  it("derives the initial lifecycle without changing non-Website connector behavior", () => {
+    const website = getConnector("website");
+    expect(getInitialSourceStatus(website, true)).toBe("healthy");
+    expect(getInitialSourceStatus(website, false)).toBe("demo");
+
+    for (const connector of connectorRegistry.filter((item) => item.key !== "website")) {
+      const expected =
+        connector.requiredFields.some((field) => field.required) || connector.key === "supabase"
+          ? "needs_credentials"
+          : "demo";
+      expect(getInitialSourceStatus(connector, true), connector.key).toBe(expected);
+      expect(getInitialSourceStatus(connector, false), connector.key).toBe(expected);
+    }
   });
 });
