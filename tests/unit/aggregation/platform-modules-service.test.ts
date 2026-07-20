@@ -100,6 +100,24 @@ describe("platform modules service", () => {
     expect(modules.find((module) => module.sourceTypeKey === "website")?.rangeLabel).toBe("Last 30 days");
   });
 
+  it("labels a healthy first-party source as the authoritative Website Tracker", async () => {
+    const source = getDemoStore().sources.find((item) => item.id === DEMO_SOURCE_IDS.website);
+    if (!source) throw new Error("Website fixture is missing.");
+    source.status = "healthy";
+    source.metadata = { ...source.metadata, demo: false };
+
+    const website = (await getPlatformModules("30d")).find((module) => module.sourceTypeKey === "website");
+    expect(website).toMatchObject({
+      sourceId: source.id,
+      status: "healthy",
+      sourceModeLabel: "Website Tracker",
+      setupState: {
+        label: "Connected",
+        severity: "ok",
+      },
+    });
+  });
+
   it("computes delta vs previous period", () => {
     expect(calculateDelta(150, 100)).toBe(50);
     expect(calculateDelta(0, 0)).toBe(0);

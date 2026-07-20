@@ -78,6 +78,22 @@ describe("source update safety", () => {
     });
   });
 
+  it("does not let PATCH promote a source to a server-owned lifecycle status", async () => {
+    const before = await getSource(DEMO_SOURCE_IDS.website, { dataSpaceId: DATA_SPACE_IDS.moonarq });
+
+    for (const status of ["healthy", "demo"]) {
+      const response = await patchSourceRoute(
+        patchRequest({ status }),
+        { params: Promise.resolve({ id: DEMO_SOURCE_IDS.website }) },
+      );
+      expect(response.status, status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "Invalid source update." });
+    }
+
+    const after = await getSource(DEMO_SOURCE_IDS.website, { dataSpaceId: DATA_SPACE_IDS.moonarq });
+    expect(after).toEqual(before);
+  });
+
   it("enforces the data-space scope and repository immutable-field guard", async () => {
     await expect(
       updateSource(

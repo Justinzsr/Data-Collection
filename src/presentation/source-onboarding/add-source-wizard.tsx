@@ -152,6 +152,7 @@ function setupKindLabel(kind: SetupKind) {
 }
 
 function syncModesFor(sourceType: SourceTypeDefinition): SyncMode[] {
+  if (sourceType.key === "website") return ["webhook"];
   const modes: SyncMode[] = [];
   if (sourceType.capabilities.supportsWebhook && sourceType.capabilities.supportsPolling) modes.push("hybrid");
   if (sourceType.capabilities.supportsPolling) modes.push("hourly");

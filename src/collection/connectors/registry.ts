@@ -3,7 +3,7 @@ import type {
   ConnectorSourceTypeDefinition,
   DetectionResult,
 } from "@/collection/connectors/types";
-import type { Source, SourceTypeKey } from "@/storage/db/schema";
+import type { Source, SourceStatus, SourceTypeKey } from "@/storage/db/schema";
 import { supabaseConnector } from "@/collection/connectors/supabase/connector";
 import { websiteConnector } from "@/collection/connectors/website/connector";
 import { vercelWebAnalyticsDrainConnector } from "@/collection/connectors/vercel-web-analytics-drain/connector";
@@ -43,6 +43,18 @@ export function getConnectorUnavailableReason(connector: ConnectorDefinition): s
     return `${connector.displayName} is planned and does not support live connections, connection tests, or sync yet.`;
   }
   return null;
+}
+
+export function getInitialSourceStatus(
+  connector: ConnectorDefinition,
+  databaseConfigured: boolean,
+): SourceStatus {
+  const needsCredentials =
+    connector.requiredFields.some((field) => field.required) || connector.key === "supabase";
+
+  if (needsCredentials) return "needs_credentials";
+  if (connector.key === "website" && databaseConfigured) return "healthy";
+  return "demo";
 }
 
 export function getSourceOperationBlockReason(

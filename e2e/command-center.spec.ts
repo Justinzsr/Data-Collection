@@ -139,6 +139,9 @@ test("add source wizard detects Supabase and Website and shows credentials after
   await page.getByRole("button", { name: /First-party Website Tracker/ }).click();
   await page.getByRole("button", { name: "Check URL" }).click();
   await page.getByRole("button", { name: "Review connection" }).click();
+  await expect(page.getByText("Advanced sync settings")).toBeVisible();
+  await expect(page.getByText("Event-driven webhook").first()).toBeVisible();
+  await expect(page.getByText("Manual only")).toHaveCount(0);
   await page.getByRole("button", { name: "Save source" }).click();
   await expect(page.getByText("First-party tracker").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Open tracker snippet" })).toBeVisible();

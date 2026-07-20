@@ -4,6 +4,10 @@ Website Event Contract v1 is the versioned, first-party analytics contract for `
 
 Use the generated JavaScript snippet or React/Next helper from the Website Tracker source. Both emit v1 events and keep the existing `window.moonarqTrack(name, properties)` and `trackEvent(name, properties)` interfaces.
 
+## Website source lifecycle
+
+Initial lifecycle state is decided by the server during source creation. A Website Tracker persisted to runtime Postgres is inserted as `healthy` with `metadata.demo = false`; the credential-free in-memory fixture remains `demo` with `metadata.demo = true`. The same insert stores the server-generated source UUID, public tracking key, exact allowed origin, and webhook URL. Clients cannot submit an initial status or use the public update route to promote a source. Credential-required connectors retain their existing `needs_credentials` lifecycle, and this policy does not require a migration or backfill.
+
 ## Canonical payload
 
 ```json

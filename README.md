@@ -63,13 +63,13 @@ Do not use Vercel Deployment Protection for the whole app if it would block webh
 
 ## Demo Mode
 
-When `DATABASE_URL` is missing, the app seeds in-memory demo data for MoonArq website traffic, unique visitors, sessions, custom events, Supabase signups/users, source health, sync runs, and content placeholders. Shopify remains an empty live-connector state until a real store is configured.
+When `DATABASE_URL` is missing, the app seeds in-memory demo data for MoonArq website traffic, unique visitors, sessions, custom events, Supabase signups/users, source health, sync runs, and content placeholders. The demo Website source and its generated-looking public key exist only in memory. Shopify remains an empty live-connector state until a real store is configured.
 
 ```bash
 pnpm db:seed
 ```
 
-When `DATABASE_URL` is configured, `pnpm db:seed` seeds the runtime catalog tables (`source_types`, `metric_definitions`) for the real app database.
+When `DATABASE_URL` is configured, `pnpm db:seed` seeds only the runtime catalog tables (`source_types`, `metric_definitions`) for the real app database. It does not create source rows or tracking credentials.
 
 ## Add A Source
 
@@ -206,6 +206,8 @@ If you set a Signature Verification Secret in Vercel, save the same value as the
 ### Website Tracker
 
 Use `/dashboard/events` to copy the lightweight JavaScript snippet or the React/Next helper with `usePageViewTracking()` and `trackEvent(name, properties)` after a real Website Tracker source exists. The tracker posts Website Event Contract v1 events to `POST /api/track` while preserving the existing helper APIs.
+
+The source lifecycle is server-owned. A Website Tracker created through the normal flow is inserted atomically as `healthy` with `metadata.demo = false` when runtime Postgres persistence is configured; without runtime Postgres it remains the in-memory `demo` fixture with `metadata.demo = true`. The server generates its source UUID, public tracking key, exact allowed origin, and webhook URL. Credential-required connectors continue to start as `needs_credentials`, and public create/update requests cannot promote a source by submitting a lifecycle status.
 
 In production, v1 tracker events must include a valid `source_id` and matching `public_tracking_key`, and must come from an allowed origin configured on that Website Tracker source. Legacy payloads remain accepted with either source identifier. New payloads include a client UUID `event_id`, `schema_version: "1.0"`, event time, consent, attribution, and client context; retries reuse `event_id` for idempotent delivery.
 
