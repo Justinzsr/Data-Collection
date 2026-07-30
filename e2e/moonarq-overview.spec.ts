@@ -1,9 +1,9 @@
 import {
   expect,
+  settleResponsiveLayout,
   test,
   type APIRequestContext,
   type Locator,
-  type Page,
 } from "./test";
 import { dashboardAuthCookie, loginDashboard } from "./auth";
 
@@ -23,12 +23,6 @@ const longAcquisitionValues = {
   landingPath: "/collections/moonlit-studio-launch/complete-persistent-acquisition-context",
   referrerHost: "editorial-partnership-long-reference.example.invalid",
 } as const;
-
-async function settleResponsiveLayout(page: Page) {
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  }));
-}
 
 async function expectVisibleFocus(locator: Locator) {
   await locator.focus();
@@ -494,6 +488,7 @@ test("empty and low-volume states remain explicit and readable", async ({ page }
 
   for (const state of ["empty", "low-volume"]) {
     await page.goto(`/w/moonarq/dashboard?demo_state=${state}`);
+    await settleResponsiveLayout(page);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );

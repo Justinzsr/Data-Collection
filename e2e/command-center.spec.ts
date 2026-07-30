@@ -1,4 +1,10 @@
-import { expect, test, type APIRequestContext, type Page } from "./test";
+import {
+  expect,
+  settleResponsiveLayout,
+  test,
+  type APIRequestContext,
+  type Page,
+} from "./test";
 import { dashboardAuthCookie, loginDashboard } from "./auth";
 
 async function saveSourceAndCaptureId(page: Page) {
@@ -328,6 +334,7 @@ test("mobile dashboard has no horizontal overflow", async ({ page }) => {
   await loginDashboard(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/w/moonarq/dashboard");
+  await settleResponsiveLayout(page);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
   await expect(page.getByTestId("business-pulse")).toBeVisible();

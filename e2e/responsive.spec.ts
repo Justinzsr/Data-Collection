@@ -1,4 +1,4 @@
-import { expect, test } from "./test";
+import { expect, settleResponsiveLayout, test } from "./test";
 import { loginDashboard } from "./auth";
 
 test.beforeEach(async ({ page }) => {
@@ -16,6 +16,7 @@ for (const viewport of [
   test(`dashboard has no horizontal overflow at ${viewport.width}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/w/moonarq/dashboard");
+    await settleResponsiveLayout(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(overflow).toBe(false);
   });
@@ -71,6 +72,7 @@ for (const width of [390, 320]) {
       await expect(detail).toHaveJSProperty("open", true);
     }
 
+    await settleResponsiveLayout(page);
     const layout = await page.evaluate(() => {
       const socialRoot = document.querySelector<HTMLElement>("[data-testid='social-platform-detail-modules']");
       const socialTouchTargets = socialRoot
@@ -161,6 +163,7 @@ for (const path of [
   test(`${path} has no horizontal overflow on narrow mobile`, async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 780 });
     await page.goto(path);
+    await settleResponsiveLayout(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(overflow).toBe(false);
   });

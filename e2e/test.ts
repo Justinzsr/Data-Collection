@@ -46,6 +46,12 @@ export const test = base.extend({
   },
 });
 
+export async function settleResponsiveLayout(page: import("@playwright/test").Page) {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+}
+
 export { expect };
 export type {
   APIRequestContext,
