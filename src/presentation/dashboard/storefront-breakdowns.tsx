@@ -10,7 +10,10 @@ import { GlassPanel } from "@/presentation/components/ui/panel";
 import {
   buildMoonArqOverviewHref,
   DEFAULT_MOONARQ_OVERVIEW_QUERY,
+  MOONARQ_OVERVIEW_FILTER_LIMITS,
+  sanitizeMoonArqOverviewDimensionValue,
   type MoonArqOverviewQuery,
+  type MoonArqOverviewDimensionKind,
   type MoonArqOverviewQueryPatch,
 } from "@/presentation/dashboard/moonarq-overview-query";
 
@@ -22,8 +25,16 @@ function percent(value: number | null) {
   return value === null ? "—" : `${value.toFixed(1)}%`;
 }
 
-function optionValues(current: string, values: string[]) {
-  return [...new Set([...(current ? [current] : []), ...values])].filter(Boolean);
+export function optionValues(
+  current: string,
+  values: string[],
+  safety?: { kind: MoonArqOverviewDimensionKind; maximumLength: number },
+) {
+  const sanitize = (value: string) => safety
+    ? sanitizeMoonArqOverviewDimensionValue(value, safety.kind, safety.maximumLength)
+    : value;
+  const safeCurrent = sanitize(current);
+  return [...new Set([...(safeCurrent ? [safeCurrent] : []), ...values.map(sanitize)])].filter(Boolean);
 }
 
 export function productIdentityDescription(row: WebsiteProductPerformanceRow) {
@@ -52,7 +63,7 @@ function ProductDesktopRow({ row }: { row: WebsiteProductPerformanceRow }) {
     <tr className="border-t border-white/[0.07]">
       <th scope="row" className="px-3 py-3">
         <p className="font-medium text-slate-200">{row.itemName || "Unknown / unmapped"}</p>
-        <p className="mt-1 break-words text-xs font-normal text-slate-500">{productIdentityDescription(row)}</p>
+        <p className="mt-1 break-words text-xs font-normal text-[var(--muted)]">{productIdentityDescription(row)}</p>
       </th>
       <td className="px-3 py-3 text-slate-300">{row.itemCategory || "Unknown"}</td>
       <td className="px-3 py-3 text-slate-300">{count(row.productViewSessions)}</td>
@@ -66,12 +77,18 @@ function AcquisitionDesktopRow({ row }: { row: WebsiteAcquisitionRow }) {
   return (
     <tr className="border-t border-white/[0.07]">
       <th scope="row" className="px-3 py-3 font-medium text-slate-200">
-        <span className="block">{row.utmSource || "Unknown"} / {row.utmMedium || "Unknown"}</span>
-        <span className="mt-1 block text-xs font-normal text-slate-500">{row.utmCampaign || "Unknown campaign"}</span>
+        <span className="block whitespace-normal break-words [overflow-wrap:anywhere]">
+          {row.utmSource || "Unknown"} / {row.utmMedium || "Unknown"}
+        </span>
+        <span className="mt-1 block whitespace-normal break-words text-xs font-normal text-[var(--muted)] [overflow-wrap:anywhere]">
+          {row.utmCampaign || "Unknown campaign"}
+        </span>
       </th>
-      <td className="max-w-56 px-3 py-3">
-        <p className="truncate text-slate-300" title={row.landingPath || "Unknown"}>{row.landingPath || "Unknown"}</p>
-        <p className="mt-1 truncate text-xs text-slate-500" title={row.referrerHost || "Unknown"}>
+      <td className="max-w-64 px-3 py-3">
+        <p className="whitespace-normal break-words text-slate-300 [overflow-wrap:anywhere]">
+          {row.landingPath || "Unknown"}
+        </p>
+        <p className="mt-1 whitespace-normal break-words text-xs text-[var(--muted)] [overflow-wrap:anywhere]">
           {row.referrerHost || "Unknown referrer"}
         </p>
       </td>
@@ -105,6 +122,31 @@ function StorefrontFilters({
   query: MoonArqOverviewQuery;
   basePath: string;
 }) {
+  const safeUtmSource = sanitizeMoonArqOverviewDimensionValue(
+    query.utm_source,
+    "utm",
+    MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+  );
+  const safeUtmMedium = sanitizeMoonArqOverviewDimensionValue(
+    query.utm_medium,
+    "utm",
+    MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+  );
+  const safeUtmCampaign = sanitizeMoonArqOverviewDimensionValue(
+    query.utm_campaign,
+    "utm",
+    MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+  );
+  const safeLandingPath = sanitizeMoonArqOverviewDimensionValue(
+    query.landing_path,
+    "landing_path",
+    MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath,
+  );
+  const safeReferrerHost = sanitizeMoonArqOverviewDimensionValue(
+    query.referrer_host,
+    "referrer_host",
+    MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost,
+  );
   const clearHref = buildMoonArqOverviewHref(basePath, query, {
     segment: "all",
     device: "all",
@@ -163,11 +205,14 @@ function StorefrontFilters({
             UTM source
             <select
               name="utm_source"
-              defaultValue={query.utm_source}
+              defaultValue={safeUtmSource}
               className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
             >
               <option value="">All UTM sources</option>
-              {optionValues(query.utm_source, overview.filterOptions.utmSources).map((value) => (
+              {optionValues(safeUtmSource, overview.filterOptions.utmSources, {
+                kind: "utm",
+                maximumLength: MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+              }).map((value) => (
                 <option key={value} value={value}>{value || "Unknown"}</option>
               ))}
             </select>
@@ -176,11 +221,14 @@ function StorefrontFilters({
             UTM medium
             <select
               name="utm_medium"
-              defaultValue={query.utm_medium}
+              defaultValue={safeUtmMedium}
               className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
             >
               <option value="">All UTM media</option>
-              {optionValues(query.utm_medium, overview.filterOptions.utmMediums).map((value) => (
+              {optionValues(safeUtmMedium, overview.filterOptions.utmMediums, {
+                kind: "utm",
+                maximumLength: MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+              }).map((value) => (
                 <option key={value} value={value}>{value || "Unknown"}</option>
               ))}
             </select>
@@ -189,11 +237,14 @@ function StorefrontFilters({
             UTM campaign
             <select
               name="utm_campaign"
-              defaultValue={query.utm_campaign}
+              defaultValue={safeUtmCampaign}
               className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
             >
               <option value="">All campaigns</option>
-              {optionValues(query.utm_campaign, overview.filterOptions.utmCampaigns).map((value) => (
+              {optionValues(safeUtmCampaign, overview.filterOptions.utmCampaigns, {
+                kind: "utm",
+                maximumLength: MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+              }).map((value) => (
                 <option key={value} value={value}>{value || "Unknown"}</option>
               ))}
             </select>
@@ -202,11 +253,14 @@ function StorefrontFilters({
             Landing path
             <select
               name="landing_path"
-              defaultValue={query.landing_path}
+              defaultValue={safeLandingPath}
               className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
             >
               <option value="">All landing paths</option>
-              {optionValues(query.landing_path, overview.filterOptions.landingPaths).map((value) => (
+              {optionValues(safeLandingPath, overview.filterOptions.landingPaths, {
+                kind: "landing_path",
+                maximumLength: MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath,
+              }).map((value) => (
                 <option key={value} value={value}>{value || "Unknown"}</option>
               ))}
             </select>
@@ -215,11 +269,14 @@ function StorefrontFilters({
             Referrer host
             <select
               name="referrer_host"
-              defaultValue={query.referrer_host}
+              defaultValue={safeReferrerHost}
               className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
             >
               <option value="">All referrers</option>
-              {optionValues(query.referrer_host, overview.filterOptions.referrerHosts).map((value) => (
+              {optionValues(safeReferrerHost, overview.filterOptions.referrerHosts, {
+                kind: "referrer_host",
+                maximumLength: MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost,
+              }).map((value) => (
                 <option key={value} value={value}>{value || "Unknown"}</option>
               ))}
             </select>
@@ -314,7 +371,7 @@ function CollectionAndProductPerformance({
         <GlassPanel className="overflow-hidden">
           <div className="border-b border-white/[0.08] p-4">
             <h3 className="font-semibold text-slate-100">Collection discovery</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">Only provable collection-to-product session progression.</p>
+            <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Only provable collection-to-product session progression.</p>
           </div>
           <div
             className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-cyan-300 lg:block"
@@ -324,7 +381,7 @@ function CollectionAndProductPerformance({
           >
             <table className="w-full min-w-[34rem] text-left text-sm">
               <caption className="sr-only">Collection view and product progression sessions</caption>
-              <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
+              <thead className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
                 <tr>
                   <th scope="col" className="px-3 py-2.5">Collection</th>
                   <th scope="col" className="px-3 py-2.5">Views</th>
@@ -343,9 +400,9 @@ function CollectionAndProductPerformance({
                   {row.state === "unknown" ? <Badge tone="amber">Unknown</Badge> : null}
                 </div>
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div><dt className="text-slate-500">Views</dt><dd className="mt-1 text-slate-200">{count(row.collectionViewSessions)}</dd></div>
-                  <div><dt className="text-slate-500">Product</dt><dd className="mt-1 text-slate-200">{count(row.productViewSessions)}</dd></div>
-                  <div><dt className="text-slate-500">Rate</dt><dd className="mt-1 text-slate-200">{percent(row.progressionRate)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Views</dt><dd className="mt-1 text-slate-200">{count(row.collectionViewSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Product</dt><dd className="mt-1 text-slate-200">{count(row.productViewSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Rate</dt><dd className="mt-1 text-slate-200">{percent(row.progressionRate)}</dd></div>
                 </dl>
               </article>
             ))}
@@ -367,7 +424,7 @@ function CollectionAndProductPerformance({
         <GlassPanel className="overflow-hidden" data-testid="product-performance">
           <div className="border-b border-white/[0.08] p-4">
             <h3 className="font-semibold text-slate-100">Product intent</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">View-to-cart rates require a stable shared item identity.</p>
+            <p className="mt-1 text-xs leading-5 text-[var(--muted)]">View-to-cart rates require a stable shared item identity.</p>
           </div>
           <div
             className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-cyan-300 lg:block"
@@ -377,7 +434,7 @@ function CollectionAndProductPerformance({
           >
             <table className="w-full min-w-[42rem] text-left text-sm">
               <caption className="sr-only">Product view and add-to-cart session performance</caption>
-              <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
+              <thead className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
                 <tr>
                   <th scope="col" className="px-3 py-2.5">Product</th>
                   <th scope="col" className="px-3 py-2.5">Category</th>
@@ -393,11 +450,11 @@ function CollectionAndProductPerformance({
             {overview.products.rows.map((row) => (
               <article key={row.key} className="rounded-lg border border-white/[0.08] bg-black/15 p-3">
                 <p className="font-medium text-slate-200">{row.itemName || "Unknown / unmapped"}</p>
-                <p className="mt-1 break-words text-xs text-slate-500">{productIdentityDescription(row)}</p>
+                <p className="mt-1 break-words text-xs text-[var(--muted)]">{productIdentityDescription(row)}</p>
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div><dt className="text-slate-500">Views</dt><dd className="mt-1 text-slate-200">{count(row.productViewSessions)}</dd></div>
-                  <div><dt className="text-slate-500">Cart</dt><dd className="mt-1 text-slate-200">{count(row.addToCartSessions)}</dd></div>
-                  <div><dt className="text-slate-500">Rate</dt><dd className="mt-1 text-slate-200">{percent(row.viewToCartRate)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Views</dt><dd className="mt-1 text-slate-200">{count(row.productViewSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Cart</dt><dd className="mt-1 text-slate-200">{count(row.addToCartSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Rate</dt><dd className="mt-1 text-slate-200">{percent(row.viewToCartRate)}</dd></div>
                 </dl>
               </article>
             ))}
@@ -442,7 +499,7 @@ function AcquisitionAndDevices({
       </div>
 
       <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,0.5fr)]">
-        <GlassPanel className="overflow-hidden">
+        <GlassPanel className="overflow-hidden" data-testid="acquisition-performance">
           <div
             className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-cyan-300 lg:block"
             role="region"
@@ -451,14 +508,14 @@ function AcquisitionAndDevices({
           >
             <table className="w-full min-w-[52rem] text-left text-sm">
               <caption className="sr-only">Acquisition session and checkout performance</caption>
-              <thead className="text-xs uppercase tracking-[0.12em] text-slate-500">
+              <thead className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
                 <tr>
                   <th scope="col" className="px-3 py-2.5">UTM</th>
                   <th scope="col" className="px-3 py-2.5">Landing / referrer</th>
                   <th scope="col" className="px-3 py-2.5">Sessions</th>
                   <th scope="col" className="px-3 py-2.5">Intent</th>
-                  <th scope="col" className="px-3 py-2.5">Checkout</th>
-                  <th scope="col" className="px-3 py-2.5">Rate</th>
+                  <th scope="col" className="px-3 py-2.5">Checkout started</th>
+                  <th scope="col" className="px-3 py-2.5">Visit-to-checkout rate</th>
                 </tr>
               </thead>
               <tbody>{overview.acquisition.rows.map((row) => <AcquisitionDesktopRow key={row.key} row={row} />)}</tbody>
@@ -466,21 +523,30 @@ function AcquisitionAndDevices({
           </div>
           <div className="grid gap-2 p-3 lg:hidden">
             {overview.acquisition.rows.map((row) => (
-              <article key={row.key} className="rounded-lg border border-white/[0.08] bg-black/15 p-3">
-                <p className="font-medium text-slate-200">
-                  {row.utmSource || "Unknown"} / {row.utmMedium || "Unknown"}
-                </p>
-                <p className="mt-1 break-words text-xs text-slate-500">{row.utmCampaign || "Unknown campaign"}</p>
-                <p className="mt-2 break-words text-xs text-slate-400">{row.landingPath || "Unknown landing path"}</p>
-                <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div><dt className="text-slate-500">Sessions</dt><dd className="mt-1 text-slate-200">{count(row.sessions)}</dd></div>
-                  <div>
-                    <dt className="text-slate-500">Checkout</dt>
-                    <dd className="mt-1 text-slate-200">
-                      {row.checkoutSessions === null ? "—" : count(row.checkoutSessions)}
-                    </dd>
-                  </div>
-                  <div><dt className="text-slate-500">Rate</dt><dd className="mt-1 text-slate-200">{percent(row.visitToCheckoutRate)}</dd></div>
+              <article
+                key={row.key}
+                className="rounded-lg border border-white/[0.08] bg-black/15 p-3"
+                data-acquisition-mobile-row
+              >
+                <dl className="grid grid-cols-[minmax(6.5rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+                  <dt className="text-[var(--muted)]">UTM source</dt>
+                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.utmSource || "Unknown"}</dd>
+                  <dt className="text-[var(--muted)]">UTM medium</dt>
+                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.utmMedium || "Unknown"}</dd>
+                  <dt className="text-[var(--muted)]">Campaign</dt>
+                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.utmCampaign || "Unknown campaign"}</dd>
+                  <dt className="text-[var(--muted)]">Landing page</dt>
+                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.landingPath || "Unknown landing path"}</dd>
+                  <dt className="text-[var(--muted)]">Referrer</dt>
+                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.referrerHost || "Unknown referrer"}</dd>
+                  <dt className="text-[var(--muted)]">Sessions</dt>
+                  <dd className="text-slate-200">{count(row.sessions)}</dd>
+                  <dt className="text-[var(--muted)]">Product intent</dt>
+                  <dd className="text-slate-200">{count(row.productIntentSessions)}</dd>
+                  <dt className="text-[var(--muted)]">Checkout started</dt>
+                  <dd className="text-slate-200">{row.checkoutSessions === null ? "—" : count(row.checkoutSessions)}</dd>
+                  <dt className="text-[var(--muted)]">Visit-to-checkout rate</dt>
+                  <dd className="text-slate-200">{percent(row.visitToCheckoutRate)}</dd>
                 </dl>
               </article>
             ))}
@@ -508,7 +574,7 @@ function AcquisitionAndDevices({
                   <p className="capitalize text-sm font-medium text-slate-200">{row.device}</p>
                   <p className="text-lg font-semibold text-white">{count(row.sessions)}</p>
                 </div>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-[var(--muted)]">
                   {count(row.productIntentSessions)} intent · {row.checkoutSessions === null ? "checkout not measured" : `${count(row.checkoutSessions)} checkout`} · {percent(row.visitToCheckoutRate)}
                 </p>
               </div>
@@ -532,7 +598,7 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
       <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-4 py-3">
         <div>
           <p className="text-sm font-medium text-slate-200">Data quality and reconciliation</p>
-          <p className="mt-0.5 text-xs text-slate-500">Sequence ambiguity, unmapped events, and like-for-like daily rollup checks</p>
+          <p className="mt-0.5 text-xs text-[var(--muted)]">Sequence ambiguity, unmapped events, and like-for-like daily rollup checks</p>
         </div>
         <Badge
           tone={
@@ -548,7 +614,7 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
       {unavailable ? (
         <div className="border-t border-white/[0.08] p-4" role="status">
           <p className="text-sm font-medium text-slate-200">Quality diagnostics unavailable</p>
-          <p className="mt-1 text-sm leading-6 text-slate-500">
+          <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
             {overview.dataState === "pre_coverage"
               ? "This range predates Website tracking coverage, so zeros would be misleading."
               : "Diagnostics require exactly one available authoritative Website source."}
@@ -557,14 +623,14 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
       ) : (
       <div className="grid gap-4 border-t border-white/[0.08] p-4 lg:grid-cols-3">
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Sequence policy</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Sequence policy</h3>
           <p className="mt-2 text-sm leading-6 text-slate-300">
             {count(equalTime)} co-timed session progressions were excluded from strict ordering; {count(unsequenced)} out-of-order or skipped-stage signals remain outside the monotonic funnel.
           </p>
-          <p className="mt-2 text-xs text-slate-500">{count(quality.duplicateDeliveriesRemoved)} duplicate deliveries removed.</p>
+          <p className="mt-2 text-xs text-[var(--muted)]">{count(quality.duplicateDeliveriesRemoved)} duplicate deliveries removed.</p>
         </div>
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Unknown and invalid</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Unknown and invalid</h3>
           <ul className="mt-2 grid gap-1.5 text-sm text-slate-300">
             {quality.unknownEvents.map((item) => (
               <li key={item.eventName}>{item.eventName || "Unknown event"} · {count(item.events)}</li>
@@ -573,25 +639,25 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
               <li key={`invalid-${item.eventName}`}>{item.eventName || "Unknown event"} invalid properties · {count(item.events)}</li>
             ))}
             {quality.unknownEvents.length === 0 && quality.invalidPropertyEvents.length === 0
-              ? <li className="text-slate-500">No unmapped event diagnostics in this selection.</li>
+              ? <li className="text-[var(--muted)]">No unmapped event diagnostics in this selection.</li>
               : null}
           </ul>
           {quality.unknownEventTotalRows > quality.unknownEvents.length ? (
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-[var(--muted)]">
               Showing {count(quality.unknownEvents.length)} of {count(quality.unknownEventTotalRows)} unknown event names.
             </p>
           ) : null}
         </div>
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Raw vs daily aggregate</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Raw vs daily aggregate</h3>
           <p className="mt-2 text-sm leading-6 text-slate-300">{overview.reconciliation.note}</p>
           <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
-            <div><dt className="text-slate-500">Completed-day raw page views</dt><dd className="mt-1 text-slate-200">{count(overview.reconciliation.rawPageViews)}</dd></div>
-            <div><dt className="text-slate-500">Daily page views</dt><dd className="mt-1 text-slate-200">{overview.reconciliation.dailyPageViews === null ? "—" : count(overview.reconciliation.dailyPageViews)}</dd></div>
-            <div><dt className="text-slate-500">Completed-day raw custom events</dt><dd className="mt-1 text-slate-200">{count(overview.reconciliation.rawCustomEvents)}</dd></div>
-            <div><dt className="text-slate-500">Daily custom events</dt><dd className="mt-1 text-slate-200">{overview.reconciliation.dailyCustomEvents === null ? "—" : count(overview.reconciliation.dailyCustomEvents)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Completed-day raw page views</dt><dd className="mt-1 text-slate-200">{count(overview.reconciliation.rawPageViews)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Daily page views</dt><dd className="mt-1 text-slate-200">{overview.reconciliation.dailyPageViews === null ? "—" : count(overview.reconciliation.dailyPageViews)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Completed-day raw custom events</dt><dd className="mt-1 text-slate-200">{count(overview.reconciliation.rawCustomEvents)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Daily custom events</dt><dd className="mt-1 text-slate-200">{overview.reconciliation.dailyCustomEvents === null ? "—" : count(overview.reconciliation.dailyCustomEvents)}</dd></div>
           </dl>
-          <p className="mt-2 text-xs leading-5 text-slate-500">Period-distinct visitors and sessions are not compared with summed daily distinct counts.</p>
+          <p className="mt-2 text-xs leading-5 text-[var(--muted)]">Period-distinct visitors and sessions are not compared with summed daily distinct counts.</p>
         </div>
       </div>
       )}

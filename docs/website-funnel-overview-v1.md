@@ -39,10 +39,12 @@ Only these accepted first-party events participate in Storefront V1 reporting:
 - `save_design`
 - `email_signup`
 
-Unknown accepted event names remain in aggregate diagnostics. Known events with
-missing, extra, incorrectly typed, or out-of-bounds frozen properties are
-retained as raw evidence and counted in invalid-property diagnostics, but are
-not inferred into a funnel stage or named product/collection row.
+Privacy-safe unknown accepted event names remain in aggregate diagnostics;
+unsafe historical names are grouped under the non-identifying `Unknown`
+sentinel. Known events with missing, extra, incorrectly typed, or out-of-bounds
+frozen properties are retained as raw evidence and counted in invalid-property
+diagnostics, but are not inferred into a funnel stage or named
+product/collection row.
 
 For backward compatibility, ingestion may retain a normalized `attribution`
 copy inside `properties` in addition to `attribution_context`. Funnel validation
@@ -126,6 +128,13 @@ funnel rather than filtering only a rendered table. Missing or conflicting
 normalized context remains `Unknown`; the system does not fabricate a Direct
 channel, browser, country, or demographic dimension.
 
+Comparison presentation follows one shared state contract. Comparison mode off
+is neutral and omits previous-period series and columns. Requested comparison
+without globally available coverage is `Comparison unavailable`. A measured
+metric without a finite previous value is `No baseline`; an unmeasured metric is
+`Not measured`. Only finite positive, negative, and zero deltas are shown as
+period changes.
+
 ## Query, privacy, and performance
 
 Production executes one fixed parameterized aggregate query inside a
@@ -136,9 +145,11 @@ repository:
 - requires `event_source = 'first_party_tracker'`;
 - applies half-open bounds and the canonical taxonomy;
 - defensively deduplicates `(source_id, event_id)`;
+- validates and normalizes every historical display dimension before session
+  context, filtering, grouping, ranking, pagination, or JSON projection;
 - performs grouping, sequencing, and final-group pagination in PostgreSQL;
 - bounds each filter-option vocabulary to 100 sorted values while preserving
-  any active URL-selected value;
+  only a validated active URL-selected value;
 - has no raw-event row cap and does not use `/api/events`,
   `findWebEvents()`, or the bounded platform-module sample;
 - returns aggregate rows only.
@@ -150,8 +161,23 @@ schema change.
 The aggregate response must not contain source, event, session, anonymous, or
 user IDs; tracking keys; IP or user-agent data; raw URLs or referrers; event
 properties/contexts/payloads; credentials; or PII. Product and collection labels
-come only from the frozen validated event contract. Demo and browser QA use
-deterministic sanitized fixtures.
+come only from the frozen validated event contract.
+
+This read-time privacy boundary applies to every schema version, including
+`legacy` and direct historical rows that predate current ingestion checks. It
+uses the Contract V1 fail-closed privacy semantics for UTM values, landing
+paths, referrers, item IDs, item names, categories, and list names. Unsafe
+values—including direct identifiers hidden behind up to three layers of
+percent encoding—become the exact `Unknown` sentinel before they can form an
+acquisition cohort or filter option. Unsafe product and collection values
+remain raw diagnostic evidence but are exposed only as Unknown/unmapped with
+unstable identity. If `first_referrer` is present but unsafe, it becomes
+`Unknown`; the fallback referrer is considered only when the primary field is
+absent. Unsafe query parameters are discarded generically and are never
+reinserted into form options or rendered markup. No historical row is mutated
+or backfilled.
+
+Demo and browser QA use deterministic sanitized fixtures.
 
 ## Honest states and reconciliation
 
@@ -160,6 +186,15 @@ events, filtered-empty, comparison unavailable, low volume, invalid metadata,
 and delayed/disagreeing daily aggregate states. Fewer than 20 starting sessions
 shows `Limited data — rates are directional` while retaining exact counts and
 rates.
+
+Shopify commerce values are authoritative only when the source is healthy and
+has a non-null successful-sync timestamp. Not connected, credentials required,
+awaiting first sync, sync error, demo, and disabled states withhold numeric
+commerce results instead of displaying placeholder zeroes. A healthy synced
+source retains genuine zero orders and labels that state explicitly with the
+selected range and data-through timestamp. A failed current sync never presents
+stale metrics as current; a prior timestamp may be shown only as the last
+successful sync.
 
 Raw event totals are reconciled with `metrics_daily` only for additive,
 like-for-like `page_views` and `custom_events` definitions. True period-distinct

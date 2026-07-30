@@ -1,6 +1,10 @@
 import type { WebsiteFunnelOverview, WebsiteFunnelStageKey } from "@/aggregation/services/website-funnel-types";
 import { Badge } from "@/presentation/components/ui/badge";
 import { GlassPanel } from "@/presentation/components/ui/panel";
+import {
+  comparisonToneClass,
+  resolveComparisonDisplay,
+} from "@/presentation/dashboard/comparison-display";
 
 const pulseDefinitions: Array<{
   key: "visitors" | WebsiteFunnelStageKey;
@@ -15,12 +19,6 @@ const pulseDefinitions: Array<{
 
 function count(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
-}
-
-function deltaLabel(value: number | null, available: boolean) {
-  if (!available || value === null) return "—";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(1)}%`;
 }
 
 export function WebsiteBusinessPulse({ overview }: { overview: WebsiteFunnelOverview }) {
@@ -45,6 +43,14 @@ export function WebsiteBusinessPulse({ overview }: { overview: WebsiteFunnelOver
           const value = definition.key === "visitors" ? overview.uniqueVisitors : stage?.sessions ?? 0;
           const delta = definition.key === "visitors" ? null : stage?.deltaPercent ?? null;
           const measured = definition.key === "visitors" || stage?.measured !== false;
+          const comparison = resolveComparisonDisplay({
+            mode: overview.comparison.mode,
+            globallyAvailable: overview.comparison.available,
+            measured,
+            hasBaseline: definition.key !== "visitors",
+            deltaPercent: delta,
+            includeDelta: definition.key !== "visitors",
+          });
           return (
             <GlassPanel
               key={definition.key}
@@ -56,15 +62,14 @@ export function WebsiteBusinessPulse({ overview }: { overview: WebsiteFunnelOver
                 {unavailable || !measured ? "—" : count(value)}
               </p>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="text-slate-500">
+                <span className="text-[var(--muted)]">
                   {!measured ? "Not measured" : definition.key === "visitors" ? "Period distinct" : "Distinct sessions"}
                 </span>
-                <span className={overview.lowVolume ? "text-slate-400" : delta !== null && delta < 0 ? "text-rose-200" : "text-emerald-200"}>
-                  {!measured
-                    ? "Builder commerce not inferred"
-                    : definition.key === "visitors"
-                    ? "Authoritative"
-                    : `${deltaLabel(delta, overview.comparison.available)} vs previous`}
+                <span
+                  className={comparisonToneClass(comparison.tone)}
+                  data-comparison-state={comparison.kind}
+                >
+                  {comparison.label}
                 </span>
               </div>
             </GlassPanel>

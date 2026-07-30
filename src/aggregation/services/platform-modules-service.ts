@@ -38,6 +38,7 @@ export type PlatformModule = {
     value: string;
   }>;
   lastSyncAt: string | null;
+  lastSuccessfulSyncAt: string | null;
   nextSyncAt: string | null;
   lastError: string | null;
   setupState: {
@@ -616,6 +617,7 @@ function createModule(input: {
     ),
     insights: input.insights ?? [],
     lastSyncAt: latestSync(source),
+    lastSuccessfulSyncAt: source?.last_success_at ?? null,
     nextSyncAt: source?.next_sync_at ?? null,
     lastError: source?.last_error ?? null,
     setupState: setupState(source, moduleKey, input.secondaryWebsiteSources, input.dataSpaceName),
@@ -729,7 +731,7 @@ export async function getGlobalPlatformHealth(rangeKey: DateRangeKey = "30d", op
   const connected = modules.filter((item) => item.sourceId && item.status !== "disabled");
   const errors = modules.filter((item) => item.status === "error" || item.lastError).length;
   const lastSuccessfulSync = connected
-    .map((item) => item.lastSyncAt)
+    .map((item) => item.lastSuccessfulSyncAt)
     .filter((value): value is string => Boolean(value))
     .sort()
     .at(-1) ?? null;

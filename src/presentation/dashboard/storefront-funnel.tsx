@@ -1,6 +1,10 @@
 import type { WebsiteFunnelOverview, WebsiteFunnelStage } from "@/aggregation/services/website-funnel-types";
 import { Badge } from "@/presentation/components/ui/badge";
 import { GlassPanel } from "@/presentation/components/ui/panel";
+import {
+  comparisonToneClass,
+  resolveComparisonDisplay,
+} from "@/presentation/dashboard/comparison-display";
 
 function count(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -30,16 +34,23 @@ function stateCopy(overview: WebsiteFunnelOverview) {
 function FunnelStageRow({
   stage,
   startingSessions,
+  comparisonMode,
   comparisonAvailable,
 }: {
   stage: WebsiteFunnelStage;
   startingSessions: number;
+  comparisonMode: WebsiteFunnelOverview["comparison"]["mode"];
   comparisonAvailable: boolean;
 }) {
   const barPercent = startingSessions > 0 ? Math.max(0, Math.min(100, (stage.sessions / startingSessions) * 100)) : 0;
-  const previousDelta = stage.measured && comparisonAvailable && stage.deltaPercent !== null
-    ? `${stage.deltaPercent > 0 ? "+" : ""}${stage.deltaPercent.toFixed(1)}% vs previous`
-    : stage.measured ? "Comparison unavailable" : "Not measured";
+  const comparison = resolveComparisonDisplay({
+    mode: comparisonMode,
+    globallyAvailable: comparisonAvailable,
+    measured: stage.measured,
+    hasBaseline: stage.previousSessions !== null,
+    deltaPercent: stage.deltaPercent,
+    includeDelta: true,
+  });
 
   return (
     <li
@@ -49,7 +60,7 @@ function FunnelStageRow({
     >
       <div className="min-w-0">
         <p className="font-medium text-[#f5f2eb]">{stage.label}</p>
-        <p className="mt-1 text-xs leading-5 text-slate-500">{stage.description}</p>
+        <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{stage.description}</p>
       </div>
 
       <div className="min-w-0">
@@ -59,8 +70,11 @@ function FunnelStageRow({
         </div>
         <div className="h-2.5 overflow-hidden rounded-full bg-white/[0.06]" aria-hidden="true">
           <span
-            className="block h-full rounded-full bg-gradient-to-r from-slate-500/70 to-cyan-300/85"
-            style={{ width: `${stage.measured ? barPercent : 0}%` }}
+            className="block h-full rounded-full"
+            style={{
+              width: `${stage.measured ? barPercent : 0}%`,
+              backgroundImage: "linear-gradient(to right, #94a3b8, #67e8f9)",
+            }}
             data-funnel-bar={stage.key}
           />
         </div>
@@ -68,22 +82,27 @@ function FunnelStageRow({
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
         <div>
-          <dt className="text-slate-500">From previous</dt>
+          <dt className="text-[var(--muted)]">From previous</dt>
           <dd className="mt-0.5 font-medium text-slate-200">{stage.measured ? percent(stage.fromPrevious) : "—"}</dd>
         </div>
         <div>
-          <dt className="text-slate-500">Drop-off</dt>
+          <dt className="text-[var(--muted)]">Drop-off</dt>
           <dd className="mt-0.5 font-medium text-slate-200">
             {!stage.measured || stage.dropOff === null ? "—" : count(stage.dropOff)}
           </dd>
         </div>
         <div>
-          <dt className="text-slate-500">Raw events</dt>
+          <dt className="text-[var(--muted)]">Raw events</dt>
           <dd className="mt-0.5 font-medium text-slate-200">{stage.measured ? count(stage.events) : "—"}</dd>
         </div>
         <div>
-          <dt className="text-slate-500">Period change</dt>
-          <dd className="mt-0.5 font-medium text-slate-200">{previousDelta}</dd>
+          <dt className="text-[var(--muted)]">Period change</dt>
+          <dd
+            className={`mt-0.5 font-medium ${comparisonToneClass(comparison.tone)}`}
+            data-comparison-state={comparison.kind}
+          >
+            {comparison.label}
+          </dd>
         </div>
       </dl>
     </li>
@@ -131,6 +150,7 @@ export function StorefrontFunnel({ overview }: { overview: WebsiteFunnelOverview
               key={stage.key}
               stage={stage}
               startingSessions={startingSessions}
+              comparisonMode={overview.comparison.mode}
               comparisonAvailable={overview.comparison.available}
             />
           ))}
@@ -143,7 +163,7 @@ export function StorefrontFunnel({ overview }: { overview: WebsiteFunnelOverview
         </p>
       ) : null}
 
-      <p id="storefront-funnel-footnote" className="border-t border-white/[0.08] pt-3 text-xs leading-5 text-slate-500">
+      <p id="storefront-funnel-footnote" className="border-t border-white/[0.08] pt-3 text-xs leading-5 text-[var(--muted)]">
         First-party session funnel; ends at checkout started. Orders and revenue are reported separately by Shopify.
       </p>
     </GlassPanel>

@@ -15,7 +15,7 @@ function JourneyStage({ stage }: { stage: WebsiteJourneyStage }) {
     <li className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-white/[0.07] py-2.5 last:border-0">
       <div className="min-w-0">
         <p className="text-sm font-medium text-slate-200">{stage.label}</p>
-        <p className="mt-0.5 text-xs text-slate-500">
+        <p className="mt-0.5 text-xs text-[var(--muted)]">
           {count(stage.events)} events · {percent(stage.fromPrevious)} from previous
         </p>
       </div>
@@ -46,7 +46,7 @@ export function StorefrontJourneys({ overview }: { overview: WebsiteFunnelOvervi
       {unavailable ? (
         <GlassPanel className="p-4 sm:p-5" role="status">
           <p className="text-sm font-medium text-slate-200">Journey data unavailable</p>
-          <p className="mt-1 text-sm leading-6 text-slate-500">{unavailableCopy}</p>
+          <p className="mt-1 text-sm leading-6 text-[var(--muted)]">{unavailableCopy}</p>
         </GlassPanel>
       ) : (
       <div className="grid min-w-0 gap-3 xl:grid-cols-3">
@@ -74,7 +74,7 @@ export function StorefrontJourneys({ overview }: { overview: WebsiteFunnelOvervi
               <div key={item.label} className="flex items-center justify-between gap-3 border-b border-white/[0.07] py-2 last:border-0">
                 <dt className="text-sm text-slate-300">
                   <span className="block">{item.label}</span>
-                  <span className="mt-0.5 block text-xs text-slate-500">
+                  <span className="mt-0.5 block text-xs text-[var(--muted)]">
                     {count(item.stage.events)} events{item.rate === null ? "" : ` · ${percent(item.rate)} of starts`}
                   </span>
                 </dt>
@@ -96,7 +96,7 @@ export function StorefrontJourneys({ overview }: { overview: WebsiteFunnelOvervi
               { label: "Events", value: overview.emailSignup.events },
             ].map((item) => (
               <div key={item.label} className="min-w-0 rounded-lg border border-white/[0.08] bg-black/15 p-2.5">
-                <dt className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{item.label}</dt>
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">{item.label}</dt>
                 <dd className="mt-1 break-words text-lg font-semibold text-white">{count(item.value)}</dd>
               </div>
             ))}

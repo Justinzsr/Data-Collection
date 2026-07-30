@@ -18,6 +18,7 @@ export default defineConfig({
       DATABASE_URL: "",
       DASHBOARD_ADMIN_PASSWORD: "e2e-dashboard-password",
       DASHBOARD_SESSION_SECRET: "e2e-dashboard-session-secret-32-bytes",
+      MOONARQ_OVERVIEW_E2E_FIXTURES: "true",
       NEXT_PUBLIC_APP_URL: "http://localhost:4000",
     },
   },

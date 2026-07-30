@@ -146,11 +146,22 @@ describe("Website funnel aggregate SQL", () => {
     const sql = compactSql(WEBSITE_FUNNEL_AGGREGATE_SQL);
 
     expect(sql).toContain("jsonb_array_length(event.properties -> 'items') between 1 and 100");
-    expect(sql).toContain("char_length(btrim(item ->> 'item_id')) between 1 and 256");
-    expect(sql).toContain("char_length(btrim(item ->> 'item_category')) between 1 and 160");
-    expect(sql).toContain("(item ->> 'price')::numeric >= 0");
-    expect(sql).toContain("(item ->> 'quantity')::numeric >= 1");
-    expect(sql).toContain("trunc((item ->> 'quantity')::numeric) = (item ->> 'quantity')::numeric");
+    expect(sql).toContain(
+      "item_entry.item ?& array['item_id', 'item_name', 'item_category']::text[]",
+    );
+    expect(sql).toContain(") is not true");
+    expect(sql).toContain(
+      "display.display_safety -> ('item_id:' || item_entry.item_index::text) = 'true'::jsonb",
+    );
+    expect(sql).toContain(
+      "display.display_safety -> ('item_name:' || item_entry.item_index::text) = 'true'::jsonb",
+    );
+    expect(sql).toContain(
+      "display.display_safety -> ('item_category:' || item_entry.item_index::text) = 'true'::jsonb",
+    );
+    expect(sql).toContain("(item_entry.item ->> 'price')::numeric >= 0");
+    expect(sql).toContain("(item_entry.item ->> 'quantity')::numeric >= 1");
+    expect(sql).toContain("trunc((item_entry.item ->> 'quantity')::numeric) = (item_entry.item ->> 'quantity')::numeric");
     expect(sql).toContain("btrim(event.properties ->> 'currency') ~ '^[a-z]{3}$'");
     expect(sql).toContain("lower(btrim(item ->> 'item_category')) <> 'build your own'");
     expect(sql).toContain("array['currency', 'value', 'items', 'attribution']");
@@ -158,9 +169,44 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("(event.properties ->> 'value')::numeric >= 0");
     expect(sql).toContain("trunc((event.properties ->> 'stone_count')::numeric) = (event.properties ->> 'stone_count')::numeric");
     expect(sql).toContain("jsonb_typeof(event.properties) is distinct from 'object'");
-    expect(sql).toContain("from classified_events where property_valid");
-    expect(sql).toContain("from classified_known_events where property_valid and event_name = 'page_view'");
+    expect(sql).toContain("from classified_events where property_valid is true");
+    expect(sql).toContain("from classified_known_events where property_valid is true and event_name = 'page_view'");
     expect(sql).toContain("from diagnostic_known_events where property_valid is not true");
+    expect(sql).toContain("as items_are_valid");
+    expect(sql).toContain("as commerce_values_are_valid");
+    expect(sql).toContain("is true as property_valid");
+    expect(sql).toContain("is true as has_ready_made_item");
+  });
+
+  it("normalizes historical display values before session context and projection", () => {
+    const sql = compactSql(WEBSITE_FUNNEL_AGGREGATE_SQL);
+
+    for (const cte of [
+      "raw_display_values as materialized",
+      "display_value_features as materialized",
+      "display_value_numeric_features as materialized",
+      "display_value_risks as materialized",
+      "validated_display_values as materialized",
+      "normalized_display_values as materialized",
+      "display_value_maps as materialized",
+    ]) {
+      expect(sql).toContain(cte);
+    }
+    expect(sql).toContain("risk.raw_text !~* '%(25)*(40|3f|23)'");
+    expect(sql).toContain("pg_input_is_valid(risk.ipv4_candidate, 'inet') is not true");
+    expect(sql).toContain("lower(coalesce(feature.raw_text, '')) ~ '^https?://[^/?#]+(/[^?#]*)?$'");
+    expect(sql).toContain(
+      "when event.display_presence -> 'first_referrer' = 'true'::jsonb",
+    );
+    expect(sql).toContain(
+      "else coalesce(event.display_values ->> 'fallback_referrer', 'unknown')",
+    );
+    expect(sql.indexOf("normalized_display_values as materialized")).toBeLessThan(
+      sql.indexOf("session_context as materialized"),
+    );
+    expect(sql.indexOf("normalized_display_values as materialized")).toBeLessThan(
+      sql.indexOf("filter_options as"),
+    );
   });
 
   it("deduplicates source/event identity before aggregate sequencing", () => {
@@ -215,13 +261,13 @@ describe("Website funnel aggregate SQL", () => {
     const sql = compactSql(WEBSITE_FUNNEL_AGGREGATE_SQL);
 
     expect(sql).toContain(
-      "btrim(list_item ->> 'item_id') = btrim(product_item ->> 'item_id')",
+      "event.display_values ->> ('item_id:' || list_entry.item_index::text) = product_event.display_values ->> ('item_id:' || product_entry.item_index::text)",
     );
     expect(sql).toContain(
-      "jsonb_array_elements(event.properties -> 'items') list_item",
+      "jsonb_array_elements(event.properties -> 'items') with ordinality as list_entry(item, item_index)",
     );
     expect(sql).toContain(
-      "jsonb_array_elements( product_event.properties -> 'items' ) product_item",
+      "jsonb_array_elements( product_event.properties -> 'items' ) with ordinality as product_entry(item, item_index)",
     );
     expect(sql).toContain(
       "'unknown / unmapped'::text as item_list_name",
@@ -385,6 +431,30 @@ describe("Website funnel aggregate SQL", () => {
       4,
       "all",
     ]);
+  });
+
+  it("discards unsafe dimension and invalid device filters without reflecting them", () => {
+    const unsafe = ["private", "-person", "@", "example.invalid"].join("");
+    const values = websiteFunnelQueryValues(input({
+      filters: {
+        utmSource: unsafe,
+        utmMedium: `encoded%2540${unsafe}`,
+        utmCampaign: unsafe,
+        landingPage: `/collections/${unsafe}`,
+        referrerHost: unsafe,
+        deviceCategory: "television",
+      },
+    }));
+
+    expect(values.slice(6, 12)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(JSON.stringify(values).includes(unsafe)).toBe(false);
   });
 
   it("uses one explicit Unknown sentinel for missing acquisition and device filters", () => {

@@ -16,6 +16,7 @@ import type {
 } from "@/aggregation/services/website-funnel-types";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel } from "@/presentation/components/ui/panel";
+import { resolveComparisonDisplay } from "@/presentation/dashboard/comparison-display";
 import {
   buildMoonArqOverviewHref,
   MOONARQ_OVERVIEW_TRENDS,
@@ -55,8 +56,13 @@ export function formatStorefrontTrendValue(value: number | null, metric: Website
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
-export function storefrontTrendText(point: StorefrontTrendChartPoint, metric: WebsiteFunnelTrendMetric) {
+export function storefrontTrendText(
+  point: StorefrontTrendChartPoint,
+  metric: WebsiteFunnelTrendMetric,
+  includePrevious = true,
+) {
   const current = formatStorefrontTrendValue(point.current, metric);
+  if (!includePrevious) return `${point.date}: ${current}`;
   const previous = point.comparisonDate
     ? `${point.comparisonDate}: ${formatStorefrontTrendValue(point.previous, metric)}`
     : "previous period unavailable";
@@ -89,7 +95,15 @@ export function StorefrontConversionTrend({
       || metric === "visit_to_checkout_rate"
     );
   const hasCurrentData = data.some((point) => point.current !== null);
-  const hasPreviousData = overview.comparison.available && data.some((point) => point.previous !== null);
+  const previousPointCount = data.filter((point) => point.previous !== null).length;
+  const hasPreviousData = overview.comparison.available && previousPointCount > 0;
+  const comparison = resolveComparisonDisplay({
+    mode: overview.comparison.mode,
+    globallyAvailable: overview.comparison.available,
+    measured: !builderCommerceUnavailable,
+    hasBaseline: hasPreviousData,
+  });
+  const showPrevious = comparison.showPrevious;
 
   return (
     <GlassPanel
@@ -129,10 +143,12 @@ export function StorefrontConversionTrend({
             <span className="h-0.5 w-5 bg-cyan-300" aria-hidden="true" />
             Selected period — solid
           </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="w-5 border-t-2 border-dashed border-slate-400" aria-hidden="true" />
-            Previous period — dashed
-          </span>
+          {showPrevious ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="w-5 border-t-2 border-dashed border-slate-400" aria-hidden="true" />
+              Previous period — dashed
+            </span>
+          ) : null}
         </div>
 
         <div className="h-64 min-w-0" data-overview-chart="true">
@@ -151,14 +167,14 @@ export function StorefrontConversionTrend({
                   axisLine={false}
                   tickLine={false}
                   minTickGap={24}
-                  tick={{ fill: "#64748b", fontSize: 10 }}
+                  tick={{ fill: "var(--muted)", fontSize: 10 }}
                   tickFormatter={(value) => String(value).slice(5)}
                 />
                 <YAxis
                   axisLine={false}
                   tickLine={false}
                   width={52}
-                  tick={{ fill: "#64748b", fontSize: 10 }}
+                  tick={{ fill: "var(--muted)", fontSize: 10 }}
                   tickFormatter={(value) => formatStorefrontTrendValue(Number(value), metric)}
                 />
                 <Tooltip
@@ -179,14 +195,16 @@ export function StorefrontConversionTrend({
                   connectNulls={false}
                   isAnimationActive={false}
                 />
-                {hasPreviousData ? (
+                {showPrevious ? (
                   <Line
                     type="monotone"
                     dataKey="previous"
                     stroke="#94a3b8"
                     strokeWidth={2}
                     strokeDasharray="6 4"
-                    dot={false}
+                    dot={previousPointCount === 1
+                      ? { r: 3, fill: "#94a3b8", strokeWidth: 0 }
+                      : false}
                     activeDot={{ r: 4, strokeWidth: 0 }}
                     connectNulls={false}
                     isAnimationActive={false}
@@ -202,7 +220,7 @@ export function StorefrontConversionTrend({
                     ? "Builder cart and checkout trends are not measured."
                     : "No daily trend is available for this selection."}
                 </p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
+                <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
                   {builderCommerceUnavailable
                     ? "The current tracker contract does not prove reliable builder-to-cart identity."
                     : "Counts remain unavailable rather than being filled with inferred zeroes."}
@@ -213,10 +231,17 @@ export function StorefrontConversionTrend({
         </div>
       </div>
 
-      {!overview.comparison.available && query.compare === "previous" ? (
-        <p className="text-xs leading-5 text-slate-500">
-          Previous-period comparison unavailable
-          {overview.comparison.reason ? ` — ${overview.comparison.reason}` : "."}
+      {comparison.kind !== "available" ? (
+        <p
+          className="text-xs leading-5 text-[var(--muted)]"
+          data-comparison-state={comparison.kind}
+        >
+          {comparison.label}
+          {comparison.kind === "unavailable" && overview.comparison.reason
+            ? ` — ${overview.comparison.reason}`
+            : comparison.kind === "no_baseline"
+              ? ` for ${trendLabels[metric]}.`
+              : "."}
         </p>
       ) : null}
 
@@ -225,14 +250,17 @@ export function StorefrontConversionTrend({
           View daily values
         </summary>
         <div className="min-w-0 max-w-full overflow-x-auto border-t border-white/[0.08]">
-          <table className="w-full min-w-[34rem] text-left text-sm">
-            <caption className="sr-only">{trendLabels[metric]} daily values and equal-length comparison</caption>
+          <table className={`w-full text-left text-sm ${showPrevious ? "min-w-[34rem]" : "min-w-[20rem]"}`}>
+            <caption className="sr-only">
+              {trendLabels[metric]} daily selected-period values
+              {showPrevious ? " and equal-length previous-period comparison" : ""}
+            </caption>
             <thead className="text-xs uppercase tracking-[0.12em] text-slate-400">
               <tr>
                 <th scope="col" className="px-3 py-2.5">Date</th>
                 <th scope="col" className="px-3 py-2.5">Selected period</th>
-                <th scope="col" className="px-3 py-2.5">Comparison date</th>
-                <th scope="col" className="px-3 py-2.5">Previous period</th>
+                {showPrevious ? <th scope="col" className="px-3 py-2.5">Comparison date</th> : null}
+                {showPrevious ? <th scope="col" className="px-3 py-2.5">Previous period</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.07]">
@@ -240,14 +268,16 @@ export function StorefrontConversionTrend({
                 <tr key={point.date}>
                   <th scope="row" className="px-3 py-2.5 font-medium text-slate-200">{point.date}</th>
                   <td className="px-3 py-2.5 text-slate-300">{formatStorefrontTrendValue(point.current, metric)}</td>
-                  <td className="px-3 py-2.5 text-slate-400">{point.comparisonDate ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-slate-300">{formatStorefrontTrendValue(point.previous, metric)}</td>
+                  {showPrevious ? <td className="px-3 py-2.5 text-slate-400">{point.comparisonDate ?? "—"}</td> : null}
+                  {showPrevious ? <td className="px-3 py-2.5 text-slate-300">{formatStorefrontTrendValue(point.previous, metric)}</td> : null}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="sr-only">{data.map((point) => storefrontTrendText(point, metric)).join("; ")}</p>
+        <p className="sr-only">
+          {data.map((point) => storefrontTrendText(point, metric, showPrevious)).join("; ")}
+        </p>
       </details>
     </GlassPanel>
   );

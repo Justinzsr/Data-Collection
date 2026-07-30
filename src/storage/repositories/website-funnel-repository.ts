@@ -4,6 +4,10 @@ import {
   WEBSITE_FUNNEL_EVENT_NAMES,
   type WebsiteFunnelEventName,
 } from "@/aggregation/metric-definitions/website-funnel-definitions";
+import {
+  sanitizeWebsiteDisplayDimension,
+  type WebsiteDisplayDimensionKind,
+} from "@/collection/tracking/website-display-privacy";
 import { query, queryRows, withDatabaseTransaction } from "@/storage/db/client";
 import type { SourceStatus } from "@/storage/db/schema";
 
@@ -261,7 +265,7 @@ export const WEBSITE_FUNNEL_AGGREGATE_RESPONSE_DENYLIST = [
  * Pagination is applied only after dimension rows have been grouped.
  */
 export const WEBSITE_FUNNEL_AGGREGATE_SQL = `
-with source_candidates as materialized (
+with recursive source_candidates as materialized (
   select s.id, s.display_name, s.status
   from sources s
   where s.data_space_id = $1::uuid
@@ -332,149 +336,603 @@ unknown_event_rows as materialized (
   from all_events
   where event_name <> all($6::text[])
 ),
+raw_display_values as materialized (
+  select
+    event.period_key,
+    event.event_id,
+    dimension.value_key,
+    dimension.maximum_length,
+    dimension.dimension_kind,
+    dimension.raw_json
+  from known_events event
+  cross join lateral (
+    values
+      (
+        'utm_source'::text,
+        256,
+        'text'::text,
+        case
+          when event.attribution_context #> '{utm,source}' is not null
+            and event.attribution_context #> '{utm,source}' <> 'null'::jsonb
+            then event.attribution_context #> '{utm,source}'
+          else event.attribution_context #> '{utm,utm_source}'
+        end
+      ),
+      (
+        'utm_medium'::text,
+        256,
+        'text'::text,
+        case
+          when event.attribution_context #> '{utm,medium}' is not null
+            and event.attribution_context #> '{utm,medium}' <> 'null'::jsonb
+            then event.attribution_context #> '{utm,medium}'
+          else event.attribution_context #> '{utm,utm_medium}'
+        end
+      ),
+      (
+        'utm_campaign'::text,
+        256,
+        'text'::text,
+        case
+          when event.attribution_context #> '{utm,campaign}' is not null
+            and event.attribution_context #> '{utm,campaign}' <> 'null'::jsonb
+            then event.attribution_context #> '{utm,campaign}'
+          else event.attribution_context #> '{utm,utm_campaign}'
+        end
+      ),
+      (
+        'landing_page'::text,
+        500,
+        'path'::text,
+        event.attribution_context -> 'landing_page'
+      ),
+      (
+        'first_referrer'::text,
+        1200,
+        'url'::text,
+        event.attribution_context -> 'first_referrer'
+      ),
+      (
+        'fallback_referrer'::text,
+        1200,
+        'url'::text,
+        to_jsonb(event.referrer)
+      ),
+      (
+        'property_item_list_name'::text,
+        256,
+        'text'::text,
+        event.properties -> 'item_list_name'
+      ),
+      (
+        'property_item_category'::text,
+        160,
+        'text'::text,
+        event.properties -> 'item_category'
+      )
+  ) dimension(value_key, maximum_length, dimension_kind, raw_json)
+
+  union all
+
+  select
+    event.period_key,
+    event.event_id,
+    item_dimension.value_key || ':' || item_entry.item_index::text,
+    item_dimension.maximum_length,
+    'text'::text as dimension_kind,
+    item_dimension.raw_json
+  from known_events event
+  cross join lateral jsonb_array_elements(
+    case
+      when jsonb_typeof(event.properties -> 'items') = 'array'
+        then event.properties -> 'items'
+      else '[]'::jsonb
+    end
+  ) with ordinality as item_entry(item, item_index)
+  cross join lateral (
+    values
+      ('item_id'::text, 256, item_entry.item -> 'item_id'),
+      ('item_name'::text, 256, item_entry.item -> 'item_name'),
+      ('item_category'::text, 160, item_entry.item -> 'item_category'),
+      ('item_list_name'::text, 256, item_entry.item -> 'item_list_name')
+  ) item_dimension(value_key, maximum_length, raw_json)
+
+  union all
+
+  select
+    event.period_key,
+    event.event_id,
+    'unknown_event_name'::text as value_key,
+    80 as maximum_length,
+    'event_name'::text as dimension_kind,
+    to_jsonb(event.event_name) as raw_json
+  from unknown_event_rows event
+),
+display_value_features as materialized (
+  select
+    raw.*,
+    raw.raw_json is not null as is_present,
+    case
+      when jsonb_typeof(raw.raw_json) = 'string'
+        then btrim(raw.raw_json #>> '{}')
+      else null
+    end as raw_text
+  from raw_display_values raw
+),
+display_value_decoded_variants as (
+  select
+    feature.period_key,
+    feature.event_id,
+    feature.value_key,
+    feature.maximum_length,
+    feature.dimension_kind,
+    feature.raw_json,
+    feature.is_present,
+    feature.raw_text,
+    0::integer as decode_pass,
+    feature.raw_text as scan_text
+  from display_value_features feature
+
+  union all
+
+  select
+    variant.period_key,
+    variant.event_id,
+    variant.value_key,
+    variant.maximum_length,
+    variant.dimension_kind,
+    variant.raw_json,
+    variant.is_present,
+    variant.raw_text,
+    variant.decode_pass + 1,
+    decoded.scan_text
+  from display_value_decoded_variants variant
+  cross join lateral (
+    select string_agg(
+      case
+        when token.part[1] ~* '^%[0-7][0-9a-f]$' then
+          case
+            when get_byte(
+              decode(substring(token.part[1] from 2), 'hex'),
+              0
+            ) = 0 then chr(1)
+            else chr(get_byte(
+              decode(substring(token.part[1] from 2), 'hex'),
+              0
+            ))
+          end
+        else token.part[1]
+      end,
+      ''
+      order by token.part_index
+    ) as scan_text
+    from regexp_matches(
+      variant.scan_text,
+      '%[0-9a-f]{2}|.',
+      'gis'
+    ) with ordinality as token(part, part_index)
+  ) decoded
+  where variant.decode_pass < 3
+    and char_length(variant.raw_text) between 1 and variant.maximum_length
+    and variant.scan_text ~* '%[0-9a-f]{2}'
+),
+display_value_numeric_features as materialized (
+  select
+    feature.*,
+    regexp_replace(coalesce(feature.scan_text, ''), '[^0-9]', '', 'g') as digits,
+    substring(
+      coalesce(feature.scan_text, '')
+      from '([0-9][0-9 -]{11,22}[0-9])'
+    ) as payment_candidate,
+    substring(
+      coalesce(feature.scan_text, '')
+      from '([+0-9][+0-9 ().-]{6,24})'
+    ) as phone_candidate,
+    substring(
+      coalesce(feature.scan_text, '')
+      from '(([0-9]{1,3}\\.){3}[0-9]{1,3})'
+    ) as ipv4_candidate,
+    case
+      when feature.decode_pass = 0
+        and feature.dimension_kind = 'url'
+        and lower(coalesce(feature.raw_text, ''))
+          ~ '^https?://[^/?#]+(/[^?#]*)?$'
+        then substring(
+          lower(feature.raw_text)
+          from '^https?://([^/?#]+)'
+        )
+      else null
+    end as url_authority
+  from display_value_decoded_variants feature
+),
+display_value_risks as materialized (
+  select
+    feature.*,
+    regexp_replace(coalesce(feature.payment_candidate, ''), '[^0-9]', '', 'g')
+      as payment_digits,
+    case
+      when feature.scan_text is null then false
+      else exists (
+        select 1
+        from (
+          values (feature.scan_text), (feature.phone_candidate)
+        ) phone_candidate(raw_text)
+        cross join lateral (
+          select btrim(coalesce(phone_candidate.raw_text, '')) as normalized_text
+        ) normalized_phone
+        cross join lateral (
+          select regexp_replace(
+            normalized_phone.normalized_text,
+            '[^0-9]',
+            '',
+            'g'
+          ) as digits
+        ) phone_number
+        where (
+          normalized_phone.normalized_text ~ '^\\+[0-9 ().-]+$'
+          and char_length(phone_number.digits) between 7 and 15
+        )
+        or (
+          normalized_phone.normalized_text ~ '^[0-9]{9,15}$'
+          and (
+            normalized_phone.normalized_text like '0%'
+            or normalized_phone.normalized_text
+              ~ '^(20|27|30|31|32|33|34|36|39|40|41|43|44|45|46|47|48|49|51|52|53|54|55|56|57|58|60|61|62|63|64|65|66|81|82|84|86|90|91|92|93|94|95|98)'
+          )
+        )
+        or (
+          normalized_phone.normalized_text ~ '^[0-9 ()-]+$'
+          and char_length(phone_number.digits) between 9 and 15
+          and (
+            char_length(normalized_phone.normalized_text)
+            - char_length(
+              regexp_replace(normalized_phone.normalized_text, '[ ()-]', '', 'g')
+            )
+          ) >= 2
+        )
+        or (
+          normalized_phone.normalized_text ~ '^[0-9]{10,11}$'
+          and (
+            case
+              when char_length(phone_number.digits) = 11
+                and phone_number.digits like '1%'
+                then substring(phone_number.digits from 2)
+              else phone_number.digits
+            end
+          ) ~ '^[2-9][0-9]{2}[2-9][0-9]{6}$'
+        )
+        or (
+          normalized_phone.normalized_text
+            ~ '^(1[ .-])?\\(?[2-9][0-9]{2}\\)?[ .-][2-9][0-9]{2}[ .-][0-9]{4}$'
+        )
+      )
+    end as likely_phone,
+    case
+      when char_length(
+        regexp_replace(coalesce(feature.payment_candidate, ''), '[^0-9]', '', 'g')
+      ) between 13 and 19
+      then (
+        select coalesce(sum(
+          case
+            when (
+              char_length(regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g'))
+              - digit_position
+            ) % 2 = 1
+            then case
+              when substring(
+                regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
+                from digit_position for 1
+              )::integer * 2 > 9
+                then substring(
+                  regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
+                  from digit_position for 1
+                )::integer * 2 - 9
+              else substring(
+                regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
+                from digit_position for 1
+              )::integer * 2
+            end
+            else substring(
+              regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
+              from digit_position for 1
+            )::integer
+          end
+        ), 0) % 10 = 0
+        from generate_series(
+          1,
+          char_length(regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g'))
+        ) digit_position
+      )
+      else false
+    end as likely_payment_card
+  from display_value_numeric_features feature
+),
+display_value_scanned_risks as materialized (
+  select
+    risk.*,
+    coalesce(
+      bool_or(
+        risk.scan_text is not null
+        and (
+          risk.scan_text ~ '[[:cntrl:]]'
+          or risk.scan_text
+            ~* '(^|[^a-z0-9._%+-])[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}($|[^a-z0-9.-])'
+          or regexp_replace(risk.scan_text, '[-_]+', ' ', 'g')
+            ~* '(^|[^a-z0-9])p(ost)?\\.?[[:space:]]*o(ffice)?\\.?[[:space:]]+box[[:space:]]+[a-z0-9-]+($|[^a-z0-9])'
+          or regexp_replace(risk.scan_text, '[-_]+', ' ', 'g')
+            ~* '(^|[^a-z0-9])[0-9]{1,6}[[:space:]]+([a-z0-9.''-]+[[:space:]]+){0,5}(street|st|road|rd|avenue|ave|boulevard|blvd|lane|ln|drive|dr|court|ct|way|highway|hwy)($|[^a-z0-9])'
+          or risk.scan_text
+            ~* '(^|[^a-z0-9_])(bearer|basic)[[:space:]]+[a-z0-9._~+/=-]{8,}'
+          or risk.scan_text
+            ~* '(^|[^a-z0-9_])(sk|pk|rk)_(live|test)_[a-z0-9_-]{8,}'
+          or risk.scan_text
+            ~* '(^|[^a-z0-9_])eyj[a-z0-9_-]{8,}\\.[a-z0-9_-]{8,}\\.[a-z0-9_-]{8,}'
+          or risk.scan_text
+            ~* '(^|[?&#/_.-])(authorization|cookie|credential|password|passwd|secret|token|api[_-]?key|access[_-]?key|session[_-]?id)[=:/]'
+          or risk.likely_phone is true
+          or risk.likely_payment_card is true
+          or (
+            risk.ipv4_candidate is not null
+            and pg_input_is_valid(risk.ipv4_candidate, 'inet') is true
+          )
+          or risk.scan_text
+            ~* '(^|[^a-f0-9])([a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}($|[^a-f0-9])'
+          or risk.scan_text ~* '^https?://[^/?#]*@'
+        )
+      ) over (
+        partition by risk.period_key, risk.event_id, risk.value_key
+      ),
+      false
+    ) as has_unsafe_content
+  from display_value_risks risk
+),
+validated_display_values as materialized (
+  select
+    risk.*,
+    coalesce(
+      jsonb_typeof(risk.raw_json) = 'string'
+      and char_length(risk.raw_text) between 1 and risk.maximum_length
+      and risk.has_unsafe_content is not true
+      and risk.raw_text !~* '%(25)*(40|3f|23)'
+      and (
+        risk.ipv4_candidate is null
+        or pg_input_is_valid(risk.ipv4_candidate, 'inet') is not true
+      )
+      and position('?' in risk.raw_text) = 0
+      and position('#' in risk.raw_text) = 0
+      and case
+        when risk.dimension_kind = 'event_name' then
+          risk.raw_text ~ '^[a-zA-Z0-9_.:-]+$'
+        when risk.dimension_kind = 'path' then
+          risk.raw_text ~ '^/[^?#]*$'
+          and risk.raw_text !~ '^//'
+        when risk.dimension_kind = 'url' then
+          risk.url_authority is not null
+          and risk.url_authority !~ '@'
+          and risk.url_authority
+            ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[0-9]{1,5})?$'
+          and char_length(split_part(risk.url_authority, ':', 1)) <= 253
+          and split_part(risk.url_authority, ':', 1)
+            !~ '^([0-9]{1,3}\\.){3}[0-9]{1,3}$'
+          and pg_input_is_valid(split_part(risk.url_authority, ':', 1), 'inet')
+            is not true
+          and case
+            when position(':' in risk.url_authority) = 0 then true
+            when split_part(risk.url_authority, ':', 2) ~ '^[0-9]{1,5}$'
+              then split_part(risk.url_authority, ':', 2)::integer between 1 and 65535
+            else false
+          end
+        else
+          risk.raw_text !~* '^https?://[^/?#]*@'
+      end,
+      false
+    ) as is_safe
+  from display_value_scanned_risks risk
+  where risk.decode_pass = 0
+),
+normalized_display_values as materialized (
+  select
+    value.period_key,
+    value.event_id,
+    value.value_key,
+    value.is_present,
+    value.is_safe,
+    case
+      when value.is_safe is not true then 'Unknown'
+      when value.dimension_kind = 'url'
+        then lower(split_part(value.url_authority, ':', 1))
+      when value.value_key in ('utm_source', 'utm_medium')
+        then lower(value.raw_text)
+      else value.raw_text
+    end as normalized_value
+  from validated_display_values value
+),
+display_value_maps as materialized (
+  select
+    value.period_key,
+    value.event_id,
+    jsonb_object_agg(
+      value.value_key,
+      to_jsonb(value.is_present)
+    ) as display_presence,
+    jsonb_object_agg(
+      value.value_key,
+      to_jsonb(value.is_safe)
+    ) as display_safety,
+    jsonb_object_agg(
+      value.value_key,
+      to_jsonb(value.normalized_value)
+    ) as display_values
+  from normalized_display_values value
+  group by value.period_key, value.event_id
+),
 event_property_primitives as materialized (
   select
     event.*,
-    case
-      when jsonb_typeof(event.properties) = 'object'
-        and jsonb_typeof(event.properties -> 'items') = 'array'
-        then jsonb_array_length(event.properties -> 'items') between 1 and 100
-          and not exists (
-            select 1
-            from jsonb_array_elements(event.properties -> 'items') item
-            where not (
-              jsonb_typeof(item) = 'object'
-              and item - array[
-                'item_id',
-                'item_name',
-                'item_category',
-                'item_list_name',
-                'price',
-                'quantity'
-              ]::text[] = '{}'::jsonb
-              and jsonb_typeof(item -> 'item_id') = 'string'
-              and char_length(btrim(item ->> 'item_id')) between 1 and 256
-              and jsonb_typeof(item -> 'item_name') = 'string'
-              and char_length(btrim(item ->> 'item_name')) between 1 and 256
-              and jsonb_typeof(item -> 'item_category') = 'string'
-              and char_length(btrim(item ->> 'item_category')) between 1 and 160
-              and case
-                when item ? 'item_list_name' then
-                  jsonb_typeof(item -> 'item_list_name') = 'string'
-                  and char_length(btrim(item ->> 'item_list_name')) between 1 and 256
-                else true
-              end
-              and case
-                when item ? 'price' then
+    display.display_presence,
+    display.display_safety,
+    display.display_values,
+    coalesce(
+      case
+        when jsonb_typeof(event.properties) = 'object'
+          and jsonb_typeof(event.properties -> 'items') = 'array'
+          then jsonb_array_length(event.properties -> 'items') between 1 and 100
+            and not exists (
+              select 1
+              from jsonb_array_elements(event.properties -> 'items')
+                with ordinality as item_entry(item, item_index)
+              where (
+                case
+                  when jsonb_typeof(item_entry.item) = 'object' then
+                    item_entry.item
+                      ?& array['item_id', 'item_name', 'item_category']::text[]
+                    and item_entry.item - array[
+                  'item_id',
+                  'item_name',
+                  'item_category',
+                  'item_list_name',
+                  'price',
+                  'quantity'
+                ]::text[] = '{}'::jsonb
+                and display.display_safety
+                  -> ('item_id:' || item_entry.item_index::text) = 'true'::jsonb
+                and display.display_safety
+                  -> ('item_name:' || item_entry.item_index::text) = 'true'::jsonb
+                and display.display_safety
+                  -> ('item_category:' || item_entry.item_index::text) = 'true'::jsonb
+                and (
+                  not (item_entry.item ? 'item_list_name')
+                  or display.display_safety
+                    -> ('item_list_name:' || item_entry.item_index::text)
+                      = 'true'::jsonb
+                )
+                and (
                   case
-                    when jsonb_typeof(item -> 'price') = 'number'
-                      then (item ->> 'price')::numeric >= 0
-                    else false
+                    when item_entry.item ? 'price' then
+                      jsonb_typeof(item_entry.item -> 'price') = 'number'
+                      and (item_entry.item ->> 'price')::numeric >= 0
+                    else true
                   end
-                else true
-              end
-              and case
-                when item ? 'quantity' then
+                ) is true
+                and (
                   case
-                    when jsonb_typeof(item -> 'quantity') = 'number' then
-                      (item ->> 'quantity')::numeric >= 1
-                      and trunc((item ->> 'quantity')::numeric)
-                        = (item ->> 'quantity')::numeric
-                    else false
+                    when item_entry.item ? 'quantity' then
+                      jsonb_typeof(item_entry.item -> 'quantity') = 'number'
+                      and (item_entry.item ->> 'quantity')::numeric >= 1
+                      and trunc((item_entry.item ->> 'quantity')::numeric)
+                        = (item_entry.item ->> 'quantity')::numeric
+                    else true
                   end
-                else true
-              end
+                ) is true
+                  else false
+                end
+              ) is not true
             )
-          )
-      else false
-    end as items_are_valid,
-    (
+        else false
+      end,
+      false
+    ) as items_are_valid,
+    coalesce(
       jsonb_typeof(event.properties) = 'object'
+      and event.properties ?& array['currency', 'value']::text[]
       and jsonb_typeof(event.properties -> 'currency') = 'string'
       and btrim(event.properties ->> 'currency') ~ '^[A-Z]{3}$'
-      and case
-        when jsonb_typeof(event.properties -> 'value') = 'number'
-          then (event.properties ->> 'value')::numeric >= 0
-        else false
-      end
-    ) as commerce_values_are_valid
-  from known_events event
-),
-classified_known_events as materialized (
-  select
-    event.*,
-    case
-      when jsonb_typeof(event.properties) is distinct from 'object' then false
-      when event.event_name = 'page_view' then true
-      when event.event_name = 'view_item_list' then
-        event.properties
-          - array['item_list_name', 'items', 'attribution']::text[] = '{}'::jsonb
-        and event.items_are_valid
-        and jsonb_typeof(event.properties -> 'item_list_name') = 'string'
-        and char_length(btrim(event.properties ->> 'item_list_name'))
-          between 1 and 256
-      when event.event_name in ('view_item', 'add_to_cart', 'begin_checkout') then
-        event.properties
-          - array['currency', 'value', 'items', 'attribution']::text[] = '{}'::jsonb
-        and event.items_are_valid
-        and event.commerce_values_are_valid
-      when event.event_name = 'build_start' then
-        event.properties - array['item_category', 'attribution']::text[] = '{}'::jsonb
-        and jsonb_typeof(event.properties -> 'item_category') = 'string'
-        and char_length(btrim(event.properties ->> 'item_category'))
-          between 1 and 160
-      when event.event_name in ('build_complete', 'save_design') then
-        event.properties
-          - array['currency', 'item_category', 'stone_count', 'value', 'attribution']::text[]
-            = '{}'::jsonb
-        and jsonb_typeof(event.properties -> 'currency') = 'string'
-        and btrim(event.properties ->> 'currency') ~ '^[A-Z]{3}$'
-        and jsonb_typeof(event.properties -> 'item_category') = 'string'
-        and char_length(btrim(event.properties ->> 'item_category'))
-          between 1 and 160
-        and case
-          when jsonb_typeof(event.properties -> 'stone_count') = 'number' then
-            (event.properties ->> 'stone_count')::numeric >= 0
-            and trunc((event.properties ->> 'stone_count')::numeric)
-              = (event.properties ->> 'stone_count')::numeric
-          else false
-        end
-        and case
+      and (
+        case
           when jsonb_typeof(event.properties -> 'value') = 'number'
             then (event.properties ->> 'value')::numeric >= 0
           else false
         end
-      when event.event_name = 'email_signup' then
-        event.properties
-          - array['discount_code', 'method', 'attribution']::text[] = '{}'::jsonb
-        and jsonb_typeof(event.properties -> 'discount_code') = 'string'
-        and char_length(btrim(event.properties ->> 'discount_code'))
-          between 1 and 160
-        and jsonb_typeof(event.properties -> 'method') = 'string'
-        and char_length(btrim(event.properties ->> 'method'))
-          between 1 and 160
-      else false
-    end as property_valid,
+      ) is true,
+      false
+    ) as commerce_values_are_valid
+  from known_events event
+  join display_value_maps display
+    on display.period_key = event.period_key
+   and display.event_id = event.event_id
+),
+classified_known_events as materialized (
+  select
+    event.*,
     (
-      event.items_are_valid
-      and event.commerce_values_are_valid
+      case
+        when jsonb_typeof(event.properties) is distinct from 'object' then false
+        when event.event_name = 'page_view' then true
+        when event.event_name = 'view_item_list' then
+          event.properties ?& array['item_list_name', 'items']::text[]
+          and event.properties
+            - array['item_list_name', 'items', 'attribution']::text[] = '{}'::jsonb
+          and event.items_are_valid is true
+          and event.display_safety -> 'property_item_list_name' = 'true'::jsonb
+        when event.event_name in ('view_item', 'add_to_cart', 'begin_checkout') then
+          event.properties ?& array['currency', 'value', 'items']::text[]
+          and event.properties
+            - array['currency', 'value', 'items', 'attribution']::text[] = '{}'::jsonb
+          and event.items_are_valid is true
+          and event.commerce_values_are_valid is true
+        when event.event_name = 'build_start' then
+          event.properties ? 'item_category'
+          and event.properties - array['item_category', 'attribution']::text[]
+            = '{}'::jsonb
+          and event.display_safety -> 'property_item_category' = 'true'::jsonb
+        when event.event_name in ('build_complete', 'save_design') then
+          event.properties
+            ?& array['currency', 'item_category', 'stone_count', 'value']::text[]
+          and event.properties
+            - array['currency', 'item_category', 'stone_count', 'value', 'attribution']::text[]
+              = '{}'::jsonb
+          and jsonb_typeof(event.properties -> 'currency') = 'string'
+          and btrim(event.properties ->> 'currency') ~ '^[A-Z]{3}$'
+          and event.display_safety -> 'property_item_category' = 'true'::jsonb
+          and (
+            case
+              when jsonb_typeof(event.properties -> 'stone_count') = 'number' then
+                (event.properties ->> 'stone_count')::numeric >= 0
+                and trunc((event.properties ->> 'stone_count')::numeric)
+                  = (event.properties ->> 'stone_count')::numeric
+              else false
+            end
+          ) is true
+          and (
+            case
+              when jsonb_typeof(event.properties -> 'value') = 'number'
+                then (event.properties ->> 'value')::numeric >= 0
+              else false
+            end
+          ) is true
+        when event.event_name = 'email_signup' then
+          event.properties ?& array['discount_code', 'method']::text[]
+          and event.properties
+            - array['discount_code', 'method', 'attribution']::text[] = '{}'::jsonb
+          and jsonb_typeof(event.properties -> 'discount_code') = 'string'
+          and char_length(btrim(event.properties ->> 'discount_code'))
+            between 1 and 160
+          and jsonb_typeof(event.properties -> 'method') = 'string'
+          and char_length(btrim(event.properties ->> 'method'))
+            between 1 and 160
+        else false
+      end
+    ) is true as property_valid,
+    (
+      event.items_are_valid is true
+      and event.commerce_values_are_valid is true
       and exists (
         select 1
         from jsonb_array_elements(
           case
-            when event.items_are_valid then event.properties -> 'items'
+            when event.items_are_valid is true then event.properties -> 'items'
             else '[]'::jsonb
           end
         ) item
         where lower(btrim(item ->> 'item_category')) <> 'build your own'
       )
-    ) as has_ready_made_item
+    ) is true as has_ready_made_item
   from event_property_primitives event
 ),
 first_visits as materialized (
   select period_key, session_id, min(occurred_at) as visit_at
   from classified_known_events
-  where property_valid
+  where property_valid is true
     and event_name = 'page_view'
   group by period_key, session_id
 ),
@@ -484,40 +942,15 @@ visit_context_candidates as materialized (
     visit.session_id,
     visit.visit_at,
     event.anonymous_id,
-    coalesce(
-      nullif(lower(btrim(event.attribution_context #>> '{utm,source}')), ''),
-      nullif(lower(btrim(event.attribution_context #>> '{utm,utm_source}')), ''),
-      'Unknown'
-    ) as utm_source,
-    coalesce(
-      nullif(lower(btrim(event.attribution_context #>> '{utm,medium}')), ''),
-      nullif(lower(btrim(event.attribution_context #>> '{utm,utm_medium}')), ''),
-      'Unknown'
-    ) as utm_medium,
-    coalesce(
-      nullif(btrim(event.attribution_context #>> '{utm,campaign}'), ''),
-      nullif(btrim(event.attribution_context #>> '{utm,utm_campaign}'), ''),
-      'Unknown'
-    ) as utm_campaign,
+    coalesce(event.display_values ->> 'utm_source', 'Unknown') as utm_source,
+    coalesce(event.display_values ->> 'utm_medium', 'Unknown') as utm_medium,
+    coalesce(event.display_values ->> 'utm_campaign', 'Unknown') as utm_campaign,
+    coalesce(event.display_values ->> 'landing_page', 'Unknown') as landing_page,
     case
-      when coalesce(event.attribution_context ->> 'landing_page', '') ~ '^/[^?#]*$'
-        then event.attribution_context ->> 'landing_page'
-      else 'Unknown'
-    end as landing_page,
-    coalesce(
-      nullif(
-        substring(
-          lower(coalesce(event.attribution_context ->> 'first_referrer', ''))
-          from '^https?://([^/?#:]+)'
-        ),
-        ''
-      ),
-      nullif(
-        substring(lower(coalesce(event.referrer, '')) from '^https?://([^/?#:]+)'),
-        ''
-      ),
-      'Unknown'
-    ) as referrer_host,
+      when event.display_presence -> 'first_referrer' = 'true'::jsonb
+        then coalesce(event.display_values ->> 'first_referrer', 'Unknown')
+      else coalesce(event.display_values ->> 'fallback_referrer', 'Unknown')
+    end as referrer_host,
     case
       when event.client_context ->> 'device_category'
         in ('mobile', 'tablet', 'desktop', 'bot')
@@ -530,7 +963,7 @@ visit_context_candidates as materialized (
    and event.session_id = visit.session_id
    and event.event_name = 'page_view'
    and event.occurred_at = visit.visit_at
-   and event.property_valid
+   and event.property_valid is true
 ),
 session_context as materialized (
   select
@@ -679,8 +1112,17 @@ diagnostic_known_events as materialized (
   )
 ),
 diagnostic_unknown_events as materialized (
-  select event.*
+  select
+    event.period_key,
+    event.session_id,
+    coalesce(
+      display.display_values ->> 'unknown_event_name',
+      'Unknown'
+    ) as event_name
   from unknown_event_rows event
+  join display_value_maps display
+    on display.period_key = event.period_key
+   and display.event_id = event.event_id
   where (
     (
       $7::text is null
@@ -708,7 +1150,7 @@ classified_events as materialized (
 events as materialized (
   select *
   from classified_events
-  where property_valid
+  where property_valid is true
 ),
 visits as materialized (
   select period_key, session_id, min(occurred_at) as visit_at
@@ -733,7 +1175,7 @@ intents as materialized (
      or (
        $18::text = 'ready-made'
        and event.event_name = 'view_item'
-       and event.has_ready_made_item
+       and event.has_ready_made_item is true
      )
      or (
        $18::text = 'builder'
@@ -754,7 +1196,7 @@ carts as materialized (
    and event.session_id = intent.session_id
    and event.event_name = 'add_to_cart'
    and $18::text <> 'builder'
-   and ($18::text <> 'ready-made' or event.has_ready_made_item)
+   and ($18::text <> 'ready-made' or event.has_ready_made_item is true)
    and event.occurred_at > intent.intent_at
   group by intent.period_key, intent.session_id
 ),
@@ -769,7 +1211,7 @@ checkouts as materialized (
    and event.session_id = cart.session_id
    and event.event_name = 'begin_checkout'
    and $18::text <> 'builder'
-   and ($18::text <> 'ready-made' or event.has_ready_made_item)
+   and ($18::text <> 'ready-made' or event.has_ready_made_item is true)
    and event.occurred_at > cart.cart_at
   group by cart.period_key, cart.session_id
 ),
@@ -865,7 +1307,7 @@ stage_event_rows as materialized (
      or (
        $18::text = 'ready-made'
        and event.event_name = 'view_item'
-       and event.has_ready_made_item
+       and event.has_ready_made_item is true
      )
      or (
        $18::text = 'builder'
@@ -890,7 +1332,7 @@ stage_event_rows as materialized (
    and event.session_id = cart.session_id
    and event.event_name = 'add_to_cart'
    and $18::text <> 'builder'
-   and ($18::text <> 'ready-made' or event.has_ready_made_item)
+   and ($18::text <> 'ready-made' or event.has_ready_made_item is true)
    and event.occurred_at > intent.intent_at
 
   union all
@@ -909,7 +1351,7 @@ stage_event_rows as materialized (
    and event.session_id = checkout.session_id
    and event.event_name = 'begin_checkout'
    and $18::text <> 'builder'
-   and ($18::text <> 'ready-made' or event.has_ready_made_item)
+   and ($18::text <> 'ready-made' or event.has_ready_made_item is true)
    and event.occurred_at > cart.cart_at
 ),
 stage_aggregates as (
@@ -979,7 +1421,7 @@ quality as (
       select count(distinct event.session_id)
       from diagnostic_known_events event
       where event.period_key = period.period_key
-        and event.property_valid
+        and event.property_valid is true
         and event.event_name in ('view_item', 'build_start')
         and not exists (
           select 1
@@ -992,7 +1434,7 @@ quality as (
       select count(distinct event.session_id)
       from diagnostic_known_events event
       where event.period_key = period.period_key
-        and event.property_valid
+        and event.property_valid is true
         and event.event_name = 'add_to_cart'
         and not exists (
           select 1
@@ -1005,7 +1447,7 @@ quality as (
       select count(distinct event.session_id)
       from diagnostic_known_events event
       where event.period_key = period.period_key
-        and event.property_valid
+        and event.property_valid is true
         and event.event_name = 'begin_checkout'
         and not exists (
           select 1
@@ -1031,7 +1473,7 @@ ready_made_views as materialized (
     on event.period_key = visit.period_key
    and event.session_id = visit.session_id
    and event.event_name = 'view_item'
-   and event.has_ready_made_item
+   and event.has_ready_made_item is true
    and event.occurred_at > visit.visit_at
   group by visit.period_key, visit.session_id
 ),
@@ -1045,7 +1487,7 @@ ready_made_carts as materialized (
     on event.period_key = product_view.period_key
    and event.session_id = product_view.session_id
    and event.event_name = 'add_to_cart'
-   and event.has_ready_made_item
+   and event.has_ready_made_item is true
    and event.occurred_at > product_view.product_view_at
   group by product_view.period_key, product_view.session_id
 ),
@@ -1059,7 +1501,7 @@ ready_made_checkouts as materialized (
     on event.period_key = cart.period_key
    and event.session_id = cart.session_id
    and event.event_name = 'begin_checkout'
-   and event.has_ready_made_item
+   and event.has_ready_made_item is true
    and event.occurred_at > cart.cart_at
   group by cart.period_key, cart.session_id
 ),
@@ -1087,7 +1529,7 @@ ready_made_journey as (
         on event.period_key = anchor.period_key
        and event.session_id = anchor.session_id
        and event.event_name = 'view_item'
-       and event.has_ready_made_item
+       and event.has_ready_made_item is true
        and event.occurred_at > visit.visit_at
       where anchor.period_key = period.period_key
     ) as product_view_events,
@@ -1101,7 +1543,7 @@ ready_made_journey as (
         on event.period_key = anchor.period_key
        and event.session_id = anchor.session_id
        and event.event_name = 'add_to_cart'
-       and event.has_ready_made_item
+       and event.has_ready_made_item is true
        and event.occurred_at > product_view.product_view_at
       where anchor.period_key = period.period_key
     ) as add_to_cart_events,
@@ -1115,7 +1557,7 @@ ready_made_journey as (
         on event.period_key = anchor.period_key
        and event.session_id = anchor.session_id
        and event.event_name = 'begin_checkout'
-       and event.has_ready_made_item
+       and event.has_ready_made_item is true
        and event.occurred_at > cart.cart_at
       where anchor.period_key = period.period_key
     ) as begin_checkout_events
@@ -1252,7 +1694,7 @@ collection_event_rows as materialized (
     event.period_key,
     event.session_id,
     event.anonymous_id,
-    btrim(event.properties ->> 'item_list_name') as item_list_name,
+    event.display_values ->> 'property_item_list_name' as item_list_name,
     exists (
       select 1
       from events product_event
@@ -1262,12 +1704,15 @@ collection_event_rows as materialized (
         and product_event.occurred_at > event.occurred_at
         and exists (
           select 1
-          from jsonb_array_elements(event.properties -> 'items') list_item
+          from jsonb_array_elements(event.properties -> 'items')
+            with ordinality as list_entry(item, item_index)
           cross join lateral jsonb_array_elements(
             product_event.properties -> 'items'
-          ) product_item
-          where btrim(list_item ->> 'item_id')
-            = btrim(product_item ->> 'item_id')
+          ) with ordinality as product_entry(item, item_index)
+          where event.display_values
+              ->> ('item_id:' || list_entry.item_index::text)
+            = product_event.display_values
+              ->> ('item_id:' || product_entry.item_index::text)
         )
     ) as progressed_to_product,
     exists (
@@ -1279,12 +1724,15 @@ collection_event_rows as materialized (
         and product_event.occurred_at = event.occurred_at
         and exists (
           select 1
-          from jsonb_array_elements(event.properties -> 'items') list_item
+          from jsonb_array_elements(event.properties -> 'items')
+            with ordinality as list_entry(item, item_index)
           cross join lateral jsonb_array_elements(
             product_event.properties -> 'items'
-          ) product_item
-          where btrim(list_item ->> 'item_id')
-            = btrim(product_item ->> 'item_id')
+          ) with ordinality as product_entry(item, item_index)
+          where event.display_values
+              ->> ('item_id:' || list_entry.item_index::text)
+            = product_event.display_values
+              ->> ('item_id:' || product_entry.item_index::text)
         )
     ) as equal_time_progression
   from events event
@@ -1345,11 +1793,13 @@ product_item_events as materialized (
     event.anonymous_id,
     event.event_name,
     event.occurred_at,
-    btrim(item ->> 'item_id') as item_id,
-    btrim(item ->> 'item_name') as item_name,
-    btrim(item ->> 'item_category') as item_category
+    event.display_values ->> ('item_id:' || item_entry.item_index::text) as item_id,
+    event.display_values ->> ('item_name:' || item_entry.item_index::text) as item_name,
+    event.display_values ->> ('item_category:' || item_entry.item_index::text)
+      as item_category
   from events event
-  cross join lateral jsonb_array_elements(event.properties -> 'items') item
+  cross join lateral jsonb_array_elements(event.properties -> 'items')
+    with ordinality as item_entry(item, item_index)
   where event.event_name in ('view_item', 'add_to_cart')
 ),
 product_labels as (
@@ -1978,11 +2428,28 @@ function normalizedDimensionFilter(
   maximum: number,
   field: string,
   lowerCase = false,
+  kind?: WebsiteDisplayDimensionKind,
 ) {
   const normalized = normalizedFilter(value, maximum, field);
   if (normalized === null) return null;
-  if (normalized.toLowerCase() === "unknown") return "Unknown";
-  return lowerCase ? normalized.toLowerCase() : normalized;
+  const privacySafe = kind
+    ? sanitizeWebsiteDisplayDimension(normalized, kind, maximum)
+    : normalized;
+  if (!privacySafe) return null;
+  if (privacySafe.toLowerCase() === "unknown") return "Unknown";
+  return lowerCase ? privacySafe.toLowerCase() : privacySafe;
+}
+
+function normalizedDeviceFilter(value: string | null | undefined) {
+  const normalized = normalizedDimensionFilter(value, 20, "deviceCategory");
+  if (
+    normalized === null
+    || normalized === "Unknown"
+    || ["mobile", "tablet", "desktop", "bot"].includes(normalized)
+  ) {
+    return normalized;
+  }
+  return null;
 }
 
 function normalizedSegment(value: WebsiteFunnelRepositoryInput["segment"]) {
@@ -2041,12 +2508,12 @@ export function websiteFunnelQueryValues(input: WebsiteFunnelRepositoryInput): u
     input.comparison.startAt,
     input.comparison.endExclusive,
     [...WEBSITE_FUNNEL_EVENT_TAXONOMY],
-    normalizedDimensionFilter(input.filters?.utmSource, 256, "utmSource", true),
-    normalizedDimensionFilter(input.filters?.utmMedium, 256, "utmMedium", true),
-    normalizedDimensionFilter(input.filters?.utmCampaign, 256, "utmCampaign"),
-    normalizedDimensionFilter(input.filters?.landingPage, 500, "landingPage"),
-    normalizedDimensionFilter(input.filters?.referrerHost, 253, "referrerHost", true),
-    normalizedDimensionFilter(input.filters?.deviceCategory, 20, "deviceCategory"),
+    normalizedDimensionFilter(input.filters?.utmSource, 256, "utmSource", true, "utm"),
+    normalizedDimensionFilter(input.filters?.utmMedium, 256, "utmMedium", true, "utm"),
+    normalizedDimensionFilter(input.filters?.utmCampaign, 256, "utmCampaign", false, "utm"),
+    normalizedDimensionFilter(input.filters?.landingPage, 500, "landingPage", false, "landing_path"),
+    normalizedDimensionFilter(input.filters?.referrerHost, 253, "referrerHost", true, "referrer_host"),
+    normalizedDeviceFilter(input.filters?.deviceCategory),
     groupLimit,
     productOffset,
     collectionOffset,

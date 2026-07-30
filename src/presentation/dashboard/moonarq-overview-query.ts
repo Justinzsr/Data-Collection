@@ -1,3 +1,8 @@
+import {
+  sanitizeWebsiteDisplayDimension as sanitizeMoonArqOverviewDimensionValue,
+  type WebsiteDisplayDimensionKind as MoonArqOverviewDimensionKind,
+} from "@/collection/tracking/website-display-privacy";
+
 export const MOONARQ_OVERVIEW_RANGES = ["today", "7d", "30d"] as const;
 export const MOONARQ_OVERVIEW_COMPARISONS = ["previous", "off"] as const;
 export const MOONARQ_OVERVIEW_SEGMENTS = ["all", "ready-made", "builder"] as const;
@@ -9,7 +14,15 @@ export const MOONARQ_OVERVIEW_TRENDS = [
   "visit_to_checkout_rate",
 ] as const;
 export const MOONARQ_OVERVIEW_DEVICES = ["all", "desktop", "mobile", "tablet", "bot", "unknown"] as const;
-export const MOONARQ_OVERVIEW_DEMO_STATES = ["populated", "empty", "low-volume"] as const;
+export const MOONARQ_OVERVIEW_DEMO_STATES = [
+  "populated",
+  "empty",
+  "low-volume",
+  "comparison-unavailable",
+  "shopify-awaiting",
+  "shopify-zero",
+  "long-values",
+] as const;
 
 export const MOONARQ_OVERVIEW_FILTER_LIMITS = {
   utm: 256,
@@ -17,6 +30,9 @@ export const MOONARQ_OVERVIEW_FILTER_LIMITS = {
   referrerHost: 253,
   productPage: 401,
 } as const;
+
+export type { MoonArqOverviewDimensionKind };
+export { sanitizeMoonArqOverviewDimensionValue };
 
 export type MoonArqOverviewQuery = {
   range: (typeof MOONARQ_OVERVIEW_RANGES)[number];
@@ -91,10 +107,6 @@ function allowlistedValue<const Values extends readonly string[]>(
     : fallback;
 }
 
-function boundedText(value: string | undefined, maximumLength: number) {
-  return (value ?? "").trim().slice(0, maximumLength);
-}
-
 function tablePage(value: string | undefined) {
   if (!value || !/^\d+$/u.test(value)) return 1;
   const parsed = Number.parseInt(value, 10);
@@ -129,11 +141,31 @@ export function parseMoonArqOverviewQuery(input: SearchParamsInput): MoonArqOver
       MOONARQ_OVERVIEW_DEVICES,
       DEFAULT_MOONARQ_OVERVIEW_QUERY.device,
     ),
-    utm_source: boundedText(singleValue(input, "utm_source"), MOONARQ_OVERVIEW_FILTER_LIMITS.utm),
-    utm_medium: boundedText(singleValue(input, "utm_medium"), MOONARQ_OVERVIEW_FILTER_LIMITS.utm),
-    utm_campaign: boundedText(singleValue(input, "utm_campaign"), MOONARQ_OVERVIEW_FILTER_LIMITS.utm),
-    landing_path: boundedText(singleValue(input, "landing_path"), MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath),
-    referrer_host: boundedText(singleValue(input, "referrer_host"), MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost),
+    utm_source: sanitizeMoonArqOverviewDimensionValue(
+      singleValue(input, "utm_source"),
+      "utm",
+      MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+    ).toLowerCase(),
+    utm_medium: sanitizeMoonArqOverviewDimensionValue(
+      singleValue(input, "utm_medium"),
+      "utm",
+      MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+    ).toLowerCase(),
+    utm_campaign: sanitizeMoonArqOverviewDimensionValue(
+      singleValue(input, "utm_campaign"),
+      "utm",
+      MOONARQ_OVERVIEW_FILTER_LIMITS.utm,
+    ),
+    landing_path: sanitizeMoonArqOverviewDimensionValue(
+      singleValue(input, "landing_path"),
+      "landing_path",
+      MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath,
+    ),
+    referrer_host: sanitizeMoonArqOverviewDimensionValue(
+      singleValue(input, "referrer_host"),
+      "referrer_host",
+      MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost,
+    ),
     collection_page: tablePage(singleValue(input, "collection_page")),
     product_page: tablePage(singleValue(input, "product_page")),
     acquisition_page: tablePage(singleValue(input, "acquisition_page")),

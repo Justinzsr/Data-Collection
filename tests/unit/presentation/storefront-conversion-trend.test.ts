@@ -40,5 +40,12 @@ describe("StorefrontConversionTrend data", () => {
       current: 12,
       previous: 10,
     }, "sessions")).toBe("2026-07-28: 12; 2026-06-28: 10");
+
+    expect(storefrontTrendText({
+      date: "2026-07-28",
+      comparisonDate: "2026-06-28",
+      current: 12,
+      previous: 10,
+    }, "sessions", false)).toBe("2026-07-28: 12");
   });
 });

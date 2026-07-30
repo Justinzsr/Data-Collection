@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "./test";
 import { dashboardAuthCookie, loginDashboard } from "./auth";
 
 async function saveSourceAndCaptureId(page: Page) {

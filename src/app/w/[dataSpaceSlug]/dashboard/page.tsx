@@ -1,14 +1,19 @@
 import { ArrowRight, Bookmark, Camera, Car, ChevronDown, ExternalLink, Eye, FileText, Heart, MessageCircle, Plus, Share2, TableProperties, Video } from "lucide-react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getDailyReport } from "@/aggregation/services/daily-report-service";
 import { getInstagramDashboardSummary, type InstagramDashboardSummary } from "@/aggregation/services/instagram-dashboard-service";
 import { getInstagramPaidAdsSummary, type InstagramPaidAdsSummary, type PaidMetricValue } from "@/aggregation/services/meta-ads-attribution-service";
 import { getTikTokDashboardSummary, type TikTokDashboardSummary } from "@/aggregation/services/tiktok-dashboard-service";
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
-import { getGlobalPlatformHealth, getPlatformModules } from "@/aggregation/services/platform-modules-service";
+import {
+  getGlobalPlatformHealth,
+  getPlatformModules,
+  type PlatformModule,
+} from "@/aggregation/services/platform-modules-service";
 import { getWebsiteFunnelOverview } from "@/aggregation/services/website-funnel-service";
 import { getDataSpaceBySlug, isAutoLabDataSpace } from "@/storage/repositories/data-spaces-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
+import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
 import { addDaysToDateKey, dateKeyInAppTimeZone, formatAppDateTime } from "@/storage/runtime/app-time";
 import { Badge } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
@@ -20,7 +25,11 @@ import { GlobalHealthStrip } from "@/presentation/dashboard/global-health-strip"
 import { PlatformModuleCard } from "@/presentation/dashboard/platform-module-card";
 import { InstagramPaidAdsPanel } from "@/presentation/dashboard/instagram-paid-ads-panel";
 import { MoonArqOverviewHeader } from "@/presentation/dashboard/moonarq-overview-header";
-import { parseMoonArqOverviewQuery } from "@/presentation/dashboard/moonarq-overview-query";
+import {
+  buildMoonArqOverviewHref,
+  parseMoonArqOverviewQuery,
+  type MoonArqOverviewQuery,
+} from "@/presentation/dashboard/moonarq-overview-query";
 import { StorefrontBreakdowns } from "@/presentation/dashboard/storefront-breakdowns";
 import { StorefrontConversionTrend } from "@/presentation/dashboard/storefront-conversion-trend";
 import { StorefrontFunnel } from "@/presentation/dashboard/storefront-funnel";
@@ -33,6 +42,73 @@ export const dynamic = "force-dynamic";
 function parseRange(value: string | undefined): DateRangeKey {
   if (value === "today" || value === "7d" || value === "30d") return value;
   return "30d";
+}
+
+const overviewDisplayFilterKeys = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "landing_path",
+  "referrer_host",
+] as const satisfies readonly (keyof MoonArqOverviewQuery)[];
+
+function requiresSanitizedOverviewRedirect(
+  raw: Record<string, string | string[] | undefined>,
+  normalized: MoonArqOverviewQuery,
+) {
+  return overviewDisplayFilterKeys.some((key) => {
+    const value = raw[key];
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value !== "string") return false;
+    return value.trim() !== normalized[key];
+  });
+}
+
+function localShopifyFixture(
+  demoState: "shopify-awaiting" | "shopify-zero",
+): PlatformModule {
+  const synced = demoState === "shopify-zero";
+  return {
+    sourceId: "local-shopify-fixture",
+    sourceTypeKey: "shopify",
+    displayName: "Shopify local fixture",
+    platformLabel: "Shopify",
+    status: synced ? "healthy" : "warning",
+    syncMode: "webhook",
+    sourceModeLabel: "Shopify authoritative commerce",
+    rangeLabel: "Last 30 days",
+    primaryMetric: {
+      key: "orders",
+      label: "Orders",
+      value: 0,
+      unit: "count",
+      deltaPercent: null,
+      deltaLabel: "—",
+    },
+    secondaryMetrics: [
+      { key: "net_payment", label: "Net payment", value: 0, unit: "usd" },
+      { key: "gross_sales", label: "Gross sales", value: 0, unit: "usd" },
+      { key: "refunds", label: "Refunds", value: 0, unit: "usd" },
+    ],
+    sparkline: [],
+    insights: [],
+    lastSyncAt: synced ? "2026-07-29T18:00:00.000Z" : null,
+    lastSuccessfulSyncAt: synced ? "2026-07-29T18:00:00.000Z" : null,
+    nextSyncAt: null,
+    lastError: null,
+    setupState: {
+      label: synced ? "Healthy" : "Awaiting first sync",
+      severity: synced ? "ok" : "warning",
+      message: synced
+        ? "Deterministic local Shopify fixture is synced."
+        : "Deterministic local Shopify fixture is awaiting its first successful sync.",
+    },
+    actions: {
+      canRunSync: true,
+      canConfigure: true,
+      canViewDetails: true,
+    },
+  };
 }
 
 function moduleSeries(modules: Awaited<ReturnType<typeof getPlatformModules>>) {
@@ -457,10 +533,13 @@ export default async function DataSpaceDashboardPage({
   if (!dataSpace) notFound();
   const isMoonArq = dataSpace.slug === "moonarq";
   const overviewQuery = parseMoonArqOverviewQuery(query ?? {});
+  const basePath = dashboardPath(dataSpace.slug);
+  if (isMoonArq && requiresSanitizedOverviewRedirect(query ?? {}, overviewQuery)) {
+    redirect(buildMoonArqOverviewHref(basePath, overviewQuery));
+  }
   const range = isMoonArq
     ? overviewQuery.range
     : parseRange(typeof query?.range === "string" ? query.range : undefined);
-  const basePath = dashboardPath(dataSpace.slug);
   const yesterday = addDaysToDateKey(dateKeyInAppTimeZone(), -1);
   const instagramSummaryPromise = getInstagramDashboardSummary({ dataSpaceId: dataSpace.id });
   const instagramPaidSummaryPromise = isMoonArq
@@ -518,7 +597,12 @@ export default async function DataSpaceDashboardPage({
   const operationalSeries = isMoonArq
     ? moduleSeries(modules.filter((module) => module.sourceTypeKey !== "website" && module.sourceTypeKey !== "shopify"))
     : moduleSeries(modules);
-  const shopifyModule = modules.find((module) => module.sourceTypeKey === "shopify") ?? null;
+  const localFixtureEnabled = process.env.MOONARQ_OVERVIEW_E2E_FIXTURES === "true"
+    && !isRuntimeDatabaseConfigured();
+  const shopifyModule = localFixtureEnabled
+    && (overviewQuery.demo_state === "shopify-awaiting" || overviewQuery.demo_state === "shopify-zero")
+    ? localShopifyFixture(overviewQuery.demo_state)
+    : modules.find((module) => module.sourceTypeKey === "shopify") ?? null;
   const hasDirectInstagramPanel = instagramSummary.sources.length > 0;
   const hasDirectTikTokPanel = tiktokSummary.sources.length > 0;
 

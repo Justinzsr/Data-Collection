@@ -34,6 +34,10 @@ import type {
   WebsiteProductPerformanceRow,
   WebsiteReadyMadeJourney,
 } from "@/aggregation/services/website-funnel-types";
+import {
+  sanitizeWebsiteDisplayDimension,
+  type WebsiteDisplayDimensionKind,
+} from "@/collection/tracking/website-display-privacy";
 import { resolveAuthoritativeWebsiteSource } from "@/collection/tracking/website-sources";
 import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
 import type { JsonRecord, Source, WebEvent } from "@/storage/db/schema";
@@ -59,7 +63,14 @@ import {
   type HalfOpenAppDateRangeUtc,
 } from "@/storage/runtime/app-time";
 
-export type WebsiteFunnelDemoState = "populated" | "empty" | "low-volume";
+export type WebsiteFunnelDemoState =
+  | "populated"
+  | "empty"
+  | "low-volume"
+  | "comparison-unavailable"
+  | "shopify-awaiting"
+  | "shopify-zero"
+  | "long-values";
 
 export type WebsiteFunnelOverviewInput = {
   dataSpaceId: string;
@@ -198,6 +209,16 @@ function boundedText(value: string | undefined, maximum: number) {
   return normalized;
 }
 
+function boundedDimension(
+  value: string | undefined,
+  maximum: number,
+  kind: WebsiteDisplayDimensionKind,
+  lowerCase = false,
+) {
+  const safe = sanitizeWebsiteDisplayDimension(boundedText(value, maximum), kind, maximum);
+  return lowerCase ? safe.toLowerCase() : safe;
+}
+
 function prepareRequest(input: WebsiteFunnelOverviewInput): PreparedRequest {
   const now = validDate(input.now);
   const rangeKey = input.range ?? "30d";
@@ -218,11 +239,11 @@ function prepareRequest(input: WebsiteFunnelOverviewInput): PreparedRequest {
     filters: {
       segment,
       device,
-      utmSource: boundedText(input.utmSource, 256).toLowerCase(),
-      utmMedium: boundedText(input.utmMedium, 256).toLowerCase(),
-      utmCampaign: boundedText(input.utmCampaign, 256),
-      landingPath: boundedText(input.landingPath, 500),
-      referrerHost: boundedText(input.referrerHost, 253).toLowerCase(),
+      utmSource: boundedDimension(input.utmSource, 256, "utm", true),
+      utmMedium: boundedDimension(input.utmMedium, 256, "utm", true),
+      utmCampaign: boundedDimension(input.utmCampaign, 256, "utm"),
+      landingPath: boundedDimension(input.landingPath, 500, "landing_path"),
+      referrerHost: boundedDimension(input.referrerHost, 253, "referrer_host", true),
     },
     dateRange,
     comparableRanges,
@@ -1487,11 +1508,47 @@ async function demoOverview(request: PreparedRequest): Promise<WebsiteFunnelOver
   const current = demoPeriod(sourceEvents, request.comparableRanges.current, request);
   const previous = demoPeriod(sourceEvents, request.repositoryComparison, request);
   const sourceSummary = sourceState(source);
-  const comparison = comparisonAvailability(request, sourceSummary, firstOccurredAt);
+  const fixtureMode = process.env.MOONARQ_OVERVIEW_E2E_FIXTURES === "true";
+  const comparison = request.demoState === "comparison-unavailable" && fixtureMode
+    ? {
+        available: false,
+        reason: "Deterministic local fixture: previous-period coverage is unavailable.",
+      }
+    : comparisonAvailability(request, sourceSummary, firstOccurredAt);
   const stages = buildStageRows(current.stages, previous.stages, request, comparison.available);
   const products = productRows(current);
   const collections = collectionRows(current);
   const acquisition = acquisitionRows(current, request.segment);
+  if (request.demoState === "long-values" && fixtureMode && acquisition.length > 0) {
+    acquisition[0] = {
+      ...acquisition[0],
+      utmSource: sanitizeWebsiteDisplayDimension(
+        "partner_social_channel_with_an_intentionally_long_but_safe_name",
+        "utm",
+        256,
+      ),
+      utmMedium: sanitizeWebsiteDisplayDimension(
+        "community_collaboration_and_editorial_referral",
+        "utm",
+        256,
+      ),
+      utmCampaign: sanitizeWebsiteDisplayDimension(
+        "moonlit_studio_launch_with_complete_persistent_acquisition_context",
+        "utm",
+        256,
+      ),
+      landingPath: sanitizeWebsiteDisplayDimension(
+        "/collections/moonlit-studio-launch/complete-persistent-acquisition-context",
+        "landing_path",
+        500,
+      ),
+      referrerHost: sanitizeWebsiteDisplayDimension(
+        "editorial-partnership-long-reference.example.invalid",
+        "referrer_host",
+        253,
+      ),
+    };
+  }
 
   return {
     ...baseOverview(

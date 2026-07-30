@@ -177,4 +177,113 @@ describe("StorefrontBreakdowns", () => {
     expect(markup).not.toContain("0 co-timed session progressions");
     expect(markup).not.toContain("Completed-day raw page views");
   });
+
+  it("preserves complete long acquisition values and explicit mobile labels", () => {
+    const overview = createWebsiteFunnelOverview();
+    const longValues = {
+      utmSource: "affiliate_partner_channel_with_extended_context",
+      utmMedium: "creator_collaboration_and_editorial_placement",
+      utmCampaign: "summer_lunar_collection_launch_with_extended_campaign_context",
+      landingPath: "/collections/build-your-own/lunar-signature-series/extended-editorial-landing",
+      referrerHost: "editorial-partnership.storefront-discovery.example",
+    };
+    overview.acquisition.rows = [{
+      ...overview.acquisition.rows[0]!,
+      ...longValues,
+      key: "long-safe-acquisition-row",
+    }];
+
+    const markup = renderToStaticMarkup(
+      <StorefrontBreakdowns
+        overview={overview}
+        query={DEFAULT_MOONARQ_OVERVIEW_QUERY}
+        basePath="/w/moonarq/dashboard"
+      />,
+    );
+    const root = document.createElement("div");
+    root.innerHTML = markup;
+    const acquisition = root.querySelector('[data-testid="acquisition-performance"]');
+    const mobileRow = acquisition?.querySelector("[data-acquisition-mobile-row]");
+
+    expect(acquisition).not.toBeNull();
+    expect(mobileRow).not.toBeNull();
+    expect([...mobileRow!.querySelectorAll("dt")].map((term) => term.textContent)).toEqual([
+      "UTM source",
+      "UTM medium",
+      "Campaign",
+      "Landing page",
+      "Referrer",
+      "Sessions",
+      "Product intent",
+      "Checkout started",
+      "Visit-to-checkout rate",
+    ]);
+    expect([...mobileRow!.querySelectorAll("dd")].map((detail) => detail.textContent)).toEqual([
+      longValues.utmSource,
+      longValues.utmMedium,
+      longValues.utmCampaign,
+      longValues.landingPath,
+      longValues.referrerHost,
+      "20",
+      "12",
+      "3",
+      "15.0%",
+    ]);
+    expect(acquisition?.querySelector(".truncate")).toBeNull();
+    expect(acquisition?.querySelector("[title]")).toBeNull();
+    for (const value of Object.values(longValues)) {
+      expect(markup).toContain(value);
+    }
+  });
+
+  it("does not reflect unsafe query filters or unsafe filter options into the page", () => {
+    const overview = createWebsiteFunnelOverview();
+    const unsafeValues = [
+      "synthetic.user@example.invalid",
+      "token=synthetic-not-a-secret",
+      "4111111111111111",
+      "/checkout?authorization=synthetic",
+      "127.0.0.1",
+    ] as const;
+    overview.filterOptions = {
+      ...overview.filterOptions,
+      utmSources: ["newsletter", unsafeValues[0]],
+      utmMediums: ["email", unsafeValues[1]],
+      utmCampaigns: ["summer", unsafeValues[2]],
+      landingPaths: ["/collections/new", unsafeValues[3]],
+      referrerHosts: ["example.test", unsafeValues[4]],
+    };
+    const query: MoonArqOverviewQuery = {
+      ...DEFAULT_MOONARQ_OVERVIEW_QUERY,
+      utm_source: unsafeValues[0],
+      utm_medium: unsafeValues[1],
+      utm_campaign: unsafeValues[2],
+      landing_path: unsafeValues[3],
+      referrer_host: unsafeValues[4],
+    };
+
+    const markup = renderToStaticMarkup(
+      <StorefrontBreakdowns
+        overview={overview}
+        query={query}
+        basePath="/w/moonarq/dashboard"
+      />,
+    );
+    const root = document.createElement("div");
+    root.innerHTML = markup;
+
+    for (const value of unsafeValues) {
+      expect(markup).not.toContain(value);
+    }
+    expect(root.querySelector<HTMLSelectElement>('select[name="utm_source"]')?.value).toBe("");
+    expect(root.querySelector<HTMLSelectElement>('select[name="utm_medium"]')?.value).toBe("");
+    expect(root.querySelector<HTMLSelectElement>('select[name="utm_campaign"]')?.value).toBe("");
+    expect(root.querySelector<HTMLSelectElement>('select[name="landing_path"]')?.value).toBe("");
+    expect(root.querySelector<HTMLSelectElement>('select[name="referrer_host"]')?.value).toBe("");
+    expect(markup).toContain('<option value="newsletter">newsletter</option>');
+    expect(markup).toContain('<option value="email">email</option>');
+    expect(markup).toContain('<option value="summer">summer</option>');
+    expect(markup).toContain('<option value="/collections/new">/collections/new</option>');
+    expect(markup).toContain('<option value="example.test">example.test</option>');
+  });
 });

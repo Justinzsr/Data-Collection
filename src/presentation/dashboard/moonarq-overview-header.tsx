@@ -69,7 +69,7 @@ export function MoonArqOverviewHeader({
         <div className="flex min-w-0 items-start gap-2.5">
           <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200/80" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Data through</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">Data through</p>
             <p className="mt-1 break-words text-sm text-slate-200">
               {formatAppDateTime(overview.coverage.latestReceivedAt, "No accepted events yet")}
             </p>
@@ -78,7 +78,7 @@ export function MoonArqOverviewHeader({
         <div className="flex min-w-0 items-start gap-2.5">
           <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200/80" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Tracking coverage</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">Tracking coverage</p>
             <p className="mt-1 break-words text-sm text-slate-200">
               {overview.coverage.firstOccurredAt
                 ? `Since ${formatAppDate(overview.coverage.firstOccurredAt)}`
@@ -89,14 +89,14 @@ export function MoonArqOverviewHeader({
         <div className="flex min-w-0 items-start gap-2.5">
           <Activity className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200/80" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Selected period</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">Selected period</p>
             <p className="mt-1 text-sm text-slate-200">{overview.range.label}</p>
           </div>
         </div>
         <div className="flex min-w-0 items-start gap-2.5">
           <DatabaseZap className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200/80" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Source role</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">Source role</p>
             <p className="mt-1 text-sm text-slate-200">First-party Website Tracker</p>
           </div>
         </div>

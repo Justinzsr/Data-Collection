@@ -63,20 +63,70 @@ describe("MoonArq Overview query state", () => {
     expect(parseMoonArqOverviewQuery({ product_page: "0" }).product_page).toBe(1);
   });
 
-  it("trims and caps supported text filters", () => {
+  it("trims supported safe text filters", () => {
     const parsed = parseMoonArqOverviewQuery({
-      utm_source: `  ${"s".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.utm + 20)}  `,
+      utm_source: "  Newsletter  ",
       utm_medium: "  paid social  ",
       utm_campaign: "  lunar launch  ",
-      landing_path: `  /${"p".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath + 20)}  `,
-      referrer_host: `  ${"r".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost + 20)}  `,
+      landing_path: "  /collections/build-your-own  ",
+      referrer_host: "  Search.Example  ",
     });
 
-    expect(parsed.utm_source).toHaveLength(MOONARQ_OVERVIEW_FILTER_LIMITS.utm);
+    expect(parsed.utm_source).toBe("newsletter");
     expect(parsed.utm_medium).toBe("paid social");
     expect(parsed.utm_campaign).toBe("lunar launch");
-    expect(parsed.landing_path).toHaveLength(MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath);
-    expect(parsed.referrer_host).toHaveLength(MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost);
+    expect(parsed.landing_path).toBe("/collections/build-your-own");
+    expect(parsed.referrer_host).toBe("search.example");
+  });
+
+  it("does not confuse ordinary hyphenated campaign words with credentials", () => {
+    const parsed = parseMoonArqOverviewQuery({
+      utm_source: "secret-case",
+      utm_medium: "token-drop",
+      utm_campaign: "credential-free-editorial",
+    });
+
+    expect(parsed.utm_source).toBe("secret-case");
+    expect(parsed.utm_medium).toBe("token-drop");
+    expect(parsed.utm_campaign).toBe("credential-free-editorial");
+  });
+
+  it("rejects overlong and privacy-unsafe filter values instead of reflecting them", () => {
+    const unsafe = parseMoonArqOverviewQuery({
+      utm_source: "synthetic.user%2540example.invalid",
+      utm_medium: "token=synthetic-not-a-secret",
+      utm_campaign: "4111111111111111",
+      landing_path: "/checkout?authorization=synthetic",
+      referrer_host: "127.0.0.1",
+    });
+    const overlong = parseMoonArqOverviewQuery({
+      utm_source: "s".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.utm + 1),
+      utm_medium: "m".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.utm + 1),
+      utm_campaign: "c".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.utm + 1),
+      landing_path: `/${"p".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath)}`,
+      referrer_host: "r".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost + 1),
+    });
+
+    expect(unsafe).toMatchObject({
+      utm_source: "",
+      utm_medium: "",
+      utm_campaign: "",
+      landing_path: "",
+      referrer_host: "",
+    });
+    expect(overlong).toMatchObject({
+      utm_source: "",
+      utm_medium: "",
+      utm_campaign: "",
+      landing_path: "",
+      referrer_host: "",
+    });
+
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", {
+      ...DEFAULT_MOONARQ_OVERVIEW_QUERY,
+      ...unsafe,
+    });
+    expect(href).toBe("/w/moonarq/dashboard");
   });
 
   it("preserves supported state, omits defaults, and URL-encodes values", () => {
@@ -106,7 +156,7 @@ describe("MoonArq Overview query state", () => {
       segment: "builder",
       trend: "add_to_cart",
       device: "mobile",
-      utm_source: "Instagram stories",
+      utm_source: "instagram stories",
       utm_medium: "paid/social",
       utm_campaign: "Moon & stars",
       landing_path: "/collections/build your own",
