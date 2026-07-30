@@ -693,7 +693,7 @@ describe("website funnel overview service", () => {
   });
 
   it("returns a complete aggregate DTO without raw identities, URLs, credentials, or PII", async () => {
-    addSession("private-person@example.com", [
+    addSession("private-person@example.invalid", [
       ["page_view", at(8, 0)],
       ["view_item", at(8, 1)],
       ["email_signup", at(8, 2)],
@@ -701,7 +701,7 @@ describe("website funnel overview service", () => {
       anonymousId: "202-555-0100",
       attribution: {
         landing_page: "/products/moon",
-        first_referrer: "https://safe.example/private-person@example.com",
+        first_referrer: "https://safe.example/private-person@example.invalid",
       },
     });
     getDemoStore().webEvents[0].user_id = "private-user-id";
@@ -729,7 +729,7 @@ describe("website funnel overview service", () => {
       reconciliation: expect.any(Object),
     }));
     for (const forbidden of [
-      "private-person@example.com",
+      "private-person@example.invalid",
       "202-555-0100",
       "private-user-id",
       "must-never-leave-the-service",
