@@ -6,6 +6,7 @@ import { getInstagramPaidAdsSummary, type InstagramPaidAdsSummary, type PaidMetr
 import { getTikTokDashboardSummary, type TikTokDashboardSummary } from "@/aggregation/services/tiktok-dashboard-service";
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
 import { getGlobalPlatformHealth, getPlatformModules } from "@/aggregation/services/platform-modules-service";
+import { getWebsiteFunnelOverview } from "@/aggregation/services/website-funnel-service";
 import { getDataSpaceBySlug, isAutoLabDataSpace } from "@/storage/repositories/data-spaces-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { addDaysToDateKey, dateKeyInAppTimeZone, formatAppDateTime } from "@/storage/runtime/app-time";
@@ -13,10 +14,18 @@ import { Badge } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel } from "@/presentation/components/ui/panel";
 import { PlatformTrendChart } from "@/presentation/charts/platform-trend-chart";
+import { CommerceOutcomes } from "@/presentation/dashboard/commerce-outcomes";
 import { CommandCenterHeader } from "@/presentation/dashboard/command-center-header";
 import { GlobalHealthStrip } from "@/presentation/dashboard/global-health-strip";
 import { PlatformModuleCard } from "@/presentation/dashboard/platform-module-card";
 import { InstagramPaidAdsPanel } from "@/presentation/dashboard/instagram-paid-ads-panel";
+import { MoonArqOverviewHeader } from "@/presentation/dashboard/moonarq-overview-header";
+import { parseMoonArqOverviewQuery } from "@/presentation/dashboard/moonarq-overview-query";
+import { StorefrontBreakdowns } from "@/presentation/dashboard/storefront-breakdowns";
+import { StorefrontConversionTrend } from "@/presentation/dashboard/storefront-conversion-trend";
+import { StorefrontFunnel } from "@/presentation/dashboard/storefront-funnel";
+import { StorefrontJourneys } from "@/presentation/dashboard/storefront-journeys";
+import { WebsiteBusinessPulse } from "@/presentation/dashboard/website-business-pulse";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
 
 export const dynamic = "force-dynamic";
@@ -441,16 +450,20 @@ export default async function DataSpaceDashboardPage({
   searchParams,
 }: {
   params: Promise<{ dataSpaceSlug: string }>;
-  searchParams?: Promise<{ range?: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [{ dataSpaceSlug }, query] = await Promise.all([params, searchParams]);
   const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
   if (!dataSpace) notFound();
-  const range = parseRange(query?.range);
+  const isMoonArq = dataSpace.slug === "moonarq";
+  const overviewQuery = parseMoonArqOverviewQuery(query ?? {});
+  const range = isMoonArq
+    ? overviewQuery.range
+    : parseRange(typeof query?.range === "string" ? query.range : undefined);
   const basePath = dashboardPath(dataSpace.slug);
   const yesterday = addDaysToDateKey(dateKeyInAppTimeZone(), -1);
   const instagramSummaryPromise = getInstagramDashboardSummary({ dataSpaceId: dataSpace.id });
-  const instagramPaidSummaryPromise = dataSpace.slug === "moonarq"
+  const instagramPaidSummaryPromise = isMoonArq
     ? instagramSummaryPromise.then((summary) => {
         const primaryInstagramSourceId = summary.sources[0]?.sourceId;
         return primaryInstagramSourceId
@@ -458,7 +471,34 @@ export default async function DataSpaceDashboardPage({
           : null;
       })
     : Promise.resolve(null);
-  const [modules, health, yesterdayReport, sources, instagramSummary, tiktokSummary, instagramPaidSummary] = await Promise.all([
+  const websiteOverviewPromise = isMoonArq
+    ? getWebsiteFunnelOverview({
+        dataSpaceId: dataSpace.id,
+        range: overviewQuery.range,
+        comparison: overviewQuery.compare,
+        segment: overviewQuery.segment,
+        device: overviewQuery.device,
+        utmSource: overviewQuery.utm_source,
+        utmMedium: overviewQuery.utm_medium,
+        utmCampaign: overviewQuery.utm_campaign,
+        landingPath: overviewQuery.landing_path,
+        referrerHost: overviewQuery.referrer_host,
+        collectionPage: overviewQuery.collection_page,
+        productPage: overviewQuery.product_page,
+        acquisitionPage: overviewQuery.acquisition_page,
+        demoState: overviewQuery.demo_state,
+      })
+    : Promise.resolve(null);
+  const [
+    modules,
+    health,
+    yesterdayReport,
+    sources,
+    instagramSummary,
+    tiktokSummary,
+    instagramPaidSummary,
+    websiteOverview,
+  ] = await Promise.all([
     getPlatformModules(range, { dataSpaceId: dataSpace.id, dataSpaceName: dataSpace.display_name }),
     getGlobalPlatformHealth(range, { dataSpaceId: dataSpace.id, dataSpaceName: dataSpace.display_name }),
     getDailyReport(yesterday, dataSpace),
@@ -466,39 +506,88 @@ export default async function DataSpaceDashboardPage({
     instagramSummaryPromise,
     getTikTokDashboardSummary({ dataSpaceId: dataSpace.id }),
     instagramPaidSummaryPromise,
+    websiteOverviewPromise,
   ]);
   const futureModules = modules.filter((platformModule) => platformModule.sourceTypeKey === "custom_api" || platformModule.sourceTypeKey === "custom_csv");
   const autoLabEmpty = isAutoLabDataSpace(dataSpace) && sources.length === 0;
   const overviewTypes = new Set(["website", "supabase", "tiktok", "instagram", "shopify"]);
   const overviewModules = modules.filter((module) => overviewTypes.has(module.sourceTypeKey) && Boolean(module.sourceId || dataSpace.slug === "moonarq"));
+  const operationalModules = isMoonArq
+    ? overviewModules.filter((module) => module.sourceTypeKey !== "website" && module.sourceTypeKey !== "shopify")
+    : overviewModules;
+  const operationalSeries = isMoonArq
+    ? moduleSeries(modules.filter((module) => module.sourceTypeKey !== "website" && module.sourceTypeKey !== "shopify"))
+    : moduleSeries(modules);
+  const shopifyModule = modules.find((module) => module.sourceTypeKey === "shopify") ?? null;
   const hasDirectInstagramPanel = instagramSummary.sources.length > 0;
   const hasDirectTikTokPanel = tiktokSummary.sources.length > 0;
 
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-[1600px] grid-cols-[minmax(0,1fr)] gap-4">
-      <CommandCenterHeader modules={modules} range={range} dataSpaceName={dataSpace.display_name} dataSpaceSlug={dataSpace.slug} basePath={basePath} />
+      {websiteOverview ? (
+        <MoonArqOverviewHeader overview={websiteOverview} query={overviewQuery} basePath={basePath} />
+      ) : (
+        <CommandCenterHeader modules={modules} range={range} dataSpaceName={dataSpace.display_name} dataSpaceSlug={dataSpace.slug} basePath={basePath} />
+      )}
 
       {autoLabEmpty ? <AutoLabEmptyState dataSpaceSlug={dataSpace.slug} /> : null}
 
-      {!autoLabEmpty ? (
+      {websiteOverview ? (
+        <>
+          <WebsiteBusinessPulse overview={websiteOverview} />
+          <section
+            className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]"
+            aria-label="Storefront funnel and conversion trend"
+          >
+            <StorefrontFunnel overview={websiteOverview} />
+            <StorefrontConversionTrend overview={websiteOverview} query={overviewQuery} basePath={basePath} />
+          </section>
+          <StorefrontJourneys overview={websiteOverview} />
+          <StorefrontBreakdowns overview={websiteOverview} query={overviewQuery} basePath={basePath} />
+          <CommerceOutcomes shopify={shopifyModule} />
+        </>
+      ) : null}
+
+      {!autoLabEmpty && !isMoonArq ? (
         <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3" data-testid="dashboard-data-stage" aria-label="Performance graphs and platform summaries">
-          <PlatformTrendChart series={moduleSeries(modules)} />
+          <PlatformTrendChart series={operationalSeries} />
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="overview-module-grid">
-            {overviewModules.map((module) => (
+            {operationalModules.map((module) => (
               <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
             ))}
           </div>
         </section>
       ) : null}
 
-      {!autoLabEmpty ? <GlobalHealthStrip health={health} /> : null}
+      {!autoLabEmpty && !isMoonArq ? <GlobalHealthStrip health={health} /> : null}
 
       {!autoLabEmpty && (hasDirectInstagramPanel || hasDirectTikTokPanel) ? (
-        <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 xl:grid-cols-2" aria-label="Social platform detail modules">
+        <section
+          className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 [&_a]:!min-h-11 [&_button]:!min-h-11 xl:grid-cols-2"
+          data-testid="social-platform-detail-modules"
+          aria-label="Social platform detail modules"
+        >
           {hasDirectInstagramPanel ? <InstagramInsightsPanel summary={instagramSummary} paid={instagramPaidSummary} basePath={basePath} dataSpaceSlug={dataSpace.slug} /> : null}
           {hasDirectTikTokPanel ? <TikTokInsightsPanel summary={tiktokSummary} basePath={basePath} /> : null}
         </section>
       ) : null}
+
+      {websiteOverview ? (
+        <section
+          className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3"
+          data-testid="dashboard-data-stage"
+          aria-label="Operational platform summaries"
+        >
+          <PlatformTrendChart series={operationalSeries} />
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-3 [&_a]:!min-h-11 [&_button]:!min-h-11" data-testid="overview-module-grid">
+            {operationalModules.map((module) => (
+              <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {websiteOverview ? <GlobalHealthStrip health={health} /> : null}
 
       {!autoLabEmpty ? (
         <details className="group glass rounded-xl" data-testid="daily-report-module">
@@ -524,11 +613,11 @@ export default async function DataSpaceDashboardPage({
               {yesterdayReport ? `Generated ${yesterdayReport.run.generated_at_pt}.` : "Generate a safe PT daily snapshot from this data space when you are ready."}
             </p>
             <div className="flex flex-wrap gap-2">
-              <LinkButton href={`${basePath}/reports/daily`} variant="primary" className="min-h-9 px-3 text-xs">
+              <LinkButton href={`${basePath}/reports/daily`} variant="primary" className="min-h-11 px-3 text-xs">
                 <FileText className="h-3.5 w-3.5" />
                 Open Report
               </LinkButton>
-              <LinkButton href={`${basePath}/data`} variant="secondary" className="min-h-9 px-3 text-xs">
+              <LinkButton href={`${basePath}/data`} variant="secondary" className="min-h-11 px-3 text-xs">
                 <TableProperties className="h-3.5 w-3.5" />
                 Explore Data
               </LinkButton>
@@ -538,7 +627,7 @@ export default async function DataSpaceDashboardPage({
       ) : null}
 
       {!autoLabEmpty ? (
-        <details className="group glass rounded-xl">
+        <details className="group glass rounded-xl" data-testid="more-integrations">
           <summary className="flex cursor-pointer items-center justify-between gap-4 p-3 transition hover:bg-white/[0.025]">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">More integrations</p>
@@ -551,12 +640,12 @@ export default async function DataSpaceDashboardPage({
           </summary>
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 border-t border-white/10 p-3 sm:p-4">
             <div className="flex justify-end">
-              <LinkButton href={`${basePath}/sources`} variant="secondary" className="min-h-9 px-3 text-xs">
+              <LinkButton href={`${basePath}/sources`} variant="secondary" className="min-h-11 px-3 text-xs">
                 Source management
                 <ArrowRight className="h-3.5 w-3.5" />
               </LinkButton>
             </div>
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 [&_a]:!min-h-11 [&_button]:!min-h-11">
               {futureModules.map((module) => (
                 <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
               ))}

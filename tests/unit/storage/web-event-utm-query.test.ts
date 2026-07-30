@@ -39,6 +39,7 @@ describe("database web-event UTM query", () => {
 
     expect(queryRowsMock).toHaveBeenCalledTimes(1);
     const sql = String(queryRowsMock.mock.calls[0]?.[0]);
+    expect(sql.match(/event_source = 'first_party_tracker'/gu)).toHaveLength(2);
     expect(sql).toContain("e.attribution_context #>> '{utm,source}'");
     expect(sql).toContain("e.attribution_context #>> '{utm,utm_source}'");
     expect(sql).toContain("e.properties #>> '{attribution,utm,source}'");

@@ -213,6 +213,12 @@ In production, v1 tracker events must include a valid `source_id` and matching `
 
 See [Website Event Contract v1](docs/website-event-contract-v1.md) for payload, privacy, validation, rate-limit, and compatibility details. Set optional `WEBSITE_TRACKING_RATE_LIMIT_PER_MINUTE` to tune the default 600 requests per minute per source/client.
 
+The canonical MoonArq Overview uses a strict, same-session, first-party funnel
+that ends at checkout started. See
+[MoonArq Website Funnel Overview V1](docs/website-funnel-overview-v1.md) for
+stage denominators, ordering policy, filters, privacy boundaries, and honest
+data states.
+
 Source roles are explicit: the first-party tracker is authoritative for funnel/session/identity/attribution; Vercel Drain is auxiliary; Shopify is authoritative for commerce; and Meta is authoritative for paid media delivery and spend.
 
 ## Manual Sync

@@ -1,5 +1,5 @@
 import { getDateRange, type DateRangeKey } from "@/aggregation/services/summary-service";
-import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
+import { resolveAuthoritativeWebsiteSource } from "@/collection/tracking/website-sources";
 import { MOONARQ_FIRST_STORY_CAMPAIGN_NAME, MOONARQ_FIRST_STORY_UTM_TAGS } from "@/collection/connectors/meta-ads/constants";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { JsonRecord, MetricDaily, RawIngestion, Source, WebEvent } from "@/storage/db/schema";
@@ -1234,10 +1234,12 @@ export async function getInstagramPaidAdsSummary(options: {
     : shopifySources.length === 1 ? shopifySources[0] : null) ?? null;
   const websiteSources = sources.filter((source) => source.source_type_key === "website" && source.status !== "disabled");
   const linkedWebsiteSourceId = metaSource ? stringValue(metaSource.metadata.linked_website_source_id) : null;
-  const websiteSource = (
-    (linkedWebsiteSourceId ? websiteSources.find((source) => source.id === linkedWebsiteSourceId) : null)
-    ?? resolvePrimaryWebsiteSource(websiteSources)
-  ) ?? null;
+  const websiteResolution = resolveAuthoritativeWebsiteSource(websiteSources);
+  const websiteSource = linkedWebsiteSourceId
+    ? websiteSources.find((source) => source.id === linkedWebsiteSourceId) ?? null
+    : websiteResolution.status === "resolved"
+      ? websiteResolution.source
+      : null;
   const expectedUtm = sourceUtm(metaSource);
   const [metaRows, shopifyRows, websiteEventCounts, shopifyCapability, metaSnapshot] = await Promise.all([
     metaSource

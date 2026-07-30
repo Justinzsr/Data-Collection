@@ -3,6 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
+  // Source-wizard coverage mutates one shared deterministic store and cleans it in finally blocks.
+  workers: 1,
   use: {
     baseURL: "http://localhost:4000",
     trace: "on-first-retry",
@@ -13,6 +15,7 @@ export default defineConfig({
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "true",
     env: {
       APP_ENCRYPTION_KEY: "test-key-32-bytes-long-for-aes!!",
+      DATABASE_URL: "",
       DASHBOARD_ADMIN_PASSWORD: "e2e-dashboard-password",
       DASHBOARD_SESSION_SECRET: "e2e-dashboard-session-secret-32-bytes",
       NEXT_PUBLIC_APP_URL: "http://localhost:4000",

@@ -1,0 +1,186 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildMoonArqOverviewHref,
+  DEFAULT_MOONARQ_OVERVIEW_QUERY,
+  MOONARQ_OVERVIEW_FILTER_LIMITS,
+  parseMoonArqOverviewQuery,
+  type MoonArqOverviewQuery,
+  type MoonArqOverviewQueryPatch,
+} from "@/presentation/dashboard/moonarq-overview-query";
+
+describe("MoonArq Overview query state", () => {
+  it("defaults invalid, repeated, and unsupported values safely", () => {
+    expect(parseMoonArqOverviewQuery({
+      range: "90d",
+      compare: ["previous", "off"],
+      segment: "purchase",
+      trend: "revenue",
+      device: "watch",
+      collection_page: "0",
+      product_page: "-2",
+      acquisition_page: "1.5",
+      demo_state: "production",
+      ignored: "value",
+    })).toEqual(DEFAULT_MOONARQ_OVERVIEW_QUERY);
+
+    expect(parseMoonArqOverviewQuery(new URLSearchParams("range=7d&range=30d"))).toEqual(
+      DEFAULT_MOONARQ_OVERVIEW_QUERY,
+    );
+  });
+
+  it("accepts every supported enum and bounded positive table pages", () => {
+    expect(parseMoonArqOverviewQuery(new URLSearchParams({
+      range: "today",
+      compare: "off",
+      segment: "ready-made",
+      trend: "visit_to_checkout_rate",
+      device: "bot",
+      collection_page: "21",
+      product_page: "42",
+      acquisition_page: "63",
+      demo_state: "low-volume",
+    }))).toMatchObject({
+      range: "today",
+      compare: "off",
+      segment: "ready-made",
+      trend: "visit_to_checkout_rate",
+      device: "bot",
+      collection_page: 21,
+      product_page: 42,
+      acquisition_page: 63,
+      demo_state: "low-volume",
+    });
+
+    const capped = parseMoonArqOverviewQuery({
+      collection_page: "999999",
+      product_page: "999999",
+      acquisition_page: "999999",
+    });
+    expect(capped.collection_page).toBe(MOONARQ_OVERVIEW_FILTER_LIMITS.productPage);
+    expect(capped.product_page).toBe(MOONARQ_OVERVIEW_FILTER_LIMITS.productPage);
+    expect(capped.acquisition_page).toBe(MOONARQ_OVERVIEW_FILTER_LIMITS.productPage);
+    expect(parseMoonArqOverviewQuery({ product_page: "1.5" }).product_page).toBe(1);
+    expect(parseMoonArqOverviewQuery({ product_page: "0" }).product_page).toBe(1);
+  });
+
+  it("trims and caps supported text filters", () => {
+    const parsed = parseMoonArqOverviewQuery({
+      utm_source: `  ${"s".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.utm + 20)}  `,
+      utm_medium: "  paid social  ",
+      utm_campaign: "  lunar launch  ",
+      landing_path: `  /${"p".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath + 20)}  `,
+      referrer_host: `  ${"r".repeat(MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost + 20)}  `,
+    });
+
+    expect(parsed.utm_source).toHaveLength(MOONARQ_OVERVIEW_FILTER_LIMITS.utm);
+    expect(parsed.utm_medium).toBe("paid social");
+    expect(parsed.utm_campaign).toBe("lunar launch");
+    expect(parsed.landing_path).toHaveLength(MOONARQ_OVERVIEW_FILTER_LIMITS.landingPath);
+    expect(parsed.referrer_host).toHaveLength(MOONARQ_OVERVIEW_FILTER_LIMITS.referrerHost);
+  });
+
+  it("preserves supported state, omits defaults, and URL-encodes values", () => {
+    const current = parseMoonArqOverviewQuery({
+      range: "7d",
+      compare: "off",
+      segment: "builder",
+      trend: "add_to_cart",
+      device: "mobile",
+      utm_source: "Instagram stories",
+      utm_medium: "paid/social",
+      utm_campaign: "Moon & stars",
+      landing_path: "/collections/build your own",
+      referrer_host: "example.com",
+      collection_page: "2",
+      product_page: "3",
+      acquisition_page: "4",
+      demo_state: "empty",
+    });
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", current);
+    const url = new URL(href, "https://data-hub.example");
+
+    expect(url.pathname).toBe("/w/moonarq/dashboard");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      range: "7d",
+      compare: "off",
+      segment: "builder",
+      trend: "add_to_cart",
+      device: "mobile",
+      utm_source: "Instagram stories",
+      utm_medium: "paid/social",
+      utm_campaign: "Moon & stars",
+      landing_path: "/collections/build your own",
+      referrer_host: "example.com",
+      collection_page: "2",
+      product_page: "3",
+      acquisition_page: "4",
+      demo_state: "empty",
+    });
+    expect(href).toContain("utm_campaign=Moon+%26+stars");
+    expect(buildMoonArqOverviewHref("/w/moonarq/dashboard", DEFAULT_MOONARQ_OVERVIEW_QUERY)).toBe(
+      "/w/moonarq/dashboard",
+    );
+  });
+
+  it("keeps every table page when the patch does not change an analytic filter", () => {
+    const current: MoonArqOverviewQuery = {
+      ...DEFAULT_MOONARQ_OVERVIEW_QUERY,
+      range: "7d",
+      collection_page: 7,
+      product_page: 8,
+      acquisition_page: 9,
+    };
+
+    const unchanged = new URL(
+      buildMoonArqOverviewHref("/w/moonarq/dashboard", current, { range: "7d" }),
+      "https://data-hub.example",
+    );
+    expect(Object.fromEntries(unchanged.searchParams)).toMatchObject({
+      collection_page: "7",
+      product_page: "8",
+      acquisition_page: "9",
+    });
+
+    const collectionChanged = new URL(
+      buildMoonArqOverviewHref("/w/moonarq/dashboard", current, { collection_page: 10 }),
+      "https://data-hub.example",
+    );
+    expect(Object.fromEntries(collectionChanged.searchParams)).toMatchObject({
+      collection_page: "10",
+      product_page: "8",
+      acquisition_page: "9",
+    });
+  });
+
+  it.each<[keyof MoonArqOverviewQueryPatch, MoonArqOverviewQueryPatch]>([
+    ["range", { range: "today" }],
+    ["compare", { compare: "off" }],
+    ["segment", { segment: "builder" }],
+    ["trend", { trend: "checkout" }],
+    ["device", { device: "tablet" }],
+    ["utm_source", { utm_source: "instagram" }],
+    ["utm_medium", { utm_medium: "paid_social" }],
+    ["utm_campaign", { utm_campaign: "lunar_launch" }],
+    ["landing_path", { landing_path: "/products/lunar-bracelet" }],
+    ["referrer_host", { referrer_host: "search.example" }],
+    ["demo_state", { demo_state: "low-volume" }],
+  ])("resets all table pagination when %s changes", (_key, patch) => {
+    const current: MoonArqOverviewQuery = {
+      ...DEFAULT_MOONARQ_OVERVIEW_QUERY,
+      collection_page: 7,
+      product_page: 8,
+      acquisition_page: 9,
+    };
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", current, {
+      ...patch,
+      collection_page: 16,
+      product_page: 17,
+      acquisition_page: 18,
+    });
+    const params = new URL(href, "https://data-hub.example").searchParams;
+
+    expect(params.has("collection_page")).toBe(false);
+    expect(params.has("product_page")).toBe(false);
+    expect(params.has("acquisition_page")).toBe(false);
+  });
+});

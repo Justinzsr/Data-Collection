@@ -362,6 +362,7 @@ function demoReturnDeviceCounts(options: {
   const eligibleCutoff7d = addDaysToDateKey(rangeEndDate, -7);
   const sourcePageViews = getDemoStore().webEvents.filter((event) =>
     event.source_id === options.sourceId
+    && event.event_source === "first_party_tracker"
     && event.event_name === "page_view"
     && Date.parse(event.occurred_at) <= endTimestamp);
   const exactUtmPageViews = sourcePageViews.filter((event) =>
@@ -427,6 +428,7 @@ export async function countWebPageViewsByUtm(options: {
     const endTimestamp = Date.parse(options.endOccurredAt);
     const matching = getDemoStore().webEvents.filter((event) =>
       event.source_id === options.sourceId
+      && event.event_source === "first_party_tracker"
       && event.event_name === "page_view"
       && Date.parse(event.occurred_at) >= startTimestamp
       && Date.parse(event.occurred_at) <= endTimestamp
@@ -440,6 +442,7 @@ export async function countWebPageViewsByUtm(options: {
 
   const exactEventConditions = [
     "e.source_id = $1",
+    "e.event_source = 'first_party_tracker'",
     "e.event_name = 'page_view'",
     "e.occurred_at <= $3",
   ];
@@ -522,6 +525,7 @@ export async function countWebPageViewsByUtm(options: {
           (occurred_at at time zone 'America/Los_Angeles')::date as return_date
         from web_events
         where source_id = $1
+          and event_source = 'first_party_tracker'
           and event_name = 'page_view'
           and occurred_at >= $2
           and occurred_at <= $3

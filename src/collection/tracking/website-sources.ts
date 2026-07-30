@@ -3,6 +3,24 @@ import type { Source, SourceTypeKey } from "@/storage/db/schema";
 export const WEBSITE_SOURCE_KEYS = ["vercel_web_analytics_drain", "website"] as const;
 
 export type WebsiteSourceKey = (typeof WEBSITE_SOURCE_KEYS)[number];
+export type AuthoritativeWebsiteSource = Source & { source_type_key: "website" };
+
+export type AuthoritativeWebsiteSourceResolution =
+  | {
+    status: "missing";
+    source: null;
+    candidates: [];
+  }
+  | {
+    status: "resolved";
+    source: AuthoritativeWebsiteSource;
+    candidates: [AuthoritativeWebsiteSource];
+  }
+  | {
+    status: "ambiguous";
+    source: null;
+    candidates: AuthoritativeWebsiteSource[];
+  };
 
 const statusPreference: Record<Source["status"], number> = {
   healthy: 0,
@@ -46,6 +64,22 @@ export function resolvePrimaryWebsiteSource(sources: Source[]) {
   return sources
     .filter((source): source is Source & { source_type_key: "website" } => source.source_type_key === "website" && source.status !== "disabled")
     .sort((left, right) => statusPreference[left.status] - statusPreference[right.status])[0] ?? null;
+}
+
+export function resolveAuthoritativeWebsiteSource(
+  sources: readonly Source[],
+): AuthoritativeWebsiteSourceResolution {
+  const candidates = sources.filter(
+    (source): source is AuthoritativeWebsiteSource => source.source_type_key === "website" && source.status !== "disabled",
+  );
+
+  if (candidates.length === 0) {
+    return { status: "missing", source: null, candidates: [] };
+  }
+  if (candidates.length === 1) {
+    return { status: "resolved", source: candidates[0], candidates: [candidates[0]] };
+  }
+  return { status: "ambiguous", source: null, candidates };
 }
 
 export function listSecondaryWebsiteSources(sources: Source[]) {

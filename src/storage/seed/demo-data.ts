@@ -250,38 +250,388 @@ function makeSyncRuns(sources: Source[]): SyncRun[] {
 }
 
 function makeEvents(): WebEvent[] {
-  const paths = ["/", "/pricing", "/dashboard", "/blog/source-onboarding", "/contact"];
-  const referrers = [null, "https://google.com", "https://x.com", "https://linkedin.com", "direct"];
-  return Array.from({ length: 90 }, (_, index) => {
-    const occurred = new Date(getDemoNow().getTime() - index * 41 * 60_000);
+  type EventInput = {
+    sessionId: string;
+    anonymousId: string;
+    eventName: string;
+    occurredAt: Date;
+    path?: string;
+    properties?: JsonRecord;
+    attribution?: JsonRecord;
+    device?: "mobile" | "tablet" | "desktop" | "unknown";
+    pageType?: string;
+  };
+  const events: WebEvent[] = [];
+  const demoOrigin = "https://storefront.example";
+  const now = getDemoNow();
+  const products = [
+    { item_id: "LUNAR-SILVER", item_name: "Lunar Silver Bracelet", item_category: "Ready-made", price: 88 },
+    { item_id: "TIDAL-PEARL", item_name: "Tidal Pearl Bracelet", item_category: "Ready-made", price: 96 },
+    { item_id: "ORBIT-GOLD", item_name: "Orbit Gold Bracelet", item_category: "Ready-made", price: 112 },
+  ] as const;
+
+  function addEvent(input: EventInput) {
     const id = randomUUID();
-    return {
+    const path = input.path ?? "/";
+    const receivedAt = new Date(input.occurredAt.getTime() + 1_500);
+    events.push({
       id,
       event_id: id,
-      schema_version: "legacy",
+      schema_version: "1.0",
       event_source: "first_party_tracker",
       source_id: DEMO_SOURCE_IDS.website,
       public_tracking_key: "mq_demo_public_website",
-      anonymous_id: `anon_${index % 34}`,
-      session_id: `sess_${index % 42}`,
-      user_id: index % 13 === 0 ? `user_${index}` : null,
-      event_name: index % 5 === 0 ? "cta_click" : "page_view",
-      path: paths[index % paths.length],
-      url: `https://example.com${paths[index % paths.length]}`,
-      referrer: referrers[index % referrers.length],
-      user_agent: "Mozilla/5.0 MoonArq Demo",
+      anonymous_id: input.anonymousId,
+      session_id: input.sessionId,
+      user_id: null,
+      event_name: input.eventName,
+      path,
+      url: `${demoOrigin}${path}`,
+      referrer: typeof input.attribution?.first_referrer === "string" ? input.attribution.first_referrer : null,
+      user_agent: "MoonArq deterministic demo client",
       ip_hash: null,
-      country: index % 4 === 0 ? "US" : null,
-      device_type: index % 3 === 0 ? "mobile" : "desktop",
-      properties: { demo: true, campaign: index % 6 === 0 ? "launch" : "organic" },
-      attribution_context: {},
+      country: null,
+      device_type: input.device ?? "unknown",
+      properties: input.properties ?? {},
+      attribution_context: input.attribution ?? {},
       consent_status: { analytics: "unknown", marketing: "unknown" },
-      client_context: { device_category: index % 3 === 0 ? "mobile" : "desktop" },
-      occurred_at: iso(occurred),
-      received_at: iso(occurred),
-      created_at: iso(occurred),
-    };
+      client_context: {
+        language: "en-US",
+        currency: "USD",
+        viewport_category: input.device === "mobile" ? "small" : input.device === "tablet" ? "medium" : "large",
+        device_category: input.device ?? "unknown",
+        page_type: input.pageType ?? "landing",
+      },
+      occurred_at: iso(input.occurredAt),
+      received_at: iso(receivedAt),
+      created_at: iso(receivedAt),
+    });
+  }
+
+  function eventTime(dayOffset: number, minuteOffset: number, index: number) {
+    return new Date(now.getTime() - dayOffset * 24 * 60 * 60_000 - 3 * 60 * 60_000 - (index % 6) * 12 * 60_000 + minuteOffset * 60_000);
+  }
+
+  function sessionAt(input: {
+    cohort: "current" | "previous";
+    index: number;
+    dayOffset: number;
+    readyIntentCount: number;
+    builderStart: number;
+    cartCount: number;
+    checkoutCount: number;
+  }) {
+    const { cohort, index } = input;
+    const sessionId = `demo_${cohort}_session_${String(index).padStart(2, "0")}`;
+    const anonymousId = `demo_${cohort}_visitor_${String(index % 37).padStart(2, "0")}`;
+    const device = (["desktop", "mobile", "tablet", "unknown"] as const)[index % 4];
+    const acquisition: JsonRecord = index % 3 === 0
+      ? {
+          utm: { source: "instagram", medium: "paid_social", campaign: "lunar_launch" },
+          landing_page: index % 2 === 0 ? "/collections/lunar" : "/products/lunar-silver",
+          first_referrer: "https://social.example/",
+        }
+      : index % 3 === 1
+        ? {
+            utm: { source: "search", medium: "organic", campaign: "evergreen" },
+            landing_page: "/collections/core",
+            first_referrer: "https://search.example/",
+          }
+        : {};
+    const visitAt = eventTime(input.dayOffset, 0, index);
+    const product = products[index % products.length];
+    const productPath = `/products/${product.item_id.toLowerCase()}`;
+    const hasReadyIntent = index < input.readyIntentCount;
+    const hasBuilderIntent = index >= input.builderStart && index < input.builderStart + 12;
+    const pagePath = hasReadyIntent && index % 4 === 0 ? productPath : "/collections/core";
+
+    addEvent({
+      sessionId,
+      anonymousId,
+      eventName: "page_view",
+      occurredAt: visitAt,
+      path: pagePath,
+      attribution: acquisition,
+      device,
+      pageType: pagePath.startsWith("/products/") ? "product" : "collection",
+    });
+    if (index === 0 && cohort === "current") {
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "page_view",
+        occurredAt: eventTime(input.dayOffset, 1, index),
+        path: pagePath,
+        attribution: acquisition,
+        device,
+        pageType: "product",
+      });
+    }
+
+    if (index < 20) {
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "view_item_list",
+        occurredAt: eventTime(input.dayOffset, 1, index),
+        path: "/collections/core",
+        properties: {
+          item_list_name: "Core Collection",
+          items: [{ ...product, item_list_name: "Core Collection", quantity: 1 }],
+        },
+        attribution: acquisition,
+        device,
+        pageType: "collection",
+      });
+    }
+
+    if (hasReadyIntent) {
+      const occurredAt = cohort === "current" && index === 31
+        ? visitAt
+        : eventTime(input.dayOffset, 2, index);
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "view_item",
+        occurredAt,
+        path: productPath,
+        properties: {
+          currency: "USD",
+          value: product.price,
+          items: [{
+            ...product,
+            ...(index < 20 ? { item_list_name: "Core Collection" } : {}),
+            quantity: 1,
+          }],
+        },
+        attribution: acquisition,
+        device,
+        pageType: "product",
+      });
+      if (index === 0 && cohort === "current") {
+        addEvent({
+          sessionId,
+          anonymousId,
+          eventName: "view_item",
+          occurredAt: eventTime(input.dayOffset, 3, index),
+          path: productPath,
+          properties: {
+            currency: "USD",
+            value: product.price,
+            items: [{ ...product, quantity: 1 }],
+          },
+          attribution: acquisition,
+          device,
+          pageType: "product",
+        });
+      }
+    }
+
+    if (hasBuilderIntent) {
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "build_start",
+        occurredAt: eventTime(input.dayOffset, 2, index),
+        path: "/build",
+        properties: { item_category: "Build Your Own" },
+        attribution: acquisition,
+        device,
+        pageType: "builder",
+      });
+      if (index < input.builderStart + 7) {
+        addEvent({
+          sessionId,
+          anonymousId,
+          eventName: "build_complete",
+          occurredAt: eventTime(input.dayOffset, 5, index),
+          path: "/build",
+          properties: {
+            currency: "USD",
+            item_category: "Build Your Own",
+            stone_count: 7 + (index % 4),
+            value: 140 + index,
+          },
+          attribution: acquisition,
+          device,
+          pageType: "builder",
+        });
+      }
+      if (index < input.builderStart + 5) {
+        addEvent({
+          sessionId,
+          anonymousId,
+          eventName: "save_design",
+          occurredAt: eventTime(input.dayOffset, 3, index),
+          path: "/build",
+          properties: {
+            currency: "USD",
+            item_category: "Build Your Own",
+            stone_count: 7 + (index % 4),
+            value: 140 + index,
+          },
+          attribution: acquisition,
+          device,
+          pageType: "builder",
+        });
+      }
+    }
+
+    if (index < input.cartCount) {
+      const cartItem = cohort === "current" && index === input.cartCount - 1
+        ? { ...product, item_id: `product-${product.item_id.toLowerCase()}` }
+        : product;
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "add_to_cart",
+        occurredAt: eventTime(input.dayOffset, 4, index),
+        path: "/cart",
+        properties: {
+          currency: "USD",
+          value: product.price,
+          items: [{ ...cartItem, quantity: 1 }],
+        },
+        attribution: acquisition,
+        device,
+        pageType: "cart",
+      });
+    }
+
+    if (index < input.checkoutCount) {
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "begin_checkout",
+        occurredAt: eventTime(input.dayOffset, 6, index),
+        path: "/checkout",
+        properties: {
+          currency: "USD",
+          value: product.price,
+          items: [{
+            ...product,
+            item_id: `product-${product.item_id.toLowerCase()}`,
+            quantity: 1,
+          }],
+        },
+        attribution: acquisition,
+        device,
+        pageType: "checkout",
+      });
+    }
+
+    if (index % 5 === 0) {
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "email_signup",
+        occurredAt: eventTime(input.dayOffset, 7, index),
+        path: pagePath,
+        properties: { discount_code: "LUNAR10", method: "footer_form" },
+        attribution: acquisition,
+        device,
+        pageType: "engagement",
+      });
+    }
+    if (cohort === "current" && [3, 11, 27].includes(index)) {
+      addEvent({
+        sessionId,
+        anonymousId,
+        eventName: "cta_click",
+        occurredAt: eventTime(input.dayOffset, 8, index),
+        path: pagePath,
+        properties: { component: "hero" },
+        attribution: acquisition,
+        device,
+      });
+    }
+  }
+
+  for (let index = 0; index < 48; index += 1) {
+    sessionAt({
+      cohort: "current",
+      index,
+      dayOffset: index % 24,
+      readyIntentCount: 19,
+      builderStart: 19,
+      cartCount: 14,
+      checkoutCount: 6,
+    });
+  }
+  for (let index = 0; index < 40; index += 1) {
+    sessionAt({
+      cohort: "previous",
+      index,
+      dayOffset: 32 + (index % 26),
+      readyIntentCount: 18,
+      builderStart: 18,
+      cartCount: 10,
+      checkoutCount: 4,
+    });
+  }
+
+  addEvent({
+    sessionId: "demo_current_session_31",
+    anonymousId: "demo_current_visitor_31",
+    eventName: "view_item",
+    occurredAt: eventTime(7, 0, 31),
+    path: "/products/lunar-silver",
+    properties: {
+      currency: "USD",
+      value: products[0].price,
+      items: [{ ...products[0], quantity: 1 }],
+    },
+    device: "unknown",
+    pageType: "product",
   });
+  addEvent({
+    sessionId: "demo_coverage_seed",
+    anonymousId: "demo_coverage_visitor",
+    eventName: "page_view",
+    occurredAt: eventTime(70, 0, 0),
+    path: "/",
+    device: "unknown",
+  });
+  addEvent({
+    sessionId: "demo_invalid_properties",
+    anonymousId: "demo_invalid_visitor",
+    eventName: "view_item",
+    occurredAt: eventTime(4, 2, 41),
+    path: "/products/unmapped",
+    properties: { currency: "USD", value: 54, items: [] },
+    device: "unknown",
+    pageType: "product",
+  });
+  addEvent({
+    sessionId: "demo_out_of_order_cart",
+    anonymousId: "demo_out_of_order_visitor",
+    eventName: "add_to_cart",
+    occurredAt: eventTime(3, 1, 42),
+    path: "/cart",
+    properties: {
+      currency: "USD",
+      value: 88,
+      items: [{ ...products[0], quantity: 1 }],
+    },
+    device: "mobile",
+    pageType: "cart",
+  });
+  addEvent({
+    sessionId: "demo_skipped_checkout",
+    anonymousId: "demo_skipped_visitor",
+    eventName: "begin_checkout",
+    occurredAt: eventTime(2, 1, 43),
+    path: "/checkout",
+    properties: {
+      currency: "USD",
+      value: 96,
+      items: [{ ...products[1], quantity: 1 }],
+    },
+    device: "desktop",
+    pageType: "checkout",
+  });
+
+  return events.sort((left, right) => right.occurred_at.localeCompare(left.occurred_at));
 }
 
 function makeContent(): { items: ContentItem[]; metrics: ContentMetric[] } {
