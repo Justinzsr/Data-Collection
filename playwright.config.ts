@@ -5,6 +5,8 @@ export default defineConfig({
   timeout: 30_000,
   // Source-wizard coverage mutates one shared deterministic store and cleans it in finally blocks.
   workers: 1,
+  forbidOnly: Boolean(process.env.CI),
+  retries: 0,
   use: {
     baseURL: "http://localhost:4000",
     trace: "on-first-retry",

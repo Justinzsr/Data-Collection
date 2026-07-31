@@ -8,6 +8,10 @@ import {
   type MoonArqOverviewQueryPatch,
 } from "@/presentation/dashboard/moonarq-overview-query";
 
+const malformedRawCanary = "private-person%25ZZ%2540example.invalid";
+const malformedIntermediateCanary = "private-person%ZZ%40example.invalid";
+const malformedDecodedCanary = "private-person%ZZ@example.invalid";
+
 describe("MoonArq Overview query state", () => {
   it("defaults invalid, repeated, and unsupported values safely", () => {
     expect(parseMoonArqOverviewQuery({
@@ -127,6 +131,32 @@ describe("MoonArq Overview query state", () => {
       ...unsafe,
     });
     expect(href).toBe("/w/moonarq/dashboard");
+  });
+
+  it.each([
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "landing_path",
+    "referrer_host",
+  ] as const)("fails closed on malformed percent encoding in %s", (key) => {
+    const parsed = parseMoonArqOverviewQuery(
+      new URLSearchParams(`range=7d&${key}=${malformedRawCanary}`),
+    );
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", parsed);
+    const canonical = new URL(href, "https://data-hub.invalid");
+
+    expect(parsed.range).toBe("7d");
+    expect(parsed[key]).toBe("");
+    expect(canonical.searchParams.get("range")).toBe("7d");
+    expect(canonical.searchParams.has(key)).toBe(false);
+    for (const canary of [
+      malformedRawCanary,
+      malformedIntermediateCanary,
+      malformedDecodedCanary,
+    ]) {
+      expect(href).not.toContain(canary);
+    }
   });
 
   it("preserves supported state, omits defaults, and URL-encodes values", () => {

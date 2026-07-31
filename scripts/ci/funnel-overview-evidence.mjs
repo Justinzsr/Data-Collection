@@ -284,21 +284,60 @@ function collectPlaywrightSpecs(suites, destination = []) {
   return destination;
 }
 
-function summarizePlaywright(rawReportPath, outputPath) {
-  const report = readJson(rawReportPath, MAX_RAW_REPORT_BYTES, "raw Playwright report");
+function isActualPlaywrightPass(test) {
+  const results = Array.isArray(test?.results) ? test.results : [];
+  const result = results[0];
+  return test?.expectedStatus === "passed"
+    && test?.status === "expected"
+    && results.length === 1
+    && result?.status === "passed"
+    && result?.retry === 0
+    && (result?.error === undefined || result?.error === null)
+    && (
+      result?.errors === undefined
+      || (Array.isArray(result.errors) && result.errors.length === 0)
+    );
+}
+
+export function validatePlaywrightReport(report) {
   if (!report || typeof report !== "object" || Array.isArray(report)) {
     fail("Playwright report has an invalid top-level shape.");
+  }
+  if (
+    !report.config
+    || typeof report.config !== "object"
+    || Array.isArray(report.config)
+    || report.config.forbidOnly !== true
+  ) {
+    fail("Playwright focused-test protection is not enabled.");
+  }
+  if (!Array.isArray(report.config.projects)) {
+    fail("Playwright project configuration is missing.");
+  }
+  const configuredProjects = report.config.projects.map((project) => project?.name);
+  if (
+    configuredProjects.length !== REQUIRED_PLAYWRIGHT_PROJECTS.length
+    || !REQUIRED_PLAYWRIGHT_PROJECTS.every(
+      (name) => configuredProjects.includes(name),
+    )
+    || report.config.projects.some((project) => project?.retries !== 0)
+  ) {
+    fail("Playwright project configuration is not approved.");
   }
   const stats = report.stats;
   if (!stats || typeof stats !== "object" || Array.isArray(stats)) {
     fail("Playwright statistics are missing.");
   }
-  const passed = requiredInteger(stats.expected, "passed Playwright tests", 100_000);
+  const expectedOutcomes = requiredInteger(
+    stats.expected,
+    "expected-outcome Playwright tests",
+    100_000,
+  );
   const failed = requiredInteger(stats.unexpected, "failed Playwright tests", 100_000);
   const flaky = requiredInteger(stats.flaky, "flaky Playwright tests", 100_000);
   const skipped = requiredInteger(stats.skipped, "skipped Playwright tests", 100_000);
-  const total = passed + failed + flaky + skipped;
-  if (total === 0 || failed !== 0 || flaky !== 0 || skipped !== 0) {
+  const aggregateTotal = expectedOutcomes + failed + flaky + skipped;
+  if (aggregateTotal === 0 || failed !== 0 || flaky !== 0 || skipped !== 0) {
     fail("Playwright did not complete with a clean, non-skipped result.");
   }
   if (!Array.isArray(report.errors) || report.errors.length !== 0) {
@@ -310,11 +349,24 @@ function summarizePlaywright(rawReportPath, outputPath) {
     fail("Playwright spec results are empty or unbounded.");
   }
   const tests = specs.flatMap((spec) => Array.isArray(spec?.tests) ? spec.tests : []);
-  if (tests.length !== total) {
+  if (tests.length !== aggregateTotal) {
     fail("Playwright test totals do not reconcile with spec results.");
   }
-  const actualProjects = [...new Set(tests.map((test) => test?.projectName))]
-    .filter((name) => typeof name === "string")
+  if (tests.some((test) =>
+    typeof test?.projectName !== "string"
+    || !REQUIRED_PLAYWRIGHT_PROJECTS.includes(test.projectName))) {
+    fail("Playwright contains an unapproved project result.");
+  }
+  const actualPasses = tests.filter(isActualPlaywrightPass);
+  if (
+    actualPasses.length !== tests.length
+    || expectedOutcomes !== actualPasses.length
+  ) {
+    fail("Playwright contains a result that is not an actual first-attempt pass.");
+  }
+  const passed = actualPasses.length;
+  const total = passed;
+  const actualProjects = [...new Set(actualPasses.map((test) => test.projectName))]
     .toSorted();
   if (
     actualProjects.length !== REQUIRED_PLAYWRIGHT_PROJECTS.length
@@ -331,11 +383,13 @@ function summarizePlaywright(rawReportPath, outputPath) {
         : "";
       return (
         normalizedFile === "responsive.spec.ts"
+        || normalizedFile === "e2e/responsive.spec.ts"
         || normalizedFile.endsWith("/e2e/responsive.spec.ts")
       )
         && spec.title === expectedTitle
+        && Array.isArray(spec.tests)
         && spec.tests.some(
-          (test) => test?.projectName === "chromium" && test?.status === "expected",
+          (test) => test?.projectName === "chromium" && isActualPlaywrightPass(test),
         );
     });
     if (!completed) fail("A required responsive viewport did not execute successfully.");
@@ -346,11 +400,7 @@ function summarizePlaywright(rawReportPath, outputPath) {
       .map((spec) => typeof spec?.file === "string" ? spec.file.replaceAll("\\", "/") : "")
       .filter(Boolean),
   );
-  writeJson(outputPath, {
-    schema_version: "1.0",
-    job: "playwright",
-    ...currentRunIdentity(),
-    runtime: currentRuntime({ includePlaywright: true }),
+  return {
     tests: {
       files: files.size,
       total,
@@ -361,9 +411,21 @@ function summarizePlaywright(rawReportPath, outputPath) {
     },
     projects: REQUIRED_PLAYWRIGHT_PROJECTS,
     viewport_widths: REQUIRED_VIEWPORT_WIDTHS,
+  };
+}
+
+function summarizePlaywright(rawReportPath, outputPath) {
+  const report = readJson(rawReportPath, MAX_RAW_REPORT_BYTES, "raw Playwright report");
+  const summary = validatePlaywrightReport(report);
+  writeJson(outputPath, {
+    schema_version: "1.0",
+    job: "playwright",
+    ...currentRunIdentity(),
+    runtime: currentRuntime({ includePlaywright: true }),
+    ...summary,
   });
   console.log(
-    `Sanitized Playwright evidence: ${passed} passed, ${failed} failed, ${flaky} flaky, ${skipped} skipped.`,
+    `Sanitized Playwright evidence: ${summary.tests.passed} passed, ${summary.tests.failed} failed, ${summary.tests.flaky} flaky, ${summary.tests.skipped} skipped.`,
   );
 }
 
@@ -867,13 +929,18 @@ async function main() {
   fail("Invalid CI evidence command or argument count.");
 }
 
-main().catch((error) => {
-  if (error instanceof EvidenceError) {
-    console.error(error.message);
-  } else {
-    console.error(
-      "CI evidence processing failed without exposing report contents or environment values.",
-    );
-  }
-  process.exitCode = 1;
-});
+if (
+  process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main().catch((error) => {
+    if (error instanceof EvidenceError) {
+      console.error(error.message);
+    } else {
+      console.error(
+        "CI evidence processing failed without exposing report contents or environment values.",
+      );
+    }
+    process.exitCode = 1;
+  });
+}

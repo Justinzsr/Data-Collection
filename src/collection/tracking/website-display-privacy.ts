@@ -5,7 +5,7 @@ const streetAddressPattern = /\b[0-9]{1,6}\s+(?:[A-Z0-9.'-]+\s+){0,5}(?:street|s
 const postOfficeBoxPattern = /\bP(?:OST)?\.?\s*O(?:FFICE)?\.?\s+BOX\s+[A-Z0-9-]+\b/iu;
 const secretPattern = /(?:\b(?:bearer|basic)\s+[A-Z0-9._~+/=-]{8,}\b|\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9_-]{8,}\b|\beyJ[A-Z0-9_-]{8,}\.[A-Z0-9_-]{8,}\.[A-Z0-9_-]{8,}\b|(?:^|[?&#/_.-])(?:authorization|cookie|credential|password|passwd|secret|token|api[_-]?key|access[_-]?key|session[_-]?id)[=:/])/iu;
 
-function decodedVariants(value: string) {
+function decodedVariants(value: string): string[] | null {
   const variants = [value];
   for (let pass = 0; pass < 3; pass += 1) {
     try {
@@ -13,9 +13,10 @@ function decodedVariants(value: string) {
       if (decoded === variants.at(-1)) break;
       variants.push(decoded);
     } catch {
-      break;
+      return null;
     }
   }
+  if ((variants.at(-1) ?? value).includes("%")) return null;
   return [...new Set(variants)];
 }
 
@@ -25,8 +26,8 @@ function validIpv4(value: string) {
     && octets.every((octet) => /^\d{1,3}$/u.test(octet) && Number(octet) <= 255);
 }
 
-function containsRawIp(value: string) {
-  return decodedVariants(value).some((variant) => {
+function containsRawIp(variants: string[]) {
+  return variants.some((variant) => {
     const ipv4Candidates = variant.match(/(?:^|[^0-9])((?:[0-9]{1,3}\.){3}[0-9]{1,3})(?=$|[^0-9])/gu) ?? [];
     if (ipv4Candidates.some((candidate) => validIpv4(candidate.replace(/^[^0-9]+|[^0-9]+$/gu, "")))) {
       return true;
@@ -82,8 +83,8 @@ function isLikelyPhoneNumber(value: string) {
   );
 }
 
-function containsProhibitedNumber(value: string) {
-  return decodedVariants(value).some((variant) => {
+function containsProhibitedNumber(variants: string[]) {
+  return variants.some((variant) => {
     const trimmed = variant.trim();
     const digits = trimmed.replace(/\D/gu, "");
     if (isLikelyPhoneNumber(trimmed)) return true;
@@ -96,15 +97,16 @@ function containsProhibitedNumber(value: string) {
 }
 
 function containsUnsafeDisplayData(value: string) {
-  return decodedVariants(value).some((variant) => {
+  const variants = decodedVariants(value);
+  if (!variants) return true;
+  if (containsRawIp(variants) || containsProhibitedNumber(variants)) return true;
+  return variants.some((variant) => {
     const normalizedAddress = variant.replace(/[-_]+/gu, " ");
     return /[\u0000-\u001F\u007F]/u.test(variant)
       || emailPattern.test(variant)
       || streetAddressPattern.test(normalizedAddress)
       || postOfficeBoxPattern.test(normalizedAddress)
-      || secretPattern.test(variant)
-      || containsRawIp(variant)
-      || containsProhibitedNumber(variant);
+      || secretPattern.test(variant);
   });
 }
 

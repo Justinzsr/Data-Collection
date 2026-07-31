@@ -249,54 +249,78 @@ test("acquisition tables and disclosures retain keyboard access", async ({ page 
   }
 });
 
-test("unsafe acquisition query values are not reflected into rendered controls", async ({ page }) => {
-  const unsafeFilter = [
-    "private",
-    "-person",
-    "%2540",
-    "example.invalid",
-  ].join("");
-  await page.goto(`/w/moonarq/dashboard?range=7d&utm_campaign=${encodeURIComponent(unsafeFilter)}`);
+test("malformed acquisition query values are not reflected into rendered controls", async ({ page }) => {
+  const rawCanary = "private-person%25ZZ%2540example.invalid";
+  const intermediateCanary = "private-person%ZZ%40example.invalid";
+  const decodedCanary = "private-person%ZZ@example.invalid";
+  await page.goto(`/w/moonarq/dashboard?range=7d&utm_campaign=${rawCanary}`);
 
-  const reflected = await page.locator("body").evaluate(
-    (body, candidate) => body.textContent?.includes(candidate) ?? false,
-    unsafeFilter,
-  );
   const finalUrl = new URL(page.url());
-  expect(reflected).toBe(false);
   expect(finalUrl.searchParams.get("range")).toBe("7d");
   expect(finalUrl.searchParams.has("utm_campaign")).toBe(false);
   await expect(page.getByLabel("UTM campaign")).toHaveValue("");
+  const markup = await page.evaluate(() => document.documentElement.outerHTML);
+  for (const canary of [rawCanary, intermediateCanary, decodedCanary]) {
+    expect(finalUrl.href).not.toContain(canary);
+    expect(markup).not.toContain(canary);
+  }
 });
 
 test("Overview muted text, chart ticks, and funnel bars meet contrast requirements", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/w/moonarq/dashboard?demo_state=long-values");
   await expect(page.getByTestId("storefront-conversion-trend").locator(".recharts-cartesian-axis-tick-value").first()).toBeVisible();
+  const instagram = page.locator("details.overview-social-card").filter({
+    has: page.getByText("Instagram Graph API", { exact: true }),
+  });
+  await expect(instagram).toHaveCount(1);
+  if (!await instagram.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await instagram.locator("summary").first().click();
+  }
+  await expect(instagram).toHaveJSProperty("open", true);
+  const paidPanel = instagram.getByTestId("instagram-paid-ads-panel");
+  await expect(paidPanel).toBeVisible();
+  const reconciliation = paidPanel.getByTestId("paid-attribution-reconciliation");
+  if (!await reconciliation.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await reconciliation.locator("summary").click();
+  }
+  await expect(reconciliation).toHaveJSProperty("open", true);
+  const reconciliationTargets = reconciliation.locator(
+    '[data-contrast-normal-text="paid-attribution-reconciliation"]',
+  );
+  await expect(reconciliationTargets).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    await expect(reconciliationTargets.nth(index)).toBeVisible();
+  }
 
   const contrast = await page.evaluate(() => {
     type Color = [number, number, number, number];
 
-    const parseRgbColor = (value: string): Color => {
-      const channels = value.match(/[0-9.]+/gu)?.map(Number) ?? [];
-      if (channels.length < 3) throw new Error("Unable to parse computed color.");
-      return [channels[0], channels[1], channels[2], channels[3] ?? 1];
+    const fail = (): never => {
+      throw new Error("Required contrast evidence could not be normalized.");
     };
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) fail();
     const parseColor = (value: string): Color => {
-      if (/^rgba?\(/u.test(value)) return parseRgbColor(value);
-      const probe = document.createElement("span");
-      probe.style.color = value;
-      probe.style.position = "fixed";
-      probe.style.visibility = "hidden";
-      document.body.append(probe);
-      const resolved = getComputedStyle(probe).color;
-      probe.remove();
-      return parseRgbColor(resolved);
+      if (!value) fail();
+      context!.clearRect(0, 0, 1, 1);
+      context!.fillStyle = "rgb(1, 2, 3)";
+      const sentinel = context!.fillStyle;
+      context!.fillStyle = value;
+      if (context!.fillStyle === sentinel && value !== sentinel) fail();
+      context!.fillRect(0, 0, 1, 1);
+      const channels = context!.getImageData(0, 0, 1, 1).data;
+      const color: Color = [channels[0], channels[1], channels[2], channels[3] / 255];
+      if (color.some((channel) => !Number.isFinite(channel))) fail();
+      return color;
     };
-    const colorFunctions = (value: string) =>
-      value.match(/(?:rgba?|hsla?|lab|lch|oklab|oklch)\([^)]*\)/gu) ?? [];
     const composite = (foreground: Color, background: Color): Color => {
       const alpha = foreground[3] + background[3] * (1 - foreground[3]);
+      if (!Number.isFinite(alpha) || alpha < 0 || alpha > 1) fail();
+      if (alpha === 0) return [0, 0, 0, 0];
       return [
         (foreground[0] * foreground[3] + background[0] * background[3] * (1 - foreground[3])) / alpha,
         (foreground[1] * foreground[3] + background[1] * background[3] * (1 - foreground[3])) / alpha,
@@ -315,53 +339,177 @@ test("Overview muted text, chart ticks, and funnel bars meet contrast requiremen
       const values = [luminance(left), luminance(right)].sort((a, b) => b - a);
       return (values[0] + 0.05) / (values[1] + 0.05);
     };
-    const gradientColors = (element: Element) => {
-      const body = parseColor(getComputedStyle(document.body).backgroundColor);
-      const gradient = getComputedStyle(element).backgroundImage;
-      const stops = colorFunctions(gradient).map(parseColor);
-      return stops.length > 0 ? stops.map((stop) => composite(stop, body)) : [body];
+    const normalizeColor = (color: Color) =>
+      `rgba(${color[0].toFixed(3)},${color[1].toFixed(3)},${color[2].toFixed(3)},${color[3].toFixed(4)})`;
+    const deduplicate = (colors: Color[]) => {
+      const unique = new Map<string, Color>();
+      for (const color of colors) unique.set(normalizeColor(color), color);
+      const values = [...unique.values()];
+      if (values.length === 0 || values.length > 4_096) fail();
+      return values;
     };
-    const minimum = (values: number[]) => Math.min(...values);
+    const splitBackgroundLayers = (value: string) => {
+      const layers: string[] = [];
+      let depth = 0;
+      let start = 0;
+      for (let index = 0; index < value.length; index += 1) {
+        if (value[index] === "(") depth += 1;
+        else if (value[index] === ")") depth -= 1;
+        else if (value[index] === "," && depth === 0) {
+          layers.push(value.slice(start, index).trim());
+          start = index + 1;
+        }
+        if (depth < 0) fail();
+      }
+      if (depth !== 0) fail();
+      layers.push(value.slice(start).trim());
+      return layers.filter(Boolean);
+    };
+    const gradientStops = (layer: string) => {
+      if (!/^(?:linear|radial)-gradient\(/u.test(layer)) fail();
+      const tokens = layer.match(
+        /(?:rgba?|hsla?|lab|lch|oklab|oklch|color)\([^)]*\)|\btransparent\b/gu,
+      ) ?? [];
+      if (tokens.length === 0) fail();
+      const stops = tokens.map(parseColor);
+      const candidates = [...stops];
+      for (let index = 1; index < stops.length; index += 1) {
+        const previous = stops[index - 1];
+        const current = stops[index];
+        candidates.push([
+          (previous[0] + current[0]) / 2,
+          (previous[1] + current[1]) / 2,
+          (previous[2] + current[2]) / 2,
+          (previous[3] + current[3]) / 2,
+        ]);
+      }
+      return deduplicate(candidates);
+    };
+    const isVisible = (element: Element) => {
+      const style = getComputedStyle(element);
+      return style.display !== "none"
+        && style.visibility !== "hidden"
+        && style.visibility !== "collapse"
+        && element.getClientRects().length > 0;
+    };
+    const paintedBackgrounds = (element: HTMLElement | SVGElement) => {
+      const ancestors: Element[] = [];
+      for (let current: Element | null = element; current; current = current.parentElement) {
+        ancestors.unshift(current);
+      }
+      if (ancestors[0] !== document.documentElement) fail();
+      let candidates: Color[] = [[0, 0, 0, 0]];
+      for (const ancestor of ancestors) {
+        const style = getComputedStyle(ancestor);
+        const opacity = Number.parseFloat(style.opacity);
+        if (
+          !Number.isFinite(opacity)
+          || opacity !== 1
+          || style.filter !== "none"
+          || style.mixBlendMode !== "normal"
+          || style.backgroundBlendMode.split(",").some((mode) => mode.trim() !== "normal")
+        ) {
+          fail();
+        }
+        const backgroundColor = parseColor(style.backgroundColor);
+        candidates = deduplicate(
+          candidates.map((background) => composite(backgroundColor, background)),
+        );
+        if (style.backgroundImage === "none") continue;
+        const layers = splitBackgroundLayers(style.backgroundImage);
+        for (const layer of [...layers].reverse()) {
+          if (layer === "none") continue;
+          const stops = gradientStops(layer);
+          candidates = deduplicate(candidates.flatMap((background) =>
+            stops.map((stop) => composite(stop, background))));
+        }
+      }
+      if (
+        candidates.length === 0
+        || candidates.some((color) =>
+          color.some((channel) => !Number.isFinite(channel))
+          || color[3] < 0.999)
+      ) {
+        fail();
+      }
+      return candidates;
+    };
+    const measuredText = (
+      element: HTMLElement,
+      index: number,
+      marker: string,
+    ) => {
+      if (!isVisible(element)) fail();
+      const style = getComputedStyle(element);
+      const foreground = parseColor(style.color);
+      const fontSize = Number.parseFloat(style.fontSize);
+      if (!Number.isFinite(fontSize) || fontSize <= 0) fail();
+      const backgrounds = paintedBackgrounds(element);
+      const ratios = backgrounds.map((background) =>
+        ratio(composite(foreground, background), background));
+      if (ratios.length === 0 || ratios.some((value) => !Number.isFinite(value))) fail();
+      const minimumRatio = Math.min(...ratios);
+      const worstBackground = backgrounds[ratios.indexOf(minimumRatio)];
+      return {
+        marker,
+        index,
+        fontSize,
+        foreground: normalizeColor(foreground),
+        worstBackground: normalizeColor(worstBackground),
+        minimumRatio,
+      };
+    };
 
-    const mutedText = [...document.querySelectorAll<HTMLElement>("[class*='text-[var(--muted)]']")];
-    const textRatios = mutedText.flatMap((element) => {
-      const panel = element.closest(".glass") ?? document.body;
-      const foreground = parseColor(getComputedStyle(element).color);
-      return gradientColors(panel).map((background) => ratio(foreground, background));
-    });
+    const mutedText = [...document.querySelectorAll<HTMLElement>(
+      "[class*='text-[var(--muted)]']",
+    )].filter(isVisible);
+    const mutedMeasurements = mutedText.map((element, index) =>
+      measuredText(element, index, "overview-muted"));
+    if (mutedMeasurements.length === 0) fail();
+    const reconciliationElements = [...document.querySelectorAll<HTMLElement>(
+      '[data-testid="paid-attribution-reconciliation"] '
+      + '[data-contrast-normal-text="paid-attribution-reconciliation"]',
+    )];
+    if (reconciliationElements.length !== 3) fail();
+    const reconciliationMeasurements = reconciliationElements.map((element, index) =>
+      measuredText(element, index, "paid-attribution-reconciliation"));
 
-    const chart = document.querySelector<HTMLElement>("[data-testid='storefront-conversion-trend'] [role='group']");
-    const chartBackgrounds = gradientColors(chart?.closest(".glass") ?? document.body)
-      .map((background) => chart
-        ? composite(parseColor(getComputedStyle(chart).backgroundColor), background)
-        : background);
+    const chart = document.querySelector<HTMLElement>(
+      "[data-testid='storefront-conversion-trend'] [role='group']",
+    ) ?? fail();
+    if (!isVisible(chart)) fail();
+    const chartBackgrounds = paintedBackgrounds(chart);
     const tickRatios = [...document.querySelectorAll<SVGElement>(
       "[data-testid='storefront-conversion-trend'] .recharts-cartesian-axis-tick-value",
     )]
+      .filter(isVisible)
       .flatMap((tick) => {
         const foreground = parseColor(getComputedStyle(tick).fill);
-        return chartBackgrounds.map((background) => ratio(foreground, background));
+        return chartBackgrounds.map((background) =>
+          ratio(composite(foreground, background), background));
       });
+    if (tickRatios.length === 0 || tickRatios.some((value) => !Number.isFinite(value))) fail();
 
-    const funnelBar = document.querySelector<HTMLElement>("[data-funnel-bar]");
-    const funnelTrack = funnelBar?.parentElement;
-    const panelBackgrounds = gradientColors(funnelBar?.closest(".glass") ?? document.body);
-    const trackBackgrounds = panelBackgrounds.map((background) => funnelTrack
-      ? composite(parseColor(getComputedStyle(funnelTrack).backgroundColor), background)
-      : background);
-    const barStops = funnelBar
-      ? colorFunctions(getComputedStyle(funnelBar).backgroundImage).map(parseColor)
-      : [];
+    const funnelBar = document.querySelector<HTMLElement>("[data-funnel-bar]") ?? fail();
+    const funnelTrack = funnelBar.parentElement ?? fail();
+    if (!isVisible(funnelBar) || !isVisible(funnelTrack)) fail();
+    const trackBackgrounds = paintedBackgrounds(funnelTrack);
+    const barLayers = splitBackgroundLayers(getComputedStyle(funnelBar).backgroundImage);
+    if (barLayers.length !== 1) fail();
+    const barStops = gradientStops(barLayers[0]);
     const barRatios = barStops.flatMap((foreground) =>
-      trackBackgrounds.map((background) => ratio(foreground, background)));
+      trackBackgrounds.map((background) =>
+        ratio(composite(foreground, background), background)));
+    if (barRatios.length === 0 || barRatios.some((value) => !Number.isFinite(value))) fail();
 
     return {
       mutedTextCount: mutedText.length,
       chartTickCount: tickRatios.length,
       funnelBarStopCount: barStops.length,
-      minimumMutedTextRatio: minimum(textRatios),
-      minimumChartTickRatio: minimum(tickRatios),
-      minimumFunnelBarRatio: minimum(barRatios),
+      minimumMutedTextRatio: Math.min(...mutedMeasurements.map((item) => item.minimumRatio)),
+      minimumChartTickRatio: Math.min(...tickRatios),
+      minimumFunnelBarRatio: Math.min(...barRatios),
+      reconciliationMeasurements,
     };
   });
 
@@ -371,6 +519,11 @@ test("Overview muted text, chart ticks, and funnel bars meet contrast requiremen
   expect(contrast.minimumMutedTextRatio).toBeGreaterThanOrEqual(4.5);
   expect(contrast.minimumChartTickRatio).toBeGreaterThanOrEqual(4.5);
   expect(contrast.minimumFunnelBarRatio).toBeGreaterThanOrEqual(3);
+  expect(contrast.reconciliationMeasurements).toHaveLength(3);
+  expect(contrast.reconciliationMeasurements.every((measurement) =>
+    measurement.marker === "paid-attribution-reconciliation"
+    && Number.isFinite(measurement.minimumRatio)
+    && measurement.minimumRatio >= 4.5)).toBe(true);
 });
 
 test("Overview controls, filters, and disclosures work from the keyboard with visible focus", async ({ page }) => {
