@@ -59,6 +59,9 @@ function compactSql(sql: string) {
 }
 
 const ECMASCRIPT_TRIM_CHARACTERS_SQL_COMPACT = String.raw`u&'\0009\000a\000b\000c\000d\0020\00a0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200a\2028\2029\202f\205f\3000\feff'`;
+const ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD = (
+  (BigInt(1) << BigInt(1024)) - (BigInt(1) << BigInt(970))
+).toString();
 
 function emptyAggregate(): WebsiteFunnelAggregateRow {
   return {
@@ -146,7 +149,34 @@ describe("Website funnel aggregate SQL", () => {
 
   it("applies the frozen property contract before events can qualify for aggregates", () => {
     const sql = compactSql(WEBSITE_FUNNEL_AGGREGATE_SQL);
+    const numericSafetyStart = sql.indexOf("known_event_numeric_safety as materialized");
+    const numericSafetyEnd = sql.indexOf("unknown_event_rows as materialized");
+    const numericSafetySql = sql.slice(numericSafetyStart, numericSafetyEnd);
 
+    expect(numericSafetyStart).toBeGreaterThan(-1);
+    expect(numericSafetyEnd).toBeGreaterThan(numericSafetyStart);
+    expect(sql).toContain("known_event_numeric_safety as materialized");
+    expect(sql).toContain(
+      "select event.period_key, event.event_id, not exists",
+    );
+    expect(sql).toContain(
+      "when event.event_name = 'page_view' then event.properties",
+    );
+    expect(sql).toContain(
+      "when jsonb_typeof(event.properties) = 'object' then event.properties - 'attribution'",
+    );
+    expect(sql).toContain("'strict $.** ? (@.type() == \"number\")'");
+    expect(sql).toContain(
+      `abs((numeric_leaf.value #>> '{}')::numeric) >= ${ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD}::numeric`,
+    );
+    expect(numericSafetySql).not.toContain("double precision");
+    expect(numericSafetySql).not.toContain("::real");
+    expect(numericSafetySql).not.toContain("::float");
+    expect(numericSafetySql).not.toContain(" regexp ");
+    expect(numericSafetySql).not.toContain(" ~ ");
+    expect(sql).toContain(
+      "when jsonb_typeof(event.properties) is distinct from 'object' then false when event.properties_have_only_finite_numbers is not true then false",
+    );
     expect(sql).toContain("jsonb_array_length(event.properties -> 'items') between 1 and 100");
     expect(sql).toContain(
       "item_entry.item ?& array['item_id', 'item_name', 'item_category']::text[]",
@@ -188,6 +218,15 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("as items_are_valid");
     expect(sql).toContain("as commerce_values_are_valid");
     expect(sql).toContain("is true as property_valid");
+    expect(sql).toContain(
+      "event.properties_have_only_finite_numbers is true and event.items_are_valid is true",
+    );
+    expect(sql).toContain(
+      "where event_name = 'view_item_list' and property_valid is not true and properties_have_only_finite_numbers is true",
+    );
+    expect(sql).toContain(
+      "where event.event_name in ('view_item', 'add_to_cart') and event.property_valid is not true and event.properties_have_only_finite_numbers is true",
+    );
     expect(sql).toContain("is true as has_ready_made_item");
   });
 

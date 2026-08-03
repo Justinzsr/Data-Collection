@@ -243,6 +243,9 @@ const MAX_GROUP_OFFSET = 10_000;
 const MAX_PERIOD_MS = 32 * 24 * 60 * 60 * 1_000;
 const QUERY_TIMEOUT_MS = 8_000;
 const ECMASCRIPT_TRIM_CHARACTERS_SQL = String.raw`U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'`;
+const ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD = (
+  (BigInt(1) << BigInt(1024)) - (BigInt(1) << BigInt(970))
+).toString();
 
 export const WEBSITE_FUNNEL_AGGREGATE_RESPONSE_DENYLIST = [
   "source_id",
@@ -415,6 +418,26 @@ known_events as materialized (
   select *
   from all_events
   where event_name = any($6::text[])
+),
+known_event_numeric_safety as materialized (
+  select
+    event.period_key,
+    event.event_id,
+    not exists (
+      select 1
+      from jsonb_path_query(
+        case
+          when event.event_name = 'page_view' then event.properties
+          when jsonb_typeof(event.properties) = 'object'
+            then event.properties - 'attribution'
+          else event.properties
+        end,
+        'strict $.** ? (@.type() == "number")'
+      ) numeric_leaf(value)
+      where abs((numeric_leaf.value #>> '{}')::numeric)
+        >= ${ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD}::numeric
+    ) as properties_have_only_finite_numbers
+  from known_events event
 ),
 unknown_event_rows as materialized (
   select *
@@ -1454,6 +1477,7 @@ display_value_maps as materialized (
 event_property_primitives as materialized (
   select
     event.*,
+    numeric_safety.properties_have_only_finite_numbers,
     display.display_presence,
     display.display_safety,
     display.display_values,
@@ -1535,6 +1559,9 @@ event_property_primitives as materialized (
       false
     ) as commerce_values_are_valid
   from known_events event
+  join known_event_numeric_safety numeric_safety
+    on numeric_safety.period_key = event.period_key
+   and numeric_safety.event_id = event.event_id
   join display_value_maps display
     on display.period_key = event.period_key
    and display.event_id = event.event_id
@@ -1545,6 +1572,7 @@ classified_known_events as materialized (
     (
       case
         when jsonb_typeof(event.properties) is distinct from 'object' then false
+        when event.properties_have_only_finite_numbers is not true then false
         when event.event_name = 'page_view' then true
         when event.event_name = 'view_item_list' then
           event.properties ?& array['item_list_name', 'items']::text[]
@@ -1611,7 +1639,8 @@ classified_known_events as materialized (
       end
     ) is true as property_valid,
     (
-      event.items_are_valid is true
+      event.properties_have_only_finite_numbers is true
+      and event.items_are_valid is true
       and event.commerce_values_are_valid is true
       and exists (
         select 1
@@ -2464,6 +2493,7 @@ collection_grouped as (
   from diagnostic_known_events
   where event_name = 'view_item_list'
     and property_valid is not true
+    and properties_have_only_finite_numbers is true
   group by period_key
 ),
 collection_ranked as (
@@ -2605,6 +2635,7 @@ product_grouped as (
   from diagnostic_known_events event
   where event.event_name in ('view_item', 'add_to_cart')
     and event.property_valid is not true
+    and event.properties_have_only_finite_numbers is true
   group by event.period_key
 ),
 product_ranked as (

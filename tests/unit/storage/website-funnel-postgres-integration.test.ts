@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { validateWebsiteFunnelEventProperties } from "@/aggregation/metric-definitions/website-funnel-definitions";
 import {
   isWebsitePaymentSeparator,
   sanitizeWebsiteDisplayDimension,
@@ -16,6 +17,9 @@ const dataSpaceId = randomUUID();
 const websiteSourceId = randomUUID();
 const otherSourceId = randomUUID();
 let insertedWebsiteSourceType = false;
+const ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD = (
+  (BigInt(1) << BigInt(1024)) - (BigInt(1) << BigInt(970))
+).toString();
 
 function requireDisposableLocalDatabase() {
   if (!enabled) return;
@@ -56,6 +60,7 @@ async function insertEvent(input: {
   eventName: string;
   occurredAt: string;
   properties?: unknown;
+  rawPropertiesJson?: string;
   eventSource?: "first_party_tracker" | "vercel_drain";
   schemaVersion?: "1.0" | "legacy";
   anonymousId?: string;
@@ -65,8 +70,14 @@ async function insertEvent(input: {
   referrer?: string | null;
   attributionContext?: unknown;
 }) {
+  if (Object.hasOwn(input, "properties") && Object.hasOwn(input, "rawPropertiesJson")) {
+    throw new Error("Use either properties or rawPropertiesJson, not both.");
+  }
   const path = input.path ?? "/products/fixture";
   const properties = Object.hasOwn(input, "properties") ? input.properties : {};
+  const serializedProperties = Object.hasOwn(input, "rawPropertiesJson")
+    ? input.rawPropertiesJson
+    : JSON.stringify(properties);
   const attributionContext = Object.hasOwn(input, "attributionContext")
     ? input.attributionContext
     : {
@@ -131,7 +142,7 @@ async function insertEvent(input: {
       path,
       input.url ?? `https://fixture.invalid${path}`,
       input.referrer ?? null,
-      JSON.stringify(properties),
+      serializedProperties,
       JSON.stringify(attributionContext),
       input.occurredAt,
     ],
@@ -2134,6 +2145,542 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       await query(
         "delete from web_events where source_id = $1::uuid and session_id = $2::text",
         [websiteSourceId, sessionId],
+      );
+    }
+  });
+
+  it("matches recursive ECMAScript finite-number semantics for raw JSONB page-view properties", async () => {
+    const overflowThreshold = BigInt(ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD);
+    const belowOverflowThreshold = (overflowThreshold - BigInt(1)).toString();
+    const aboveOverflowThreshold = (overflowThreshold + BigInt(1)).toString();
+    const maximumFiniteInteger = (
+      (BigInt(1) << BigInt(1024)) - (BigInt(1) << BigInt(971))
+    ).toString();
+    const numericTokens = [
+      ["ordinary-positive", "42"],
+      ["ordinary-negative", "-42"],
+      ["positive-zero", "0"],
+      ["negative-zero", "-0"],
+      ["positive-fraction", "0.125"],
+      ["negative-fraction", "-0.125"],
+      ["smallest-subnormal", "5e-324"],
+      ["underflow-to-zero", "1e-400"],
+      ["beyond-max-safe-integer", "9007199254740993"],
+      ["exact-maximum-finite-integer", maximumFiniteInteger],
+      ["positive-below-overflow-threshold", belowOverflowThreshold],
+      ["positive-overflow-threshold", ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD],
+      ["positive-above-overflow-threshold", aboveOverflowThreshold],
+      ["negative-below-overflow-threshold", `-${belowOverflowThreshold}`],
+      ["negative-overflow-threshold", `-${ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD}`],
+      ["negative-above-overflow-threshold", `-${aboveOverflowThreshold}`],
+      ["rounded-maximum-finite", "1.7976931348623157e308"],
+      ["rounded-finite-upper", "1.7976931348623158e308"],
+      ["rounded-positive-overflow-higher", "1.7976931348623159e308"],
+      ["positive-exponent-overflow", "1e309"],
+      ["negative-exponent-overflow", "-1e309"],
+    ] as const;
+    const numericFixtures = numericTokens.map(([label, rawNumericToken]) => ({
+      label,
+      rawPropertiesJson: `{"nested":{"value":${rawNumericToken}}}`,
+      expectedFinite: Number.isFinite(JSON.parse(rawNumericToken)),
+    }));
+    const structuralFixtures = [
+      {
+        label: "nested-object-safe",
+        rawPropertiesJson: '{"outer":{"inner":42}}',
+        expectedFinite: true,
+      },
+      {
+        label: "nested-array-safe",
+        rawPropertiesJson: '{"outer":[1,{"inner":-2.5}]}',
+        expectedFinite: true,
+      },
+      {
+        label: "multiple-numeric-leaves-safe",
+        rawPropertiesJson: '{"first":1,"second":[2,3]}',
+        expectedFinite: true,
+      },
+      {
+        label: "numeric-looking-string-safe",
+        rawPropertiesJson: '{"outer":{"inner":"1e309"}}',
+        expectedFinite: true,
+      },
+      {
+        label: "nested-object-overflow",
+        rawPropertiesJson: '{"outer":{"inner":1e309}}',
+        expectedFinite: false,
+      },
+      {
+        label: "nested-array-overflow",
+        rawPropertiesJson: '{"outer":[1,{"inner":1e309}]}',
+        expectedFinite: false,
+      },
+      {
+        label: "safe-earlier-unsafe-later",
+        rawPropertiesJson: '{"first":1,"second":{"last":-1e309}}',
+        expectedFinite: false,
+      },
+      {
+        label: "page-view-attribution-overflow",
+        rawPropertiesJson: '{"attribution":{"nested":{"value":1e309}}}',
+        expectedFinite: false,
+      },
+    ] as const;
+    const fixtures = [...numericFixtures, ...structuralFixtures];
+    const unsafeLabels = fixtures
+      .filter((fixture) => !fixture.expectedFinite)
+      .map((fixture) => fixture.label);
+    const safeLabels = fixtures
+      .filter((fixture) => fixture.expectedFinite)
+      .map((fixture) => fixture.label);
+    const occurredAt = Date.parse("2026-08-18T16:00:00.000Z");
+
+    expect((BigInt(belowOverflowThreshold) + BigInt(1)).toString()).toBe(
+      ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD,
+    );
+    expect((BigInt(aboveOverflowThreshold) - BigInt(1)).toString()).toBe(
+      ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD,
+    );
+    expect(numericFixtures.filter((fixture) => !fixture.expectedFinite).map(
+      (fixture) => fixture.label,
+    )).toEqual([
+      "positive-overflow-threshold",
+      "positive-above-overflow-threshold",
+      "negative-overflow-threshold",
+      "negative-above-overflow-threshold",
+      "rounded-positive-overflow-higher",
+      "positive-exponent-overflow",
+      "negative-exponent-overflow",
+    ]);
+
+    try {
+      for (const [index, fixture] of fixtures.entries()) {
+        expect(validateWebsiteFunnelEventProperties(
+          "page_view",
+          JSON.parse(fixture.rawPropertiesJson),
+        ).valid).toBe(fixture.expectedFinite);
+        await insertEvent({
+          sourceId: websiteSourceId,
+          sessionId: `finite-page-${fixture.label}`,
+          anonymousId: `finite-page-visitor-${fixture.label}`,
+          eventName: "page_view",
+          occurredAt: new Date(occurredAt + index * 1_000).toISOString(),
+          path: `/finite/${fixture.label}`,
+          rawPropertiesJson: fixture.rawPropertiesJson,
+          attributionContext: {
+            utm: {
+              source: "finite-number-fixture",
+              medium: "test",
+              campaign: fixture.label,
+            },
+            landing_page: `/finite/${fixture.label}`,
+          },
+        });
+      }
+
+      const result = await getWebsiteFunnelAggregate({
+        dataSpaceId,
+        segment: "all",
+        current: {
+          startAt: "2026-08-18T07:00:00.000Z",
+          endExclusive: "2026-08-19T07:00:00.000Z",
+        },
+        comparison: {
+          startAt: "2026-08-17T07:00:00.000Z",
+          endExclusive: "2026-08-18T07:00:00.000Z",
+        },
+        pagination: { groupLimit: 100 },
+      });
+      const visit = result.stages.find(
+        (row) => row.period_key === "current" && row.stage_key === "visit",
+      );
+      const currentLandingPages = new Set(result.acquisition
+        .filter((row) => row.period_key === "current")
+        .map((row) => row.landing_page));
+
+      expect(visit).toMatchObject({
+        sessions: safeLabels.length,
+        visitors: safeLabels.length,
+        events: safeLabels.length,
+      });
+      expect(result.invalid_properties).toContainEqual({
+        period_key: "current",
+        event_name: "page_view",
+        events: unsafeLabels.length,
+      });
+      expect(result.event_counts).toContainEqual({
+        period_key: "current",
+        accepted_events: fixtures.length,
+        unfiltered_events: fixtures.length,
+      });
+      expect(Number(result.group_totals.acquisition)).toBe(safeLabels.length);
+      for (const label of safeLabels) {
+        expect(currentLandingPages.has(`/finite/${label}`)).toBe(true);
+      }
+      for (const label of unsafeLabels) {
+        expect(currentLandingPages.has(`/finite/${label}`)).toBe(false);
+        expect(result.filter_options.utm_campaigns).not.toContain(label);
+        expect(JSON.stringify(result)).not.toContain(label);
+      }
+      expect(result.products).toEqual([]);
+      expect(result.collections).toEqual([]);
+    } finally {
+      await query(
+        "delete from web_events where source_id = $1::uuid and session_id like 'finite-page-%'",
+        [websiteSourceId],
+      );
+    }
+  });
+
+  it("projects top-level attribution and rejects recursive overflow before funnel classification", async () => {
+    const blockedSessionId = `finite-blocked-${randomUUID()}`;
+    const unsafeSessionId = `finite-unsafe-${randomUUID()}`;
+    const attributionSessionId = `finite-attribution-${randomUUID()}`;
+    const readyItemJson = [
+      '{"item_id":"ATTRIBUTION-CONTROL-SKU"',
+      '"item_name":"Attribution control item"',
+      '"item_category":"Ready-made"',
+      '"item_list_name":"Attribution control list"',
+      '"price":80',
+      '"quantity":1}',
+    ].join(",");
+    const topLevelAttributionJson = '"attribution":{"nested":{"probe":1e309}}';
+    const withTopLevelAttribution = (...fields: string[]) => (
+      `{${[...fields, topLevelAttributionJson].join(",")}}`
+    );
+    const attributionControls = [
+      {
+        eventName: "view_item_list",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"item_list_name":"Attribution control list"',
+          `"items":[${readyItemJson}]`,
+        ),
+      },
+      {
+        eventName: "view_item",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"currency":"USD"',
+          '"value":80',
+          `"items":[${readyItemJson}]`,
+        ),
+      },
+      {
+        eventName: "add_to_cart",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"currency":"USD"',
+          '"value":80',
+          `"items":[${readyItemJson}]`,
+        ),
+      },
+      {
+        eventName: "begin_checkout",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"currency":"USD"',
+          '"value":80',
+          `"items":[${readyItemJson}]`,
+        ),
+      },
+      {
+        eventName: "build_start",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"item_category":"Build Your Own"',
+        ),
+      },
+      {
+        eventName: "build_complete",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"currency":"USD"',
+          '"item_category":"Build Your Own"',
+          '"stone_count":2',
+          '"value":80',
+        ),
+      },
+      {
+        eventName: "save_design",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"currency":"USD"',
+          '"item_category":"Build Your Own"',
+          '"stone_count":2',
+          '"value":80',
+        ),
+      },
+      {
+        eventName: "email_signup",
+        rawPropertiesJson: withTopLevelAttribution(
+          '"discount_code":"FINITE-CONTROL"',
+          '"method":"footer"',
+        ),
+      },
+    ] as const;
+    const unsafeDownstream = [
+      {
+        eventName: "view_item",
+        marker: "UNSAFE-COMMERCE-VALUE",
+        rawPropertiesJson: [
+          '{"currency":"USD","value":1e309,"items":[',
+          '{"item_id":"UNSAFE-COMMERCE-VALUE","item_name":"Unsafe value"',
+          ',"item_category":"Ready-made","quantity":1}]}',
+        ].join(""),
+      },
+      {
+        eventName: "view_item_list",
+        marker: "UNSAFE-LIST-PRICE",
+        rawPropertiesJson: [
+          '{"item_list_name":"UNSAFE-LIST-PRICE","items":[',
+          '{"item_id":"UNSAFE-LIST-PRICE","item_name":"Unsafe list price"',
+          ',"item_category":"Ready-made","price":1e309,"quantity":1}]}',
+        ].join(""),
+      },
+      {
+        eventName: "add_to_cart",
+        marker: "UNSAFE-ITEM-PRICE",
+        rawPropertiesJson: [
+          '{"currency":"USD","value":80,"items":[',
+          '{"item_id":"UNSAFE-ITEM-PRICE","item_name":"Unsafe item price"',
+          ',"item_category":"Ready-made","price":1e309,"quantity":1}]}',
+        ].join(""),
+      },
+      {
+        eventName: "begin_checkout",
+        marker: "UNSAFE-ITEM-QUANTITY",
+        rawPropertiesJson: [
+          '{"currency":"USD","value":80,"items":[',
+          '{"item_id":"UNSAFE-ITEM-QUANTITY","item_name":"Unsafe item quantity"',
+          ',"item_category":"Ready-made","price":80,"quantity":1e309}]}',
+        ].join(""),
+      },
+      {
+        eventName: "build_complete",
+        marker: "UNSAFE-STONE-COUNT",
+        rawPropertiesJson: [
+          '{"currency":"USD","item_category":"Build Your Own"',
+          ',"stone_count":1e309,"value":80}',
+        ].join(""),
+      },
+      {
+        eventName: "save_design",
+        marker: "UNSAFE-BUILD-VALUE",
+        rawPropertiesJson: [
+          '{"currency":"USD","item_category":"Build Your Own"',
+          ',"stone_count":2,"value":1e309}',
+        ].join(""),
+      },
+    ] as const;
+
+    expect(validateWebsiteFunnelEventProperties(
+      "page_view",
+      JSON.parse('{"nested":{"value":1e309}}'),
+    ).valid).toBe(false);
+    for (const fixture of unsafeDownstream) {
+      expect(validateWebsiteFunnelEventProperties(
+        fixture.eventName,
+        JSON.parse(fixture.rawPropertiesJson),
+      ).valid).toBe(false);
+    }
+    for (const fixture of attributionControls) {
+      expect(validateWebsiteFunnelEventProperties(
+        fixture.eventName,
+        JSON.parse(fixture.rawPropertiesJson),
+      ).valid).toBe(true);
+    }
+
+    try {
+      await insertEvent({
+        sourceId: websiteSourceId,
+        sessionId: blockedSessionId,
+        anonymousId: `${blockedSessionId}-visitor`,
+        eventName: "page_view",
+        occurredAt: "2026-08-19T16:00:00.000Z",
+        path: "/finite/blocked-context",
+        rawPropertiesJson: '{"nested":{"value":1e309}}',
+        attributionContext: {
+          utm: { source: "finite-number-fixture", campaign: "blocked-context" },
+          landing_page: "/finite/blocked-context",
+        },
+      });
+      await insertEvent({
+        sourceId: websiteSourceId,
+        sessionId: blockedSessionId,
+        anonymousId: `${blockedSessionId}-visitor`,
+        eventName: "view_item",
+        occurredAt: "2026-08-19T16:01:00.000Z",
+        rawPropertiesJson: [
+          '{"currency":"USD","value":80,"items":[',
+          '{"item_id":"BLOCKED-CONTEXT-SKU","item_name":"Blocked context item"',
+          ',"item_category":"Ready-made","quantity":1}]}',
+        ].join(""),
+        attributionContext: {},
+      });
+
+      await insertEvent({
+        sourceId: websiteSourceId,
+        sessionId: unsafeSessionId,
+        anonymousId: `${unsafeSessionId}-visitor`,
+        eventName: "page_view",
+        occurredAt: "2026-08-19T17:00:00.000Z",
+        path: "/finite/unsafe-downstream",
+        attributionContext: {
+          utm: { source: "finite-number-fixture", campaign: "unsafe-downstream" },
+          landing_page: "/finite/unsafe-downstream",
+        },
+      });
+      await insertEvent({
+        sourceId: websiteSourceId,
+        sessionId: unsafeSessionId,
+        anonymousId: `${unsafeSessionId}-visitor`,
+        eventName: "build_start",
+        occurredAt: "2026-08-19T17:01:00.000Z",
+        rawPropertiesJson: '{"item_category":"Build Your Own"}',
+        attributionContext: {},
+      });
+      for (const [index, fixture] of unsafeDownstream.entries()) {
+        await insertEvent({
+          sourceId: websiteSourceId,
+          sessionId: unsafeSessionId,
+          anonymousId: `${unsafeSessionId}-visitor`,
+          eventName: fixture.eventName,
+          occurredAt: new Date(
+            Date.parse("2026-08-19T17:02:00.000Z") + index * 60_000,
+          ).toISOString(),
+          rawPropertiesJson: fixture.rawPropertiesJson,
+          attributionContext: {},
+        });
+      }
+
+      await insertEvent({
+        sourceId: websiteSourceId,
+        sessionId: attributionSessionId,
+        anonymousId: `${attributionSessionId}-visitor`,
+        eventName: "page_view",
+        occurredAt: "2026-08-19T18:00:00.000Z",
+        path: "/finite/attribution-control",
+        attributionContext: {
+          utm: { source: "finite-number-fixture", campaign: "attribution-control" },
+          landing_page: "/finite/attribution-control",
+        },
+      });
+      for (const [index, fixture] of attributionControls.entries()) {
+        await insertEvent({
+          sourceId: websiteSourceId,
+          sessionId: attributionSessionId,
+          anonymousId: `${attributionSessionId}-visitor`,
+          eventName: fixture.eventName,
+          occurredAt: new Date(
+            Date.parse("2026-08-19T18:01:00.000Z") + index * 60_000,
+          ).toISOString(),
+          rawPropertiesJson: fixture.rawPropertiesJson,
+          attributionContext: {},
+        });
+      }
+
+      const result = await getWebsiteFunnelAggregate({
+        dataSpaceId,
+        segment: "all",
+        current: {
+          startAt: "2026-08-19T07:00:00.000Z",
+          endExclusive: "2026-08-20T07:00:00.000Z",
+        },
+        comparison: {
+          startAt: "2026-08-18T07:00:00.000Z",
+          endExclusive: "2026-08-19T07:00:00.000Z",
+        },
+        pagination: { groupLimit: 100 },
+      });
+      const currentStages = new Map(result.stages
+        .filter((row) => row.period_key === "current")
+        .map((row) => [row.stage_key, row]));
+      const currentInvalid = result.invalid_properties
+        .filter((row) => row.period_key === "current")
+        .map((row): [string, number] => [row.event_name, Number(row.events)])
+        .sort(([left], [right]) => left.localeCompare(right));
+
+      expect(currentStages.get("visit")).toMatchObject({
+        sessions: 2,
+        visitors: 2,
+        events: 2,
+      });
+      expect(currentStages.get("product_intent")).toMatchObject({
+        sessions: 2,
+        visitors: 2,
+        events: 3,
+      });
+      expect(currentStages.get("add_to_cart")).toMatchObject({
+        sessions: 1,
+        visitors: 1,
+        events: 1,
+      });
+      expect(currentStages.get("begin_checkout")).toMatchObject({
+        sessions: 1,
+        visitors: 1,
+        events: 1,
+      });
+      expect(currentInvalid).toEqual([
+        ["add_to_cart", 1],
+        ["begin_checkout", 1],
+        ["build_complete", 1],
+        ["page_view", 1],
+        ["save_design", 1],
+        ["view_item", 1],
+        ["view_item_list", 1],
+      ]);
+      expect(result.event_counts).toContainEqual({
+        period_key: "current",
+        accepted_events: 19,
+        unfiltered_events: 19,
+      });
+      expect(result.products).toContainEqual(expect.objectContaining({
+        period_key: "current",
+        item_id: "ATTRIBUTION-CONTROL-SKU",
+        stable_identity: true,
+        product_view_events: 1,
+        add_to_cart_events: 1,
+      }));
+      expect(result.products.find(
+        (row) => row.item_id === "Unknown / unmapped",
+      )).toBeUndefined();
+      expect(result.collections).toContainEqual(expect.objectContaining({
+        period_key: "current",
+        item_list_name: "Attribution control list",
+        collection_view_events: 1,
+      }));
+      expect(result.collections.find(
+        (row) => row.item_list_name === "Unknown / unmapped",
+      )).toBeUndefined();
+      expect(result.group_totals).toEqual({
+        products: 1,
+        collections: 1,
+        acquisition: 2,
+      });
+      expect(result.journeys.find(
+        (row) => row.period_key === "current" && row.journey_key === "builder",
+      )).toMatchObject({
+        build_start_sessions: 2,
+        build_complete_sessions: 1,
+        save_design_sessions: 1,
+        build_start_events: 2,
+        build_complete_events: 1,
+        save_design_events: 1,
+      });
+      expect(result.engagement.find(
+        (row) => row.period_key === "current" && row.event_name === "email_signup",
+      )).toMatchObject({ sessions: 1, visitors: 1, events: 1 });
+      expect(result.quality.find(
+        (row) => row.period_key === "current",
+      )).toMatchObject({ unsequenced_intent_sessions: 1 });
+      expect(result.filter_options.utm_campaigns).toEqual([
+        "attribution-control",
+        "unsafe-downstream",
+      ]);
+      expect(Number(result.group_totals.acquisition)).toBe(2);
+      expect(JSON.stringify(result)).not.toContain("blocked-context");
+      expect(JSON.stringify(result)).not.toContain("BLOCKED-CONTEXT-SKU");
+      for (const fixture of unsafeDownstream) {
+        expect(JSON.stringify(result)).not.toContain(fixture.marker);
+      }
+    } finally {
+      await query(
+        "delete from web_events where source_id = $1::uuid and session_id = any($2::text[])",
+        [websiteSourceId, [blockedSessionId, unsafeSessionId, attributionSessionId]],
       );
     }
   });
