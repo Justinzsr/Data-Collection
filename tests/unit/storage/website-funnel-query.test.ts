@@ -149,16 +149,26 @@ describe("Website funnel aggregate SQL", () => {
 
   it("applies the frozen property contract before events can qualify for aggregates", () => {
     const sql = compactSql(WEBSITE_FUNNEL_AGGREGATE_SQL);
-    const numericSafetyStart = sql.indexOf("known_event_numeric_safety as materialized");
-    const numericSafetyEnd = sql.indexOf("unknown_event_rows as materialized");
+    const numericSafetyStart = sql.indexOf("event_property_primitives as materialized");
+    const numericSafetyEndMarker = "end as properties_have_only_finite_numbers";
+    const numericSafetyEnd = sql.indexOf(
+      numericSafetyEndMarker,
+      numericSafetyStart,
+    ) + numericSafetyEndMarker.length;
     const numericSafetySql = sql.slice(numericSafetyStart, numericSafetyEnd);
 
     expect(numericSafetyStart).toBeGreaterThan(-1);
     expect(numericSafetyEnd).toBeGreaterThan(numericSafetyStart);
-    expect(sql).toContain("known_event_numeric_safety as materialized");
     expect(sql).toContain(
-      "select event.period_key, event.event_id, not exists",
+      "known_events as materialized ( select * from all_events where event_name = any($6::text[])",
     );
+    expect(sql).toContain(
+      "event_property_primitives as materialized ( select event.*, case when event.properties = '{}'::jsonb then true",
+    );
+    expect(numericSafetySql).toContain(
+      "when event.event_name <> 'page_view' and jsonb_typeof(event.properties) = 'object' and event.properties - 'attribution' = '{}'::jsonb then true else not exists",
+    );
+    expect(sql).not.toContain("join known_event_numeric_safety");
     expect(sql).toContain(
       "when event.event_name = 'page_view' then event.properties",
     );

@@ -2774,67 +2774,80 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
     }
   });
 
-  it("keeps the fixed privacy aggregate within its timeout for high-cardinality safe dimensions", async () => {
+  describe("high-cardinality safe dimensions", () => {
     const scaleEventCount = 10_000;
-    const inserted = await query(
-      `
-        insert into web_events (
-          id,
-          event_id,
-          schema_version,
-          event_source,
-          source_id,
-          anonymous_id,
-          session_id,
-          event_name,
-          path,
-          url,
-          referrer,
-          properties,
-          attribution_context,
-          consent_status,
-          client_context,
-          occurred_at,
-          received_at,
-          created_at
-        )
-        select
-          md5('scale-row-' || fixture.event_index::text)::uuid,
-          md5('scale-event-' || fixture.event_index::text)::uuid,
-          '1.0',
-          'first_party_tracker',
-          $1::uuid,
-          'scale-visitor-' || fixture.event_index::text,
-          'scale-session-' || fixture.event_index::text,
-          'page_view',
-          '/scale-safe/' || fixture.event_index::text,
-          'https://fixture.invalid/scale-safe/' || fixture.event_index::text,
-          'https://editorial.example.invalid/archive',
-          '{}'::jsonb,
-          jsonb_build_object(
-            'utm',
+    beforeAll(async () => {
+      const inserted = await query(
+        `
+          insert into web_events (
+            id,
+            event_id,
+            schema_version,
+            event_source,
+            source_id,
+            anonymous_id,
+            session_id,
+            event_name,
+            path,
+            url,
+            referrer,
+            properties,
+            attribution_context,
+            consent_status,
+            client_context,
+            occurred_at,
+            received_at,
+            created_at
+          )
+          select
+            md5('scale-row-' || fixture.event_index::text)::uuid,
+            md5('scale-event-' || fixture.event_index::text)::uuid,
+            '1.0',
+            'first_party_tracker',
+            $1::uuid,
+            'scale-visitor-' || fixture.event_index::text,
+            'scale-session-' || fixture.event_index::text,
+            'page_view',
+            '/scale-safe/' || fixture.event_index::text,
+            'https://fixture.invalid/scale-safe/' || fixture.event_index::text,
+            'https://editorial.example.invalid/archive',
+            '{}'::jsonb,
             jsonb_build_object(
-              'source', 'scale-fixture-' || fixture.event_index::text,
-              'medium', 'test',
-              'campaign', 'catalog-cardinality-' || fixture.event_index::text
+              'utm',
+              jsonb_build_object(
+                'source', 'scale-fixture-' || fixture.event_index::text,
+                'medium', 'test',
+                'campaign', 'catalog-cardinality-' || fixture.event_index::text
+              ),
+              'landing_page', '/scale-safe/' || fixture.event_index::text
             ),
-            'landing_page', '/scale-safe/' || fixture.event_index::text
-          ),
-          '{"analytics":"granted","marketing":"denied"}'::jsonb,
-          '{"device_category":"desktop","page_type":"fixture"}'::jsonb,
-          timestamptz '2026-08-15 16:00:00+00'
-            + fixture.event_index * interval '1 millisecond',
-          timestamptz '2026-08-15 16:00:01+00'
-            + fixture.event_index * interval '1 millisecond',
-          timestamptz '2026-08-15 16:00:01+00'
-            + fixture.event_index * interval '1 millisecond'
-        from generate_series(1, $2::integer) fixture(event_index)
-      `,
-      [websiteSourceId, scaleEventCount],
-    );
-    expect(inserted.rowCount).toBe(scaleEventCount);
+            '{"analytics":"granted","marketing":"denied"}'::jsonb,
+            '{"device_category":"desktop","page_type":"fixture"}'::jsonb,
+            timestamptz '2026-08-15 16:00:00+00'
+              + fixture.event_index * interval '1 millisecond',
+            timestamptz '2026-08-15 16:00:01+00'
+              + fixture.event_index * interval '1 millisecond',
+            timestamptz '2026-08-15 16:00:01+00'
+              + fixture.event_index * interval '1 millisecond'
+          from generate_series(1, $2::integer) fixture(event_index)
+        `,
+        [websiteSourceId, scaleEventCount],
+      );
+      expect(inserted.rowCount).toBe(scaleEventCount);
+    });
 
-    try {
+    afterAll(async () => {
+      await query(
+        "delete from web_events where source_id = $1::uuid and occurred_at >= $2::timestamptz and occurred_at < $3::timestamptz",
+        [
+          websiteSourceId,
+          "2026-08-15T07:00:00.000Z",
+          "2026-08-16T07:00:00.000Z",
+        ],
+      );
+    });
+
+    it("keeps the fixed privacy aggregate within its timeout", async () => {
       const result = await getWebsiteFunnelAggregate({
         dataSpaceId,
         segment: "all",
@@ -2876,15 +2889,6 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       expect(result.filter_options.utm_campaigns).toHaveLength(100);
       expect(result.filter_options.landing_pages).toHaveLength(100);
       expect(result.filter_options.referrer_hosts).toEqual(["editorial.example.invalid"]);
-    } finally {
-      await query(
-        "delete from web_events where source_id = $1::uuid and occurred_at >= $2::timestamptz and occurred_at < $3::timestamptz",
-        [
-          websiteSourceId,
-          "2026-08-15T07:00:00.000Z",
-          "2026-08-16T07:00:00.000Z",
-        ],
-      );
-    }
+    });
   });
 });

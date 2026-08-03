@@ -419,26 +419,6 @@ known_events as materialized (
   from all_events
   where event_name = any($6::text[])
 ),
-known_event_numeric_safety as materialized (
-  select
-    event.period_key,
-    event.event_id,
-    not exists (
-      select 1
-      from jsonb_path_query(
-        case
-          when event.event_name = 'page_view' then event.properties
-          when jsonb_typeof(event.properties) = 'object'
-            then event.properties - 'attribution'
-          else event.properties
-        end,
-        'strict $.** ? (@.type() == "number")'
-      ) numeric_leaf(value)
-      where abs((numeric_leaf.value #>> '{}')::numeric)
-        >= ${ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD}::numeric
-    ) as properties_have_only_finite_numbers
-  from known_events event
-),
 unknown_event_rows as materialized (
   select *
   from all_events
@@ -1477,7 +1457,27 @@ display_value_maps as materialized (
 event_property_primitives as materialized (
   select
     event.*,
-    numeric_safety.properties_have_only_finite_numbers,
+    case
+      when event.properties = '{}'::jsonb then true
+      when event.event_name <> 'page_view'
+        and jsonb_typeof(event.properties) = 'object'
+        and event.properties - 'attribution' = '{}'::jsonb
+        then true
+      else not exists (
+        select 1
+        from jsonb_path_query(
+          case
+            when event.event_name = 'page_view' then event.properties
+            when jsonb_typeof(event.properties) = 'object'
+              then event.properties - 'attribution'
+            else event.properties
+          end,
+          'strict $.** ? (@.type() == "number")'
+        ) numeric_leaf(value)
+        where abs((numeric_leaf.value #>> '{}')::numeric)
+          >= ${ECMASCRIPT_NUMBER_OVERFLOW_THRESHOLD}::numeric
+      )
+    end as properties_have_only_finite_numbers,
     display.display_presence,
     display.display_safety,
     display.display_values,
@@ -1559,9 +1559,6 @@ event_property_primitives as materialized (
       false
     ) as commerce_values_are_valid
   from known_events event
-  join known_event_numeric_safety numeric_safety
-    on numeric_safety.period_key = event.period_key
-   and numeric_safety.event_id = event.event_id
   join display_value_maps display
     on display.period_key = event.period_key
    and display.event_id = event.event_id
