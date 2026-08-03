@@ -170,7 +170,7 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("trunc((event.properties ->> 'stone_count')::numeric) = (event.properties ->> 'stone_count')::numeric");
     expect(sql).toContain("jsonb_typeof(event.properties) is distinct from 'object'");
     expect(sql).toContain("from classified_events where property_valid is true");
-    expect(sql).toContain("from classified_known_events where property_valid is true and event_name = 'page_view'");
+    expect(sql).toContain("from classified_known_events candidate where candidate.event_name = 'page_view' and candidate.property_valid is true");
     expect(sql).toContain("from diagnostic_known_events where property_valid is not true");
     expect(sql).toContain("as items_are_valid");
     expect(sql).toContain("as commerce_values_are_valid");
@@ -183,6 +183,8 @@ describe("Website funnel aggregate SQL", () => {
 
     for (const cte of [
       "raw_display_values as materialized",
+      "display_value_catalog as materialized",
+      "display_value_references as materialized",
       "display_value_features as materialized",
       "display_value_numeric_features as materialized",
       "display_value_payment_inputs as materialized",
@@ -194,13 +196,26 @@ describe("Website funnel aggregate SQL", () => {
       "display_value_payment_risks as materialized",
       "display_value_risks as materialized",
       "validated_display_values as materialized",
+      "normalized_display_value_catalog as materialized",
       "normalized_display_values as materialized",
       "display_value_maps as materialized",
     ]) {
       expect(sql).toContain(cte);
     }
     expect(sql).toContain("risk.raw_text !~* '%(25)*(40|3f|23)'");
-    expect(sql).toContain("pg_input_is_valid(risk.ipv4_candidate, 'inet') is not true");
+    expect(sql).toContain("risk.likely_ipv4 is not true");
+    expect(sql).toContain(
+      "coalesce(feature.scan_text, '') collate \"pg_c_utf8\" ~ '(?=(?<![0-9])",
+    );
+    expect(sql).toContain("numeric_privacy_probe.normalized_numeric_privacy_scan_text collate \"pg_c_utf8\" ~ '(?=(?<![0-9])");
+    expect(sql).toContain("as likely_alternative_ipv4_url");
+    expect(sql).toContain("((https?|ftp|ws|wss):[\\\\/]*|file:[\\\\/]{2})");
+    expect(sql).toContain("'(^|.)([\\\\/]{2,}([^/?#@\\\\]*@)*");
+    expect(sql).toContain("where relative_network.match[1] = ''");
+    expect(sql).toContain("relative_network.match[1] <> ':'");
+    expect(sql).toContain("(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}");
+    expect(sql).toContain("feature.scan_text collate \"pg_c_utf8\" ~ '(?:\\+");
+    expect(sql).toContain("or feature.normalized_numeric_privacy_scan_text collate \"pg_c_utf8\" ~ '(?:\\+");
     expect(sql).toContain("lower(coalesce(feature.raw_text, '')) ~ '^https?://[^/?#]+(/[^?#]*)?$'");
     expect(sql).toContain("false as decode_failed");
     expect(sql).toContain("decoded.decode_valid is not true as decode_failed");
@@ -208,30 +223,99 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("and position('%' in variant.scan_text) > 0");
     expect(sql).toContain("risk.decode_failed is true");
     expect(sql).toContain("risk.decode_pass = 3 and position('%' in risk.scan_text) > 0");
+    expect(sql).toContain("regexp_count( risk.normalized_privacy_scan_text collate \"pg_c_utf8\", '%[0-9a-f]{2}', 1, 'i' ) > regexp_count( risk.scan_text collate \"pg_c_utf8\", '%[0-9a-f]{2}', 1, 'i' )");
+    expect(sql).toContain("as raw_text_utf16_length");
+    expect(sql).toContain("normalize( translate( normalized_scan.trimmed_text");
+    expect(sql).toContain("u&'\\a7f1\\+01ccd6");
+    expect(sql).toContain("normalized_privacy_spaced_scan_text");
+    expect(sql).toContain("unicode_decimal_digit_blocks(block_start) as materialized");
+    expect(sql).toContain("when octet_length(numeric_probe.scan_text) = char_length(numeric_probe.scan_text)");
+    expect(sql).toContain("('removed', privacy_probe_prepared.normalized_privacy_scan_text)");
+    expect(sql).toContain("('spaced', privacy_probe_prepared.normalized_privacy_spaced_scan_text)");
+    expect(sql).toContain("normalized_numeric_privacy_spaced_scan_text");
+    expect(sql).toContain("u&'[^\\0020-\\007e[:alnum:][:space:]]'");
+    expect(sql).toContain("u&'[\\00ad\\034f\\0600-\\0605\\061c");
+    expect(sql).toContain(
+      "u&'[^@[:space:]]+@(?:[^@[:space:].]+[.])+[^@[:space:]._]{2,63}(?![a-z0-9_\\0080-\\+10ffff])'",
+    );
+    expect(sql).toContain(
+      "(^|[^a-z0-9_])bearer[[:space:]]+[a-z0-9._~+/-]+={0,}(?![a-z0-9._~+/=-])",
+    );
+    expect(sql).toContain(
+      "(^|[^a-z0-9_])basic[[:space:]]+([a-z0-9+/]{2,}={0,2})(?![a-z0-9+/=])",
+    );
+    expect(sql).toContain("position( decode('3a', 'hex') in decode(");
+    expect(sql).toContain("sensitive_display_key_families(value, safe_terminal_suffix) as materialized");
+    expect(sql).toContain("sensitive_display_key_contract( family_pattern, safe_terminal_pattern, split_family_pattern ) as materialized");
+    expect(sql).toContain("string_agg( family.value, '|' order by char_length(family.value) desc, family.value )");
+    expect(sql).toContain("with ordinality character(value, delimiter_index)");
+    expect(sql).toContain("from greatest(delimiter_character.delimiter_index::integer - 1200, 1)");
+    expect(sql).toContain("prefix_exceeds_inspection_limit");
+    expect(sql).toContain("char_length(translate(privacy_scan.scan_text, '=:/', '')) > 64");
+    expect(sql).toContain("where character.value in ('=', ':', '/')");
+    expect(sql).not.toContain("regexp_instr(");
+    expect(sql).not.toContain("sensitive_display_key_patterns");
+    expect(sql).not.toContain("camel_spaced_key");
+    expect(sql).toContain("sensitive_key.safe_terminal_pattern");
+    expect(sql).toContain("sensitive_key.split_family_pattern");
+    expect(sql).toContain("collate \"pg_c_utf8\" ~ sensitive_key.family_pattern");
+    expect(sql).toContain("(input.normalized_numeric_privacy_scan_text)");
+    expect(sql).toContain("(input.normalized_numeric_privacy_spaced_scan_text)");
+    expect(sql).toContain(
+      "((https?|ftp|ws|wss):[\\\\/]*|[a-z][a-z0-9+.-]*:[\\\\/]{2,}|:[\\\\/]{2,})[^[:space:]/?#\\\\]*@",
+    );
+    expect(sql).toContain("regexp_matches( privacy_scan.scan_text collate \"pg_c_utf8\"");
+    expect(sql).toContain("'(^|.)([\\\\/]{2,}[^[:space:]/?#\\\\]*@)', 'g'");
+    expect(sql).toContain("where relative_userinfo.match[1] = ''");
+    expect(sql).toContain("relative_userinfo.match[1] <> ':'");
+    expect(sql).toContain("relative_userinfo.match[1] !~ '[[:alnum:]]'");
+    expect(sql).toContain("replace(value.raw_text, u&'\\0130', u&'\\0069\\0307')");
+    expect(sql).toContain("collate \"und-x-icu\"");
+    expect(sql).not.toContain("u&'\\1c89\\a7cb\\a7cc");
+    expect(sql).toContain("when lower(value.raw_text) = 'unknown' then 'unknown'");
     expect(sql).toContain('regexp_matches( input.scan_text collate "pg_c_utf8",');
+    expect(sql).toContain("[0-9[:space:][:punct:]");
+    for (const unicodeGapRange of [
+      "\u1b4e-\u1b4f",
+      "\u2427-\u2429",
+      "ⓐ-ⓩ",
+      "\u{1f8d0}-\u{1f8d8}",
+      "\u{1fbcb}-\u{1fbef}",
+    ]) {
+      expect(sql).toContain(unicodeGapRange);
+    }
     expect(sql).toContain("regexp_replace(segment.value, '[^0-9]', '', 'g') as digits");
     expect(sql).toContain(
       "unnest( regexp_split_to_array(candidate.match[1], '[0-9]{20,}') )",
     );
-    expect(sql).toContain("and feature.ascii_digit_count >= 13");
-    expect(sql).toContain("and feature.scan_text ~ '^[^0-9]*[0-9]([^0-9]*[0-9]){12}'");
+    expect(sql).toContain("values (feature.scan_text), (feature.normalized_numeric_privacy_scan_text), (feature.normalized_numeric_privacy_spaced_scan_text)");
+    expect(sql).toContain("probe.scan_text ~ '^[^0-9]*[0-9]([^0-9]*[0-9]){6}'");
+    expect(sql).toContain("display_value_phone_risks as materialized");
     expect(sql).toContain(
       "coalesce(payment_risk.likely_payment_card, false) as likely_payment_card",
     );
-    expect(sql).toContain("payment_window_positions(payment_position) as materialized");
-    expect(sql).toContain("where payment_position < 1200");
+    expect(sql).toContain("cross join lateral generate_series( 1, segment.digit_count ) position(payment_position)");
+    expect(sql).toContain("cross join lateral generate_series( 1, prefix.digit_count - payment_length.window_length + 1 ) payment_start(payment_position)");
+    expect(sql).toContain("where char_length(segment.digits) between 13 and 3600");
     expect(sql).toContain(
       "cross join ( values (13), (14), (15), (16), (17), (18), (19) ) payment_length(window_length)",
     );
-    expect(sql).toContain("join payment_window_positions payment_start");
     expect(sql).toContain("array_agg(running.raw_sum order by running.payment_position)");
     expect(sql).toContain("prefix.raw_prefix[ payment_start.payment_position + payment_length.window_length ]");
     expect(sql).toContain(
-      "group by prefix.period_key, prefix.event_id, prefix.value_key, prefix.decode_pass",
+      "group by prefix.display_value_id, prefix.value_key, prefix.decode_pass",
     );
-    expect(sql).not.toContain("regexp_split_to_table(");
+    expect(sql).toContain("from display_value_references reference");
+    expect(sql).toContain("value.display_value_id = reference.display_value_id");
+    expect(sql).toContain(
+      "min(candidate.occurred_at) over ( partition by candidate.period_key, candidate.session_id ) as visit_at",
+    );
+    expect(sql).toContain("where event.occurred_at = event.visit_at");
+    expect(sql).not.toContain("first_visits as materialized");
     expect(sql).not.toContain("from '([0-9][0-9 -]{11,22}[0-9])'");
     expect(sql).not.toContain("as payment_digits");
+    expect(sql).not.toContain("as first_phone_candidate");
+    expect(sql).not.toContain("as ipv4_candidate,");
     expect(sql).toContain(
       "when event.display_presence -> 'first_referrer' = 'true'::jsonb",
     );
@@ -561,7 +645,7 @@ describe("Website funnel aggregate SQL", () => {
     }))).toThrow(/non-empty half-open range/u);
   });
 
-  it("executes in one repeatable-read, read-only transaction with a local timeout", async () => {
+  it("executes in one repeatable-read, read-only transaction with bounded local planner settings", async () => {
     const aggregate = emptyAggregate();
     queryRowsMock.mockResolvedValueOnce([aggregate]);
 
@@ -576,6 +660,18 @@ describe("Website funnel aggregate SQL", () => {
     );
     expect(queryMock).toHaveBeenNthCalledWith(
       2,
+      "set local jit = off",
+      undefined,
+      transactionClient,
+    );
+    expect(queryMock).toHaveBeenNthCalledWith(
+      3,
+      "set local enable_nestloop = off",
+      undefined,
+      transactionClient,
+    );
+    expect(queryMock).toHaveBeenNthCalledWith(
+      4,
       "set local statement_timeout = '8000ms'",
       undefined,
       transactionClient,

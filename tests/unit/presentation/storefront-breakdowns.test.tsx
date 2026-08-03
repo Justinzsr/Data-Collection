@@ -22,6 +22,8 @@ import { createWebsiteFunnelOverview } from "./website-funnel-overview-fixture";
 
 const syntheticPaymentDigits = ["7000", "0000", "0000", "0005"].join("");
 const dottedPaymentCandidate = syntheticPaymentDigits.match(/.{1,4}/gu)!.join(".");
+const alternativeIpv4Host = "0xc633642a";
+const paddedSensitiveKey = `email${"x".repeat(121)}=synthetic`;
 
 function paginationUrl(
   markup: string,
@@ -288,6 +290,110 @@ describe("StorefrontBreakdowns", () => {
     expect(markup).toContain('<option value="summer">summer</option>');
     expect(markup).toContain('<option value="/collections/new">/collections/new</option>');
     expect(markup).toContain('<option value="example.test">example.test</option>');
+  });
+
+  it.each(["query", "options"] as const)(
+    "removes an alternative IPv4 host from the %s before rendering",
+    (injectionTarget) => {
+      const overview = createWebsiteFunnelOverview();
+      overview.filterOptions.referrerHosts = injectionTarget === "options"
+        ? ["editorial.example.invalid", alternativeIpv4Host]
+        : ["editorial.example.invalid"];
+      const query: MoonArqOverviewQuery = {
+        ...DEFAULT_MOONARQ_OVERVIEW_QUERY,
+        range: "7d",
+        acquisition_page: 2,
+        referrer_host: injectionTarget === "query" ? alternativeIpv4Host : "",
+      };
+      const markup = renderToStaticMarkup(
+        <StorefrontBreakdowns
+          overview={overview}
+          query={query}
+          basePath="/w/moonarq/dashboard"
+        />,
+      );
+      const root = document.createElement("div");
+      root.innerHTML = markup;
+      const select = root.querySelector<HTMLSelectElement>('select[name="referrer_host"]');
+      const attributeValues = [...root.querySelectorAll("*")].flatMap((element) =>
+        [...element.attributes].map((attribute) => attribute.value));
+      const paginationLinks = [...root.querySelectorAll<HTMLAnchorElement>("a[rel][href]")];
+
+      expect(select?.value).toBe("");
+      expect([...select!.options].some((option) => option.value === alternativeIpv4Host)).toBe(false);
+      expect([...select!.options].some((option) =>
+        option.value === "editorial.example.invalid")).toBe(true);
+      expect(markup).not.toContain(alternativeIpv4Host);
+      expect(attributeValues.some((value) => value.includes(alternativeIpv4Host))).toBe(false);
+      expect(paginationLinks.length).toBeGreaterThan(0);
+      for (const link of paginationLinks) {
+        const url = new URL(link.href, "https://data-hub.invalid");
+        expect(url.searchParams.get("range")).toBe("7d");
+        expect(url.searchParams.has("referrer_host")).toBe(false);
+      }
+    },
+  );
+
+  it.each([
+    { label: "an unpadded Basic credential", value: "Basic YTpiYQ" },
+    { label: "a Unicode-decimal payment candidate", value: "٧٠٠٠.٠٠٠٠.٠٠٠٠.٠٠٠٥" },
+    { label: "a slash-formatted phone number", value: "44/20/7946/0958" },
+    { label: "a combining-mark-obfuscated phone number", value: "202\u0301 555\u0301 0100" },
+    { label: "a compressed NANP phone number", value: "202-5550100" },
+    { label: "a punctuation-only street address", value: "123/Main/Street" },
+    { label: "a punctuation-only PO box", value: "P/O/Box/123" },
+    { label: "an assigned alternative numeric authority", value: "redirect=//0xc633642a/path" },
+    { label: "an obfuscated qualified email key", value: "e+m+a+i+l_hash=synthetic" },
+    { label: "a concatenated qualified email key", value: "customeremailhash=synthetic" },
+    { label: "a sensitive key beyond the former local window", value: paddedSensitiveKey },
+    { label: "an encoded fragment delimiter", value: "archive%23control" },
+    { label: "an encoded query delimiter", value: "archive%3Fcontrol" },
+    { label: "an encoded at-sign delimiter", value: "archive%40control" },
+    { label: "a fullwidth-percent-escaped email", value: "private-person％40example.invalid" },
+    {
+      label: "a pipe-delimited nested authority credential",
+      value: "prefix|//alice:syntheticpass@localhost/path",
+    },
+    { label: "a contract-prohibited name field", value: "customer_name=Alice" },
+  ])("removes $label from query state, options, markup, and links", ({ value }) => {
+    for (const injectionTarget of ["query", "options"] as const) {
+      const overview = createWebsiteFunnelOverview();
+      overview.filterOptions.utmSources = injectionTarget === "options"
+        ? ["newsletter", value]
+        : ["newsletter"];
+      const query: MoonArqOverviewQuery = {
+        ...DEFAULT_MOONARQ_OVERVIEW_QUERY,
+        range: "7d",
+        acquisition_page: 2,
+        utm_source: injectionTarget === "query" ? value : "",
+      };
+      const markup = renderToStaticMarkup(
+        <StorefrontBreakdowns
+          overview={overview}
+          query={query}
+          basePath="/w/moonarq/dashboard"
+        />,
+      );
+      const root = document.createElement("div");
+      root.innerHTML = markup;
+      const select = root.querySelector<HTMLSelectElement>('select[name="utm_source"]');
+      const attributes = [...root.querySelectorAll("*")].flatMap((element) =>
+        [...element.attributes].map((attribute) => attribute.value));
+      const paginationLinks = [...root.querySelectorAll<HTMLAnchorElement>("a[rel][href]")];
+
+      expect(select?.value).toBe("");
+      expect([...select!.options].some((option) => option.value === value)).toBe(false);
+      expect([...select!.options].some((option) => option.value === "newsletter")).toBe(true);
+      expect(markup.toLowerCase()).not.toContain(value.toLowerCase());
+      expect(attributes.some((attribute) => attribute.toLowerCase().includes(value.toLowerCase())))
+        .toBe(false);
+      expect(paginationLinks.length).toBeGreaterThan(0);
+      for (const link of paginationLinks) {
+        const url = new URL(link.href, "https://data-hub.invalid");
+        expect(url.searchParams.get("range")).toBe("7d");
+        expect(url.searchParams.has("utm_source")).toBe(false);
+      }
+    }
   });
 
   it.each([

@@ -291,6 +291,93 @@ test("payment data in a literal acquisition query is not reflected into rendered
   }
 });
 
+test("an alternative IPv4 referrer host is not reflected into rendered controls", async ({ page }) => {
+  const alternativeIpv4Host = "0xc633642a";
+  const normalizedReservedAddress = ["198", "51", "100", "42"].join(".");
+  const response = await page.goto(
+    `/w/moonarq/dashboard?range=7d&referrer_host=${alternativeIpv4Host}&acquisition_page=2`,
+  );
+
+  expect(response?.ok()).toBe(true);
+  const finalUrl = new URL(page.url());
+  expect(finalUrl.searchParams.get("range")).toBe("7d");
+  expect(finalUrl.searchParams.get("acquisition_page")).toBe("2");
+  expect(finalUrl.searchParams.has("referrer_host")).toBe(false);
+  await expect(page.getByLabel("Referrer host")).toHaveValue("");
+  const markup = await page.evaluate(() => document.documentElement.outerHTML);
+  for (const canary of [alternativeIpv4Host, normalizedReservedAddress]) {
+    expect(finalUrl.href).not.toContain(canary);
+    expect(markup).not.toContain(canary);
+  }
+});
+
+test("obfuscated privacy metadata is not reflected into acquisition controls", async ({ page }) => {
+  const paddedSensitiveKey = `email${"x".repeat(121)}=synthetic`;
+  const cases = [
+    {
+      rawQueryValue: "redirect%3D%2F%2F0xc633642a%2Fpath",
+      decodedValue: "redirect=//0xc633642a/path",
+    },
+    {
+      rawQueryValue: "e%2Bm%2Ba%2Bi%2Bl_hash%3Dsynthetic",
+      decodedValue: "e+m+a+i+l_hash=synthetic",
+    },
+    {
+      rawQueryValue: "customeremailhash%3Dsynthetic",
+      decodedValue: "customeremailhash=synthetic",
+    },
+    {
+      rawQueryValue: "private-person%EF%BC%8540example.invalid",
+      decodedValue: "private-person％40example.invalid",
+    },
+    {
+      rawQueryValue: "202%CC%81%20555%CC%81%200100",
+      decodedValue: "202\u0301 555\u0301 0100",
+    },
+    {
+      rawQueryValue: "7000%CC%810000%CC%810000%CC%810005%CC%811234",
+      decodedValue: "7000\u03010000\u03010000\u03010005\u03011234",
+    },
+    {
+      rawQueryValue: "%D9%A7%D9%A0%D9%A0%D9%A0.%D9%A0%D9%A0%D9%A0%D9%A0.%D9%A0%D9%A0%D9%A0%D9%A0.%D9%A0%D9%A0%D9%A0%D9%A5",
+      decodedValue: "٧٠٠٠.٠٠٠٠.٠٠٠٠.٠٠٠٥",
+    },
+    {
+      rawQueryValue: encodeURIComponent(paddedSensitiveKey),
+      decodedValue: paddedSensitiveKey,
+    },
+    {
+      rawQueryValue: "123%2FMain%2FStreet",
+      decodedValue: "123/Main/Street",
+    },
+    {
+      rawQueryValue: "202-5550100",
+      decodedValue: "202-5550100",
+    },
+    {
+      rawQueryValue: "P%2FO%2FBox%2F123",
+      decodedValue: "P/O/Box/123",
+    },
+  ];
+
+  for (const { rawQueryValue, decodedValue } of cases) {
+    const response = await page.goto(
+      `/w/moonarq/dashboard?range=7d&utm_campaign=${rawQueryValue}&acquisition_page=2`,
+    );
+    expect(response?.ok()).toBe(true);
+    const finalUrl = new URL(page.url());
+    expect(finalUrl.searchParams.get("range")).toBe("7d");
+    expect(finalUrl.searchParams.get("acquisition_page")).toBe("2");
+    expect(finalUrl.searchParams.has("utm_campaign")).toBe(false);
+    await expect(page.getByLabel("UTM campaign")).toHaveValue("");
+    const markup = await page.evaluate(() => document.documentElement.outerHTML);
+    expect(finalUrl.href).not.toContain(rawQueryValue);
+    expect(finalUrl.href).not.toContain(decodedValue);
+    expect(markup).not.toContain(rawQueryValue);
+    expect(markup).not.toContain(decodedValue);
+  }
+});
+
 test("Overview muted text, chart ticks, and funnel bars meet contrast requirements", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/w/moonarq/dashboard?demo_state=long-values");

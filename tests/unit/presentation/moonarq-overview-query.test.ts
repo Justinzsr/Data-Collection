@@ -13,6 +13,8 @@ const malformedIntermediateCanary = "private-person%ZZ%40example.invalid";
 const malformedDecodedCanary = "private-person%ZZ@example.invalid";
 const syntheticPaymentDigits = ["7000", "0000", "0000", "0005"].join("");
 const dottedPaymentCandidate = syntheticPaymentDigits.match(/.{1,4}/gu)!.join(".");
+const alternativeIpv4Host = "0xc633642a";
+const paddedSensitiveKey = `email${"x".repeat(121)}=synthetic`;
 
 const paymentFilterCases = [
   { key: "utm_source", value: dottedPaymentCandidate },
@@ -187,6 +189,81 @@ describe("MoonArq Overview query state", () => {
       expect(href).not.toContain(canary);
       expect(decodeURIComponent(href)).not.toContain(canary);
     }
+  });
+
+  it("removes an alternative IPv4 host from query state and generated hrefs", () => {
+    const parsed = parseMoonArqOverviewQuery(new URLSearchParams({
+      range: "7d",
+      referrer_host: alternativeIpv4Host,
+      acquisition_page: "2",
+    }));
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", parsed);
+    const canonical = new URL(href, "https://data-hub.invalid");
+
+    expect(parsed).toMatchObject({
+      range: "7d",
+      referrer_host: "",
+      acquisition_page: 2,
+    });
+    expect(canonical.searchParams.get("range")).toBe("7d");
+    expect(canonical.searchParams.get("acquisition_page")).toBe("2");
+    expect(canonical.searchParams.has("referrer_host")).toBe(false);
+    expect(href).not.toContain(alternativeIpv4Host);
+  });
+
+  it.each([
+    { label: "an unpadded Basic credential", value: "Basic YTpiYQ" },
+    { label: "a Unicode-decimal payment candidate", value: "٧٠٠٠.٠٠٠٠.٠٠٠٠.٠٠٠٥" },
+    { label: "a slash-formatted phone number", value: "44/20/7946/0958" },
+    { label: "a combining-mark-obfuscated phone number", value: "202\u0301 555\u0301 0100" },
+    { label: "a compressed NANP phone number", value: "202-5550100" },
+    { label: "a punctuation-only street address", value: "123/Main/Street" },
+    { label: "a punctuation-only PO box", value: "P/O/Box/123" },
+    { label: "an assigned alternative numeric authority", value: "redirect=//0xc633642a/path" },
+    { label: "an obfuscated qualified email key", value: "e+m+a+i+l_hash=synthetic" },
+    { label: "a concatenated qualified email key", value: "customeremailhash=synthetic" },
+    { label: "a sensitive key beyond the former local window", value: paddedSensitiveKey },
+    { label: "an encoded fragment delimiter", value: "archive%23control" },
+    { label: "an encoded query delimiter", value: "archive%3Fcontrol" },
+    { label: "an encoded at-sign delimiter", value: "archive%40control" },
+    { label: "a fullwidth-percent-escaped email", value: "private-person％40example.invalid" },
+    {
+      label: "a pipe-delimited nested authority credential",
+      value: "prefix|//alice:syntheticpass@localhost/path",
+    },
+    { label: "a contract-prohibited name field", value: "customer_name=Alice" },
+  ])("removes $label from query state and generated hrefs", ({ value }) => {
+    const parsed = parseMoonArqOverviewQuery(new URLSearchParams({
+      range: "7d",
+      utm_source: value,
+      acquisition_page: "2",
+    }));
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", parsed);
+    const canonical = new URL(href, "https://data-hub.invalid");
+
+    expect(parsed).toMatchObject({ range: "7d", utm_source: "", acquisition_page: 2 });
+    expect(canonical.searchParams.get("range")).toBe("7d");
+    expect(canonical.searchParams.get("acquisition_page")).toBe("2");
+    expect(canonical.searchParams.has("utm_source")).toBe(false);
+    expect(href.toLowerCase()).not.toContain(value.toLowerCase());
+  });
+
+  it.each([
+    "://example.invalid/path",
+    "0://example.invalid/path",
+    "+://example.invalid/path",
+    "_://example.invalid/path",
+    ".-://example.invalid/path",
+  ])("preserves the safe pseudo-scheme UTM control %s", (value) => {
+    const parsed = parseMoonArqOverviewQuery(new URLSearchParams({
+      range: "7d",
+      utm_source: value,
+    }));
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", parsed);
+    const canonical = new URL(href, "https://data-hub.invalid");
+
+    expect(parsed.utm_source).toBe(value);
+    expect(canonical.searchParams.get("utm_source")).toBe(value);
   });
 
   it("preserves supported state, omits defaults, and URL-encodes values", () => {
