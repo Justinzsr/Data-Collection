@@ -724,6 +724,10 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       { label: "contiguous-phone-il", value: "972501234567", expected: "" },
       { label: "dotted-phone-uk", value: "44.20.7946.0958", expected: "" },
       { label: "dotted-phone-national", value: "020.7946.0958", expected: "" },
+      { label: "two-run-phone-national-slash", value: "020/79460958", expected: "" },
+      { label: "two-run-phone-national-hyphen", value: "020-79460958", expected: "" },
+      { label: "two-run-phone-national-encoded", value: "020%2F79460958", expected: "" },
+      { label: "two-run-phone-national-double-encoded", value: "020%252F79460958", expected: "" },
       { label: "unicode-dash-phone", value: "202–555–0100", expected: "" },
       { label: "symbol-phone", value: "202•555•0100", expected: "" },
       { label: "underscore-phone", value: "202_555_0100", expected: "" },
@@ -762,6 +766,7 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       { label: "trimmed-control", value: "\u00a0spring-sale\ufeff", expected: "spring-sale" },
       { label: "localized-year-control", value: "summer-٢٠٢٦", expected: "summer-٢٠٢٦" },
       { label: "year-release-control", value: "2026-1234567", expected: "2026-1234567" },
+      { label: "two-run-release-control", value: "2026/12345678", expected: "2026/12345678" },
       { label: "invalid-nanp-area-control", value: "102-5550100", expected: "102-5550100" },
       { label: "invalid-nanp-exchange-control", value: "202-1550100", expected: "202-1550100" },
       { label: "numeric-campaign-control", value: "campaign-123.4-release", expected: "campaign-123.4-release" },
@@ -2133,7 +2138,96 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
     }
   });
 
-  it("keeps the fixed privacy aggregate within its timeout for repeated safe dimensions", async () => {
+  it("matches ECMAScript trimming for commerce, signup, and ready-made classification", async () => {
+    const sessionId = `ecmascript-trim-${randomUUID()}`;
+    const occurredAt = [
+      "2026-08-17T16:00:00.000Z",
+      "2026-08-17T16:01:00.000Z",
+      "2026-08-17T16:02:00.000Z",
+    ] as const;
+
+    await insertEvent({
+      sourceId: websiteSourceId,
+      sessionId,
+      anonymousId: `${sessionId}-visitor`,
+      eventName: "page_view",
+      occurredAt: occurredAt[0],
+    });
+    await insertEvent({
+      sourceId: websiteSourceId,
+      sessionId,
+      anonymousId: `${sessionId}-visitor`,
+      eventName: "view_item",
+      occurredAt: occurredAt[1],
+      properties: {
+        currency: "\u00a0USD\ufeff",
+        value: 80,
+        items: [{
+          item_id: "TRIM-FIXTURE",
+          item_name: "Trim fixture",
+          item_category: "\u00a0Build Your Own\ufeff",
+          quantity: 1,
+        }],
+      },
+    });
+    await insertEvent({
+      sourceId: websiteSourceId,
+      sessionId,
+      anonymousId: `${sessionId}-visitor`,
+      eventName: "email_signup",
+      occurredAt: occurredAt[2],
+      properties: {
+        discount_code: "\u00a0",
+        method: "\ufeff",
+      },
+    });
+
+    const aggregateInput = {
+      dataSpaceId,
+      current: {
+        startAt: "2026-08-17T07:00:00.000Z",
+        endExclusive: "2026-08-18T07:00:00.000Z",
+      },
+      comparison: {
+        startAt: "2026-08-16T07:00:00.000Z",
+        endExclusive: "2026-08-17T07:00:00.000Z",
+      },
+      pagination: { groupLimit: 100 },
+    } as const;
+
+    try {
+      const all = await getWebsiteFunnelAggregate({ ...aggregateInput, segment: "all" });
+      expect(all.stages.find(
+        (row) => row.period_key === "current" && row.stage_key === "product_intent",
+      )).toMatchObject({ sessions: 1 });
+      expect(all.engagement.find(
+        (row) => row.period_key === "current" && row.event_name === "email_signup",
+      )).toMatchObject({ sessions: 0, visitors: 0, events: 0 });
+      expect(all.invalid_properties).toContainEqual({
+        period_key: "current",
+        event_name: "email_signup",
+        events: 1,
+      });
+      expect(all.invalid_properties.find(
+        (row) => row.period_key === "current" && row.event_name === "view_item",
+      )).toBeUndefined();
+
+      const readyMade = await getWebsiteFunnelAggregate({
+        ...aggregateInput,
+        segment: "ready-made",
+      });
+      expect(Number(readyMade.stages.find(
+        (row) => row.period_key === "current" && row.stage_key === "product_intent",
+      )?.sessions ?? 0)).toBe(0);
+    } finally {
+      await query(
+        "delete from web_events where source_id = $1::uuid and session_id = $2::text",
+        [websiteSourceId, sessionId],
+      );
+    }
+  });
+
+  it("keeps the fixed privacy aggregate within its timeout for high-cardinality safe dimensions", async () => {
     const scaleEventCount = 10_000;
     const inserted = await query(
       `
@@ -2166,11 +2260,19 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
           'scale-visitor-' || fixture.event_index::text,
           'scale-session-' || fixture.event_index::text,
           'page_view',
-          '/scale-safe',
-          'https://fixture.invalid/scale-safe',
+          '/scale-safe/' || fixture.event_index::text,
+          'https://fixture.invalid/scale-safe/' || fixture.event_index::text,
           'https://editorial.example.invalid/archive',
           '{}'::jsonb,
-          '{"utm":{"source":"scale-fixture","medium":"test","campaign":"catalog-dedup"},"landing_page":"/scale-safe"}'::jsonb,
+          jsonb_build_object(
+            'utm',
+            jsonb_build_object(
+              'source', 'scale-fixture-' || fixture.event_index::text,
+              'medium', 'test',
+              'campaign', 'catalog-cardinality-' || fixture.event_index::text
+            ),
+            'landing_page', '/scale-safe/' || fixture.event_index::text
+          ),
           '{"analytics":"granted","marketing":"denied"}'::jsonb,
           '{"device_category":"desktop","page_type":"fixture"}'::jsonb,
           timestamptz '2026-08-15 16:00:00+00'
@@ -2210,24 +2312,23 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       expect(result.stages.find(
         (row) => row.period_key === "current" && row.stage_key === "visit",
       )).toMatchObject({ sessions: scaleEventCount });
-      expect(result.acquisition).toContainEqual(expect.objectContaining({
-        period_key: "current",
-        utm_source: "scale-fixture",
-        utm_medium: "test",
-        utm_campaign: "catalog-dedup",
-        landing_page: "/scale-safe",
-        referrer_host: "editorial.example.invalid",
-        sessions: scaleEventCount,
-        visitors: scaleEventCount,
-        events: scaleEventCount,
-      }));
-      expect(result.filter_options).toMatchObject({
-        utm_sources: ["scale-fixture"],
-        utm_mediums: ["test"],
-        utm_campaigns: ["catalog-dedup"],
-        landing_pages: ["/scale-safe"],
-        referrer_hosts: ["editorial.example.invalid"],
-      });
+      expect(Number(result.group_totals.acquisition)).toBe(scaleEventCount);
+      expect(result.acquisition).toHaveLength(100);
+      expect(result.acquisition.every((row) => (
+        row.period_key === "current"
+        && Number(row.sessions) === 1
+        && Number(row.visitors) === 1
+        && Number(row.events) === 1
+        && row.utm_source.startsWith("scale-fixture-")
+        && row.utm_campaign.startsWith("catalog-cardinality-")
+        && row.landing_page.startsWith("/scale-safe/")
+        && row.referrer_host === "editorial.example.invalid"
+      ))).toBe(true);
+      expect(result.filter_options.utm_sources).toHaveLength(100);
+      expect(result.filter_options.utm_mediums).toEqual(["test"]);
+      expect(result.filter_options.utm_campaigns).toHaveLength(100);
+      expect(result.filter_options.landing_pages).toHaveLength(100);
+      expect(result.filter_options.referrer_hosts).toEqual(["editorial.example.invalid"]);
     } finally {
       await query(
         "delete from web_events where source_id = $1::uuid and occurred_at >= $2::timestamptz and occurred_at < $3::timestamptz",

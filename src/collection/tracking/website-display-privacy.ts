@@ -335,6 +335,16 @@ function containsPaymentNumber(value: string) {
 const formattedPhonePattern = /(?:\+(?=[+0-9 ()/.-]{6,24}(?:$|[^+0-9 ()/.-]))(?=(?:[+ ()/.-]*[0-9]){7,15}(?![+ ()/.-]*[0-9]))|(?<![0-9])[0-9](?=[0-9 ()/-]{6,24}(?:$|[^0-9 ()/-]))(?=(?:[ ()/-]*[0-9]){8,14}(?![ ()/-]*[0-9]))(?=[0-9 ()/-]*[ ()/-][0-9 ()/-]*[ ()/-])|(?<![0-9])(?:1[ ./-])?\(?[2-9][0-9]{2}\)?[ ./-][2-9][0-9]{2}[ ./-][0-9]{4}(?![0-9]))/u;
 const compressedNanpPhonePattern = /(?<![0-9])(?:1[ ./-])?(?:(?:\([2-9][0-9]{2}\)[ ./-]*|[2-9][0-9]{2}[ ./-])[2-9][0-9]{6}|[2-9][0-9]{2}[2-9][0-9]{2}[ ./-][0-9]{4})(?![0-9])/u;
 const contiguousPhonePattern = /(?<![0-9/])(?:0[0-9]{8,14}|(?=[0-9]{9,15}(?![0-9]))(?:1|2(?:0|1[1-8]|[2-6][0-9]|7|9[0-9])|[3-7]|8(?:0[08]|[1-6]|7[08]|8[0-368])|9(?:[0-5]|6[0-8]|7[0-79]|8|9[1-8]))[0-9]+|(?:1)?[2-9][0-9]{2}[2-9][0-9]{6})(?![0-9])/u;
+export const WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT = Object.freeze({
+  firstRunPatternSource: String.raw`^0[1-9][0-9]{0,3}$`,
+  minimumSubscriberDigits: 5,
+  minimumTotalDigits: 9,
+  maximumTotalDigits: 15,
+});
+const twoRunNationalPhonePrefixPattern = new RegExp(
+  WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.firstRunPatternSource,
+  "u",
+);
 
 function containsBroadlyFormattedPhone(value: string) {
   let candidate = "";
@@ -351,6 +361,17 @@ function containsBroadlyFormattedPhone(value: string) {
         if (leadingDigitCount >= 7 && leadingDigitCount <= 15) return true;
         if (leadingDigitCount > 15) break;
       }
+    }
+    for (let start = 0; start + 1 < digitRuns.length; start += 1) {
+      const prefix = digitRuns[start] ?? "";
+      const subscriber = digitRuns[start + 1] ?? "";
+      const totalDigits = prefix.length + subscriber.length;
+      if (
+        twoRunNationalPhonePrefixPattern.test(prefix)
+        && subscriber.length >= WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.minimumSubscriberDigits
+        && totalDigits >= WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.minimumTotalDigits
+        && totalDigits <= WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.maximumTotalDigits
+      ) return true;
     }
     for (let start = 0; start < digitRuns.length; start += 1) {
       if ((digitRuns[start]?.length ?? 0) > 3) continue;

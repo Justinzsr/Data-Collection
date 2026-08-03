@@ -6,6 +6,7 @@ import {
 } from "@/aggregation/metric-definitions/website-funnel-definitions";
 import {
   sanitizeWebsiteDisplayDimension,
+  WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT,
   type WebsiteDisplayDimensionKind,
 } from "@/collection/tracking/website-display-privacy";
 import { query, queryRows, withDatabaseTransaction } from "@/storage/db/client";
@@ -241,6 +242,7 @@ const MAX_GROUP_LIMIT = 100;
 const MAX_GROUP_OFFSET = 10_000;
 const MAX_PERIOD_MS = 32 * 24 * 60 * 60 * 1_000;
 const QUERY_TIMEOUT_MS = 8_000;
+const ECMASCRIPT_TRIM_CHARACTERS_SQL = String.raw`U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'`;
 
 export const WEBSITE_FUNNEL_AGGREGATE_RESPONSE_DENYLIST = [
   "source_id",
@@ -558,7 +560,24 @@ display_value_references as materialized (
     on catalog.value_key = raw.value_key
     and catalog.maximum_length = raw.maximum_length
     and catalog.dimension_kind = raw.dimension_kind
-    and catalog.raw_json is not distinct from raw.raw_json
+    and catalog.raw_json = raw.raw_json
+  where raw.raw_json is not null
+    and catalog.raw_json is not null
+
+  union all
+
+  select
+    raw.period_key,
+    raw.event_id,
+    raw.value_key,
+    catalog.display_value_id
+  from raw_display_values raw
+  join display_value_catalog catalog
+    on catalog.value_key = raw.value_key
+    and catalog.maximum_length = raw.maximum_length
+    and catalog.dimension_kind = raw.dimension_kind
+    and catalog.raw_json is null
+  where raw.raw_json is null
 ),
 display_value_features as materialized (
   select
@@ -585,7 +604,7 @@ display_value_features as materialized (
         when jsonb_typeof(raw.raw_json) = 'string'
           then btrim(
             raw.raw_json #>> '{}',
-            U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF'
+            ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
           )
         else null
       end
@@ -733,7 +752,7 @@ display_value_numeric_features as materialized (
     values (
       btrim(
         coalesce(feature.scan_text, ''),
-        U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF'
+        ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
       )
     )
   ) normalized_scan(trimmed_text)
@@ -906,6 +925,7 @@ display_value_phone_runs as materialized (
   select
     candidate.*,
     run.run_index,
+    run.match[1] as run_digits,
     char_length(run.match[1])::integer as run_length,
     sum(char_length(run.match[1])) over (
       partition by candidate.payment_input_index, candidate.candidate_index
@@ -934,6 +954,16 @@ display_value_phone_risks as materialized (
       start_run.run_index = 1
       and start_run.has_leading_plus is true
       and end_run.cumulative_digit_count between 7 and 15
+    )
+    or (
+      start_run.run_digits collate "pg_c_utf8"
+        ~ '${WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.firstRunPatternSource}'
+      and end_run.run_index = start_run.run_index + 1
+      and end_run.run_length
+        >= ${WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.minimumSubscriberDigits}
+      and start_run.run_length + end_run.run_length between
+        ${WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.minimumTotalDigits}
+        and ${WEBSITE_TWO_RUN_NATIONAL_PHONE_CONTRACT.maximumTotalDigits}
     )
     or (
       start_run.run_length <= 3
@@ -1491,7 +1521,10 @@ event_property_primitives as materialized (
       jsonb_typeof(event.properties) = 'object'
       and event.properties ?& array['currency', 'value']::text[]
       and jsonb_typeof(event.properties -> 'currency') = 'string'
-      and btrim(event.properties ->> 'currency') ~ '^[A-Z]{3}$'
+      and btrim(
+        event.properties ->> 'currency',
+        ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
+      ) ~ '^[A-Z]{3}$'
       and (
         case
           when jsonb_typeof(event.properties -> 'value') = 'number'
@@ -1537,7 +1570,10 @@ classified_known_events as materialized (
             - array['currency', 'item_category', 'stone_count', 'value', 'attribution']::text[]
               = '{}'::jsonb
           and jsonb_typeof(event.properties -> 'currency') = 'string'
-          and btrim(event.properties ->> 'currency') ~ '^[A-Z]{3}$'
+          and btrim(
+            event.properties ->> 'currency',
+            ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
+          ) ~ '^[A-Z]{3}$'
           and event.display_safety -> 'property_item_category' = 'true'::jsonb
           and (
             case
@@ -1560,10 +1596,16 @@ classified_known_events as materialized (
           and event.properties
             - array['discount_code', 'method', 'attribution']::text[] = '{}'::jsonb
           and jsonb_typeof(event.properties -> 'discount_code') = 'string'
-          and char_length(btrim(event.properties ->> 'discount_code'))
+          and char_length(btrim(
+            event.properties ->> 'discount_code',
+            ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
+          ))
             between 1 and 160
           and jsonb_typeof(event.properties -> 'method') = 'string'
-          and char_length(btrim(event.properties ->> 'method'))
+          and char_length(btrim(
+            event.properties ->> 'method',
+            ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
+          ))
             between 1 and 160
         else false
       end
@@ -1579,7 +1621,10 @@ classified_known_events as materialized (
             else '[]'::jsonb
           end
         ) item
-        where lower(btrim(item ->> 'item_category')) <> 'build your own'
+        where lower(btrim(
+          item ->> 'item_category',
+          ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
+        )) <> 'build your own'
       )
     ) is true as has_ready_made_item
   from event_property_primitives event

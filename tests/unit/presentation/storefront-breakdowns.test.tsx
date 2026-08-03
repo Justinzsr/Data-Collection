@@ -340,6 +340,7 @@ describe("StorefrontBreakdowns", () => {
     { label: "a slash-formatted phone number", value: "44/20/7946/0958" },
     { label: "a combining-mark-obfuscated phone number", value: "202\u0301 555\u0301 0100" },
     { label: "a compressed NANP phone number", value: "202-5550100" },
+    { label: "a two-run national phone number", value: "020/79460958" },
     { label: "a punctuation-only street address", value: "123/Main/Street" },
     { label: "a punctuation-only PO box", value: "P/O/Box/123" },
     { label: "an assigned alternative numeric authority", value: "redirect=//0xc633642a/path" },

@@ -217,6 +217,7 @@ describe("MoonArq Overview query state", () => {
     { label: "a slash-formatted phone number", value: "44/20/7946/0958" },
     { label: "a combining-mark-obfuscated phone number", value: "202\u0301 555\u0301 0100" },
     { label: "a compressed NANP phone number", value: "202-5550100" },
+    { label: "a two-run national phone number", value: "020/79460958" },
     { label: "a punctuation-only street address", value: "123/Main/Street" },
     { label: "a punctuation-only PO box", value: "P/O/Box/123" },
     { label: "an assigned alternative numeric authority", value: "redirect=//0xc633642a/path" },
@@ -246,6 +247,21 @@ describe("MoonArq Overview query state", () => {
     expect(canonical.searchParams.get("acquisition_page")).toBe("2");
     expect(canonical.searchParams.has("utm_source")).toBe(false);
     expect(href.toLowerCase()).not.toContain(value.toLowerCase());
+  });
+
+  it("preserves a non-phone two-run numeric release path", () => {
+    const value = "2026/12345678";
+    const parsed = parseMoonArqOverviewQuery(new URLSearchParams({
+      range: "7d",
+      utm_source: value,
+    }));
+    const canonical = new URL(
+      buildMoonArqOverviewHref("/w/moonarq/dashboard", parsed),
+      "https://data-hub.invalid",
+    );
+
+    expect(parsed.utm_source).toBe(value);
+    expect(canonical.searchParams.get("utm_source")).toBe(value);
   });
 
   it.each([

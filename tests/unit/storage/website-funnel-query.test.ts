@@ -58,6 +58,8 @@ function compactSql(sql: string) {
   return sql.replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
+const ECMASCRIPT_TRIM_CHARACTERS_SQL_COMPACT = String.raw`u&'\0009\000a\000b\000c\000d\0020\00a0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200a\2028\2029\202f\205f\3000\feff'`;
+
 function emptyAggregate(): WebsiteFunnelAggregateRow {
   return {
     candidate_count: 1,
@@ -162,8 +164,19 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("(item_entry.item ->> 'price')::numeric >= 0");
     expect(sql).toContain("(item_entry.item ->> 'quantity')::numeric >= 1");
     expect(sql).toContain("trunc((item_entry.item ->> 'quantity')::numeric) = (item_entry.item ->> 'quantity')::numeric");
-    expect(sql).toContain("btrim(event.properties ->> 'currency') ~ '^[a-z]{3}$'");
-    expect(sql).toContain("lower(btrim(item ->> 'item_category')) <> 'build your own'");
+    expect(sql).toContain(
+      `btrim( event.properties ->> 'currency', ${ECMASCRIPT_TRIM_CHARACTERS_SQL_COMPACT} ) ~ '^[a-z]{3}$'`,
+    );
+    expect(sql).toContain(
+      `lower(btrim( item ->> 'item_category', ${ECMASCRIPT_TRIM_CHARACTERS_SQL_COMPACT} )) <> 'build your own'`,
+    );
+    expect(sql).toContain(
+      `char_length(btrim( event.properties ->> 'discount_code', ${ECMASCRIPT_TRIM_CHARACTERS_SQL_COMPACT} )) between 1 and 160`,
+    );
+    expect(sql).toContain(
+      `char_length(btrim( event.properties ->> 'method', ${ECMASCRIPT_TRIM_CHARACTERS_SQL_COMPACT} )) between 1 and 160`,
+    );
+    expect(sql.split(ECMASCRIPT_TRIM_CHARACTERS_SQL_COMPACT)).toHaveLength(8);
     expect(sql).toContain("array['currency', 'value', 'items', 'attribution']");
     expect(sql).toContain("array['discount_code', 'method', 'attribution']");
     expect(sql).toContain("(event.properties ->> 'value')::numeric >= 0");
@@ -180,6 +193,9 @@ describe("Website funnel aggregate SQL", () => {
 
   it("normalizes historical display values before session context and projection", () => {
     const sql = compactSql(WEBSITE_FUNNEL_AGGREGATE_SQL);
+    const referenceStart = sql.indexOf("display_value_references as materialized");
+    const referenceEnd = sql.indexOf("display_value_features as materialized");
+    const referenceSql = sql.slice(referenceStart, referenceEnd);
 
     for (const cte of [
       "raw_display_values as materialized",
@@ -291,6 +307,11 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("values (feature.scan_text), (feature.normalized_numeric_privacy_scan_text), (feature.normalized_numeric_privacy_spaced_scan_text)");
     expect(sql).toContain("probe.scan_text ~ '^[^0-9]*[0-9]([^0-9]*[0-9]){6}'");
     expect(sql).toContain("display_value_phone_risks as materialized");
+    expect(sql).toContain("run.match[1] as run_digits");
+    expect(sql).toContain("start_run.run_digits collate \"pg_c_utf8\" ~ '^0[1-9][0-9]{0,3}$'");
+    expect(sql).toContain("end_run.run_index = start_run.run_index + 1");
+    expect(sql).toContain("end_run.run_length >= 5");
+    expect(sql).toContain("start_run.run_length + end_run.run_length between 9 and 15");
     expect(sql).toContain(
       "coalesce(payment_risk.likely_payment_card, false) as likely_payment_card",
     );
@@ -307,6 +328,14 @@ describe("Website funnel aggregate SQL", () => {
     );
     expect(sql).toContain("from display_value_references reference");
     expect(sql).toContain("value.display_value_id = reference.display_value_id");
+    expect(referenceStart).toBeGreaterThanOrEqual(0);
+    expect(referenceEnd).toBeGreaterThan(referenceStart);
+    expect(referenceSql).toContain("union all");
+    expect(referenceSql).toContain("catalog.raw_json = raw.raw_json");
+    expect(referenceSql).toContain("where raw.raw_json is not null and catalog.raw_json is not null");
+    expect(referenceSql).toContain("and catalog.raw_json is null where raw.raw_json is null");
+    expect(referenceSql.match(/from raw_display_values raw/gu)).toHaveLength(2);
+    expect(referenceSql).not.toContain("catalog.raw_json is not distinct from raw.raw_json");
     expect(sql).toContain(
       "min(candidate.occurred_at) over ( partition by candidate.period_key, candidate.session_id ) as visit_at",
     );

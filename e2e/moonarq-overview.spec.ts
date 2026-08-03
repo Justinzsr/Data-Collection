@@ -355,6 +355,10 @@ test("obfuscated privacy metadata is not reflected into acquisition controls", a
       decodedValue: "202-5550100",
     },
     {
+      rawQueryValue: "020%2F79460958",
+      decodedValue: "020/79460958",
+    },
+    {
       rawQueryValue: "P%2FO%2FBox%2F123",
       decodedValue: "P/O/Box/123",
     },
