@@ -60,6 +60,59 @@ function passesLuhnCheck(digits: string) {
   return sum % 10 === 0;
 }
 
+const paymentSeparatorPattern = /^[\p{White_Space}\p{Punctuation}\p{Symbol}]$/u;
+
+function isAsciiDigit(value: string) {
+  return value >= "0" && value <= "9";
+}
+
+function digitsContainPaymentNumber(digits: string) {
+  if (digits.length < 13) return false;
+  for (let length = 13; length <= Math.min(19, digits.length); length += 1) {
+    for (let start = 0; start + length <= digits.length; start += 1) {
+      if (passesLuhnCheck(digits.slice(start, start + length))) return true;
+    }
+  }
+  return false;
+}
+
+function candidateContainsPaymentNumber(candidate: string) {
+  let candidateDigits = "";
+  let digitRun = "";
+  const flushDigitRun = () => {
+    if (!digitRun) return false;
+    if (digitRun.length >= 20) {
+      const unsafe = digitsContainPaymentNumber(candidateDigits);
+      candidateDigits = "";
+      digitRun = "";
+      return unsafe;
+    }
+    candidateDigits += digitRun;
+    digitRun = "";
+    return false;
+  };
+
+  for (const character of candidate) {
+    if (isAsciiDigit(character)) digitRun += character;
+    else if (flushDigitRun()) return true;
+  }
+  if (flushDigitRun()) return true;
+  return digitsContainPaymentNumber(candidateDigits);
+}
+
+function containsPaymentNumber(value: string) {
+  let candidate = "";
+  for (const character of value) {
+    if (isAsciiDigit(character) || paymentSeparatorPattern.test(character)) {
+      candidate += character;
+      continue;
+    }
+    if (candidateContainsPaymentNumber(candidate)) return true;
+    candidate = "";
+  }
+  return candidateContainsPaymentNumber(candidate);
+}
+
 function isLikelyPhoneNumber(value: string) {
   const trimmed = value.trim();
   const digits = trimmed.replace(/\D/gu, "");
@@ -86,11 +139,8 @@ function isLikelyPhoneNumber(value: string) {
 function containsProhibitedNumber(variants: string[]) {
   return variants.some((variant) => {
     const trimmed = variant.trim();
-    const digits = trimmed.replace(/\D/gu, "");
     if (isLikelyPhoneNumber(trimmed)) return true;
-    if (/^[0-9 -]+$/u.test(trimmed) && digits.length >= 13 && digits.length <= 19 && passesLuhnCheck(digits)) {
-      return true;
-    }
+    if (containsPaymentNumber(variant)) return true;
     return (variant.match(/[+0-9][+0-9 ().-]{6,24}/gu) ?? [])
       .some((candidate) => isLikelyPhoneNumber(candidate.trim()));
   });

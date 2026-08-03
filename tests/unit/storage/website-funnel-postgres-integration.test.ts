@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sanitizeWebsiteDisplayDimension } from "@/collection/tracking/website-display-privacy";
 import { closeDatabasePool, query } from "@/storage/db/client";
 import { getWebsiteFunnelAggregate } from "@/storage/repositories/website-funnel-repository";
 
@@ -23,6 +24,15 @@ function percentEncodeAscii(value: string) {
   return [...Buffer.from(value, "utf8")]
     .map((byte) => `%${byte.toString(16).padStart(2, "0").toUpperCase()}`)
     .join("");
+}
+
+function collectStringValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStringValues);
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(collectStringValues);
+  }
+  return [];
 }
 
 async function insertEvent(input: {
@@ -331,9 +341,124 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
     const syntheticIpv6 = ["2001", "db8", "", "42"].join(":");
     const syntheticPhone = ["+1", " 202", "-555", "-0100"].join("");
     const syntheticCard = ["4242", "4242", "4242", "4242"].join(" ");
+    const syntheticPan13 = ["700", "000", "000", "000", "3"].join("");
+    const syntheticPan16 = ["7000", "0000", "0000", "0005"].join("");
+    const syntheticPan19 = ["700", "0000", "0000", "0000", "000", "3"].join("");
+    const dottedPan16 = syntheticPan16.match(/.{1,4}/gu)!.join(".");
+    const invalidDottedPan16 = ["7000", "0000", "0000", "0100"].join(".");
+    const slashPan16 = syntheticPan16.match(/.{1,4}/gu)!.join("/");
+    const uninterruptedTwentyDigitIdentifier = `${syntheticPan19}5`;
     const syntheticSecret = ["to", "ken", "=", "synthetic_value_12345678"].join("");
     const syntheticAddress = ["123", " Main", " Street"].join("");
     const controlValue = `archive${String.fromCharCode(7)}control`;
+    const paymentPrivacyFixtures = [
+      { label: "dotted", value: dottedPan16, unsafe: true },
+      { label: "embedded", value: `launch-${dottedPan16}-archive`, unsafe: true },
+      { label: "mixed-separators", value: "7000,0000_0000/0005", unsafe: true },
+      { label: "punctuation-separators", value: "7000;0000!0000=0005", unsafe: true },
+      { label: "unicode-separators", value: "7000\u00a00000\u20140000\u20090005", unsafe: true },
+      { label: "contiguous", value: syntheticPan16, unsafe: true },
+      { label: "thirteen-digit", value: syntheticPan13, unsafe: true },
+      { label: "nineteen-digit", value: syntheticPan19, unsafe: true },
+      { label: "encoded", value: percentEncodeAscii(slashPan16), unsafe: true },
+      {
+        label: "double-encoded",
+        value: percentEncodeAscii(slashPan16).replaceAll("%", "%25"),
+        unsafe: true,
+      },
+      {
+        label: "triple-encoded",
+        value: percentEncodeAscii(slashPan16)
+          .replaceAll("%", "%25")
+          .replaceAll("%", "%25"),
+        unsafe: true,
+      },
+      {
+        label: "encoding-beyond-bound",
+        value: slashPan16.replaceAll("/", "%2525252F"),
+        unsafe: true,
+      },
+      {
+        label: "encoded-unicode-separators",
+        value: [
+          "7000", "%C2%A0", "0000", "%E2%80%94", "0000", "%E2%80%89", "0005",
+        ].join(""),
+        unsafe: true,
+      },
+      {
+        label: "malformed-separators",
+        value: ["7000", "0000", "0000", "0005"].join("%ZZ"),
+        unsafe: true,
+      },
+      { label: "malformed-control", value: "spring%ZZsale", unsafe: true },
+      { label: "invalid-utf8-control", value: "campaign%E2%28%A1", unsafe: true },
+      { label: "surrogate-control", value: "campaign%ED%A0%80", unsafe: true },
+      {
+        label: "residual-fourth-pass-control",
+        value: "spring%25252520sale",
+        unsafe: true,
+      },
+      {
+        label: "later-candidate",
+        value: `first-${invalidDottedPan16}-then-${dottedPan16}`,
+        unsafe: true,
+      },
+      { label: "multiple-candidates", value: `${dottedPan16}|${syntheticPan13}`, unsafe: true },
+      { label: "malformed-before-card", value: `%ZZ-${dottedPan16}`, unsafe: true },
+      {
+        label: "long-run-then-card",
+        value: `${uninterruptedTwentyDigitIdentifier}-${dottedPan16}`,
+        unsafe: true,
+      },
+      { label: "surrounded-card", value: `9-${dottedPan16}-8`, unsafe: true },
+      { label: "invalid-check-digit", value: invalidDottedPan16, unsafe: false },
+      { label: "twelve-digit", value: "7000.0000.0003", unsafe: false },
+      { label: "twenty-digit", value: uninterruptedTwentyDigitIdentifier, unsafe: false },
+      {
+        label: "twenty-digit-then-short",
+        value: `${uninterruptedTwentyDigitIdentifier}-12`,
+        unsafe: false,
+      },
+      { label: "letter-boundaries", value: "700000A000000B005", unsafe: false },
+      { label: "encoded-unicode-control", value: "caf%C3%A9", unsafe: false },
+      { label: "bounded-triple-encoded-control", value: "spring%252520sale", unsafe: false },
+    ] as const;
+    const paymentDimensionFixtures = [
+      {
+        label: "unsafe-landing",
+        kind: "landing_path" as const,
+        value: `/campaign/${dottedPan16}`,
+        unsafe: true,
+      },
+      {
+        label: "safe-landing",
+        kind: "landing_path" as const,
+        value: `/campaign/${invalidDottedPan16}`,
+        unsafe: false,
+      },
+      {
+        label: "unsafe-referrer",
+        kind: "referrer_host" as const,
+        value: `${dottedPan16}.invalid`,
+        unsafe: true,
+      },
+      {
+        label: "safe-referrer",
+        kind: "referrer_host" as const,
+        value: `${invalidDottedPan16}.invalid`,
+        unsafe: false,
+      },
+    ] as const;
+    for (const fixture of paymentPrivacyFixtures) {
+      expect(sanitizeWebsiteDisplayDimension(fixture.value, "utm", 256)).toBe(
+        fixture.unsafe ? "" : fixture.value,
+      );
+    }
+    for (const fixture of paymentDimensionFixtures) {
+      expect(sanitizeWebsiteDisplayDimension(fixture.value, fixture.kind, 500)).toBe(
+        fixture.unsafe ? "" : fixture.value,
+      );
+    }
     const encodedPrivacyFixtures = [
       { label: "phone", value: syntheticPhone },
       { label: "address", value: syntheticAddress },
@@ -545,6 +670,50 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       });
     }
 
+    for (const [index, fixture] of paymentPrivacyFixtures.entries()) {
+      await insertEvent({
+        sourceId: websiteSourceId,
+        schemaVersion: "legacy",
+        sessionId: `privacy-payment-${fixture.label}`,
+        anonymousId: `privacy-payment-${fixture.label}-visitor`,
+        eventName: "page_view",
+        occurredAt: `2026-08-10T17:${String(index).padStart(2, "0")}:00.000Z`,
+        path: "/collections/archive",
+        attributionContext: {
+          utm: {
+            source: fixture.value,
+            medium: "test",
+            campaign: `payment-${fixture.label}-case`,
+          },
+          landing_page: "/collections/archive",
+        },
+      });
+    }
+
+    for (const [index, fixture] of paymentDimensionFixtures.entries()) {
+      const isLanding = fixture.kind === "landing_path";
+      await insertEvent({
+        sourceId: websiteSourceId,
+        schemaVersion: "legacy",
+        sessionId: `privacy-payment-${fixture.label}`,
+        anonymousId: `privacy-payment-${fixture.label}-visitor`,
+        eventName: "page_view",
+        occurredAt: `2026-08-10T17:${String(30 + index).padStart(2, "0")}:00.000Z`,
+        path: "/collections/archive",
+        attributionContext: {
+          utm: {
+            source: "payment-dimension",
+            medium: "test",
+            campaign: `payment-${fixture.label}-case`,
+          },
+          landing_page: isLanding ? fixture.value : "/collections/archive",
+          ...(!isLanding
+            ? { first_referrer: `https://${fixture.value}/` }
+            : {}),
+        },
+      });
+    }
+
     const unsafeItemFixtures = [
       {
         sessionId: "privacy-item-id",
@@ -571,6 +740,15 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
           currency: "USD",
           value: 80,
           items: [{ ...safeItem, item_category: doubleEncodedEmail }],
+        },
+      },
+      {
+        sessionId: "privacy-item-payment",
+        minute: 29,
+        properties: {
+          currency: "USD",
+          value: 80,
+          items: [{ ...safeItem, item_id: dottedPan16 }],
         },
       },
     ] as const;
@@ -626,7 +804,7 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       attributionContext: {},
       properties: {
         item_list_name: rawEmail,
-        items: [{ ...safeItem, item_list_name: rawEmail }],
+        items: [{ ...safeItem, item_list_name: dottedPan16 }],
       },
     });
 
@@ -716,7 +894,6 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       },
     };
     const result = await getWebsiteFunnelAggregate(aggregateInput);
-    const serialized = JSON.stringify(result);
     const unsafeCanaries = [
       rawEmail,
       encodedEmail,
@@ -730,10 +907,23 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       syntheticAddress,
       controlValue,
       ...encodedPrivacyFixtures.map((fixture) => fixture.attributionContext.utm.source),
+      ...paymentPrivacyFixtures.filter((fixture) => fixture.unsafe).map((fixture) => fixture.value),
+      ...paymentDimensionFixtures.filter((fixture) => fixture.unsafe).map((fixture) => fixture.value),
       ...unsafeUnknownEventNames,
     ];
 
-    expect(unsafeCanaries.some((canary) => serialized.includes(canary))).toBe(false);
+    const returnedStrings = collectStringValues(result);
+    const approvedSafePaymentStrings = new Set([
+      ...paymentPrivacyFixtures
+        .filter((fixture) => !fixture.unsafe)
+        .flatMap((fixture) => [fixture.value, fixture.value.toLowerCase()]),
+      ...paymentDimensionFixtures
+        .filter((fixture) => !fixture.unsafe)
+        .flatMap((fixture) => [fixture.value, fixture.value.toLowerCase()]),
+    ]);
+    expect(unsafeCanaries.findIndex((canary) =>
+      returnedStrings.some((value) =>
+        value.includes(canary) && !approvedSafePaymentStrings.has(value)))).toBe(-1);
     expect(result.filter_options.utm_sources).not.toContain(rawEmail);
     expect(result.filter_options.utm_sources).not.toContain(encodedEmail);
     expect(result.filter_options.utm_sources).not.toContain(doubleEncodedEmail);
@@ -761,6 +951,9 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       "double-encoded-secret-case",
       "encoded-ip-case",
       "double-encoded-ip-case",
+      ...paymentPrivacyFixtures
+        .filter((fixture) => fixture.unsafe)
+        .map((fixture) => `payment-${fixture.label}-case`),
     ]) {
       expect(result.acquisition.find((row) => row.utm_campaign === campaign)).toMatchObject({
         utm_source: "Unknown",
@@ -794,10 +987,35 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       landing_page: "/collections/archive",
       referrer_host: "editorial.example.invalid",
     });
+    for (const fixture of paymentPrivacyFixtures.filter((candidate) => !candidate.unsafe)) {
+      expect(result.acquisition.find(
+        (row) => row.utm_campaign === `payment-${fixture.label}-case`,
+      )).toMatchObject({
+        utm_source: fixture.value.toLowerCase(),
+        sessions: 1,
+      });
+    }
+    for (const fixture of paymentPrivacyFixtures.filter((candidate) => candidate.unsafe)) {
+      expect(result.acquisition.find(
+        (row) => row.utm_campaign === `payment-${fixture.label}-case`,
+      )).toMatchObject({ utm_source: "Unknown", sessions: 1 });
+    }
+    expect(result.acquisition.find(
+      (row) => row.utm_campaign === "payment-unsafe-landing-case",
+    )).toMatchObject({ landing_page: "Unknown", sessions: 1 });
+    expect(result.acquisition.find(
+      (row) => row.utm_campaign === "payment-safe-landing-case",
+    )).toMatchObject({ landing_page: `/campaign/${invalidDottedPan16}`, sessions: 1 });
+    expect(result.acquisition.find(
+      (row) => row.utm_campaign === "payment-unsafe-referrer-case",
+    )).toMatchObject({ referrer_host: "Unknown", sessions: 1 });
+    expect(result.acquisition.find(
+      (row) => row.utm_campaign === "payment-safe-referrer-case",
+    )).toMatchObject({ referrer_host: `${invalidDottedPan16}.invalid`, sessions: 1 });
 
     expect(result.products.find((row) => row.item_id === "Unknown / unmapped")).toMatchObject({
       stable_identity: false,
-      product_view_events: 3,
+      product_view_events: 4,
     });
     expect(result.products.find((row) => row.item_id === "ARCHIVE-SAFE-SKU")).toMatchObject({
       stable_identity: true,
@@ -824,7 +1042,10 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
     });
     expect(unknownFilter.stages.find(
       (row) => row.period_key === "current" && row.stage_key === "visit",
-    )?.sessions).toBe(17);
+    )?.sessions).toBe(
+      17
+      + paymentPrivacyFixtures.filter((fixture) => fixture.unsafe).length
+    );
 
     const unsafeFilter = await getWebsiteFunnelAggregate({
       ...aggregateInput,

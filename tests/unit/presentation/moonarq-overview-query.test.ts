@@ -11,6 +11,16 @@ import {
 const malformedRawCanary = "private-person%25ZZ%2540example.invalid";
 const malformedIntermediateCanary = "private-person%ZZ%40example.invalid";
 const malformedDecodedCanary = "private-person%ZZ@example.invalid";
+const syntheticPaymentDigits = ["7000", "0000", "0000", "0005"].join("");
+const dottedPaymentCandidate = syntheticPaymentDigits.match(/.{1,4}/gu)!.join(".");
+
+const paymentFilterCases = [
+  { key: "utm_source", value: dottedPaymentCandidate },
+  { key: "utm_medium", value: dottedPaymentCandidate },
+  { key: "utm_campaign", value: dottedPaymentCandidate },
+  { key: "landing_path", value: `/campaign/${dottedPaymentCandidate}` },
+  { key: "referrer_host", value: `${dottedPaymentCandidate}.invalid` },
+] as const;
 
 describe("MoonArq Overview query state", () => {
   it("defaults invalid, repeated, and unsupported values safely", () => {
@@ -156,6 +166,26 @@ describe("MoonArq Overview query state", () => {
       malformedDecodedCanary,
     ]) {
       expect(href).not.toContain(canary);
+    }
+  });
+
+  it.each(paymentFilterCases)("removes embedded payment data from $key query state and hrefs", ({
+    key,
+    value,
+  }) => {
+    const parsed = parseMoonArqOverviewQuery(
+      new URLSearchParams(`range=7d&${key}=${value}`),
+    );
+    const href = buildMoonArqOverviewHref("/w/moonarq/dashboard", parsed);
+    const canonical = new URL(href, "https://data-hub.invalid");
+
+    expect(parsed.range).toBe("7d");
+    expect(parsed[key]).toBe("");
+    expect(canonical.searchParams.get("range")).toBe("7d");
+    expect(canonical.searchParams.has(key)).toBe(false);
+    for (const canary of [value, dottedPaymentCandidate, syntheticPaymentDigits]) {
+      expect(href).not.toContain(canary);
+      expect(decodeURIComponent(href)).not.toContain(canary);
     }
   });
 

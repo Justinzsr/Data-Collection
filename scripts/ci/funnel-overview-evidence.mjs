@@ -17,6 +17,7 @@ const MAX_RAW_REPORT_BYTES = 64 * 1024 * 1024;
 const MAX_SUMMARY_BYTES = 256 * 1024;
 const EXPECTED_NODE_VERSION = "v22.22.0";
 const EXPECTED_PNPM_VERSION = "10.33.2";
+const CHROMIUM_LAUNCH_TIMEOUT_MS = 30_000;
 const REQUIRED_VIEWPORT_WIDTHS = [1440, 1024, 768, 390, 360, 320];
 const REQUIRED_PLAYWRIGHT_PROJECTS = ["chromium", "mobile"];
 const POSTGRES_INTEGRATION_TEST_SUFFIX =
@@ -174,6 +175,67 @@ function currentRuntime({ includePlaywright = false } = {}) {
   }
 
   return runtime;
+}
+
+function canonicalChromiumVersion(value) {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > 48
+    || !/^(?:0|[1-9][0-9]{0,9})(?:\.(?:0|[1-9][0-9]{0,9})){3}$/.test(value)
+    || value.startsWith("0.")
+  ) {
+    fail("Invalid Chromium binary version in sanitized CI evidence.");
+  }
+  return value;
+}
+
+export async function captureChromiumVersion(injectedLauncher) {
+  let launcher = injectedLauncher;
+  let browser;
+  let version;
+  let captureFailed = false;
+
+  try {
+    if (launcher === undefined) {
+      const playwright = await import("@playwright/test");
+      launcher = playwright.chromium;
+    }
+    if (!launcher || typeof launcher.launch !== "function") {
+      fail("Chromium launcher is unavailable for sanitized CI evidence.");
+    }
+    browser = await launcher.launch({
+      headless: true,
+      timeout: CHROMIUM_LAUNCH_TIMEOUT_MS,
+    });
+    if (
+      !browser
+      || typeof browser.browserType !== "function"
+      || typeof browser.version !== "function"
+      || typeof browser.close !== "function"
+    ) {
+      fail("Launched Chromium metadata is unavailable for sanitized CI evidence.");
+    }
+    const browserType = browser.browserType();
+    if (!browserType || typeof browserType.name !== "function" || browserType.name() !== "chromium") {
+      fail("Unexpected browser type in sanitized CI evidence.");
+    }
+    version = canonicalChromiumVersion(browser.version());
+  } catch {
+    captureFailed = true;
+  }
+
+  if (browser && typeof browser.close === "function") {
+    try {
+      await browser.close();
+    } catch {
+      fail("Unable to close Chromium after sanitized CI evidence capture.");
+    }
+  }
+  if (captureFailed) {
+    fail("Unable to capture Chromium binary version for sanitized CI evidence.");
+  }
+  return version;
 }
 
 function vitestCounts(report) {
@@ -414,14 +476,18 @@ export function validatePlaywrightReport(report) {
   };
 }
 
-function summarizePlaywright(rawReportPath, outputPath) {
+async function summarizePlaywright(rawReportPath, outputPath) {
   const report = readJson(rawReportPath, MAX_RAW_REPORT_BYTES, "raw Playwright report");
   const summary = validatePlaywrightReport(report);
+  const runtime = {
+    ...currentRuntime({ includePlaywright: true }),
+    chromium: await captureChromiumVersion(),
+  };
   writeJson(outputPath, {
     schema_version: "1.0",
     job: "playwright",
     ...currentRunIdentity(),
-    runtime: currentRuntime({ includePlaywright: true }),
+    runtime,
     ...summary,
   });
   console.log(
@@ -618,6 +684,16 @@ function normalizeRuntime(value, { playwright = false } = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     fail("Evidence runtime metadata is invalid.");
   }
+  const expectedKeys = playwright
+    ? ["chromium", "node", "playwright", "pnpm"]
+    : ["node", "pnpm"];
+  const actualKeys = Object.keys(value).toSorted();
+  if (
+    actualKeys.length !== expectedKeys.length
+    || !expectedKeys.every((key, index) => actualKeys[index] === key)
+  ) {
+    fail("Evidence runtime metadata contains an unexpected field.");
+  }
   const runtime = {
     node: requireExact(value.node, EXPECTED_NODE_VERSION, "evidence Node version"),
     pnpm: requireExact(value.pnpm, EXPECTED_PNPM_VERSION, "evidence pnpm version"),
@@ -629,6 +705,7 @@ function normalizeRuntime(value, { playwright = false } = {}) {
       /^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/,
       80,
     );
+    runtime.chromium = canonicalChromiumVersion(value.chromium);
   }
   return runtime;
 }
@@ -687,30 +764,54 @@ function normalizePostgresMetadata(value) {
 function normalizeQualitySummary(value) {
   requireExact(value?.schema_version, "1.0", "quality evidence schema");
   requireExact(value?.job, "quality", "quality evidence job");
+  const tests = normalizeTestCounts(
+    value.tests,
+    ["files", "total", "passed", "failed", "skipped", "todo"],
+  );
+  if (
+    tests.files === 0
+    || tests.files > tests.total
+    || tests.total === 0
+    || tests.passed === 0
+    || tests.passed + tests.failed + tests.skipped !== tests.total
+    || tests.failed !== 0
+    || tests.todo !== 0
+  ) {
+    fail("Quality evidence test counts do not reconcile.");
+  }
   return {
     schema_version: "1.0",
     job: "quality",
     ...normalizeRunIdentity(value),
     runtime: normalizeRuntime(value.runtime),
-    tests: normalizeTestCounts(
-      value.tests,
-      ["files", "total", "passed", "failed", "skipped", "todo"],
-    ),
+    tests,
   };
 }
 
 function normalizePostgresSummary(value) {
   requireExact(value?.schema_version, "1.0", "PostgreSQL evidence schema");
   requireExact(value?.job, "postgresql-17", "PostgreSQL evidence job");
+  const tests = normalizeTestCounts(
+    value.tests,
+    ["files", "total", "passed", "failed", "skipped", "todo"],
+  );
+  if (
+    tests.files === 0
+    || tests.files > tests.total
+    || tests.total === 0
+    || tests.passed !== tests.total
+    || tests.failed !== 0
+    || tests.skipped !== 0
+    || tests.todo !== 0
+  ) {
+    fail("PostgreSQL evidence test counts do not reconcile.");
+  }
   return {
     schema_version: "1.0",
     job: "postgresql-17",
     ...normalizeRunIdentity(value),
     runtime: normalizeRuntime(value.runtime),
-    tests: normalizeTestCounts(
-      value.tests,
-      ["files", "total", "passed", "failed", "skipped", "todo"],
-    ),
+    tests,
     postgres: normalizePostgresMetadata(value.postgres),
   };
 }
@@ -734,15 +835,27 @@ function normalizePlaywrightSummary(value) {
   ) {
     fail("Playwright viewport evidence is invalid.");
   }
+  const tests = normalizeTestCounts(
+    value.tests,
+    ["files", "total", "passed", "failed", "flaky", "skipped"],
+  );
+  if (
+    tests.files === 0
+    || tests.files > tests.total
+    || tests.total === 0
+    || tests.passed !== tests.total
+    || tests.failed !== 0
+    || tests.flaky !== 0
+    || tests.skipped !== 0
+  ) {
+    fail("Playwright evidence test counts do not reconcile.");
+  }
   return {
     schema_version: "1.0",
     job: "playwright",
     ...normalizeRunIdentity(value),
     runtime: normalizeRuntime(value.runtime, { playwright: true }),
-    tests: normalizeTestCounts(
-      value.tests,
-      ["files", "total", "passed", "failed", "flaky", "skipped"],
-    ),
+    tests,
     projects: REQUIRED_PLAYWRIGHT_PROJECTS,
     viewport_widths: REQUIRED_VIEWPORT_WIDTHS,
   };
@@ -836,6 +949,7 @@ function assembleEvidence(qualityPath, postgresPath, playwrightPath, outputDirec
       pnpm: quality.runtime.pnpm,
       postgresql: postgres.postgres.server_version,
       playwright: playwright.runtime.playwright,
+      chromium: playwright.runtime.chromium,
     },
     migration_range: {
       count: postgres.postgres.migrations.count,
@@ -919,7 +1033,7 @@ async function main() {
     return;
   }
   if (command === "summarize-playwright" && args.length === 2) {
-    summarizePlaywright(args[0], args[1]);
+    await summarizePlaywright(args[0], args[1]);
     return;
   }
   if (command === "assemble" && args.length === 4) {

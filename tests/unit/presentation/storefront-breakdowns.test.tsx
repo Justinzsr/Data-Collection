@@ -20,6 +20,9 @@ import {
 } from "@/presentation/dashboard/moonarq-overview-query";
 import { createWebsiteFunnelOverview } from "./website-funnel-overview-fixture";
 
+const syntheticPaymentDigits = ["7000", "0000", "0000", "0005"].join("");
+const dottedPaymentCandidate = syntheticPaymentDigits.match(/.{1,4}/gu)!.join(".");
+
 function paginationUrl(
   markup: string,
   label: string,
@@ -363,6 +366,92 @@ describe("StorefrontBreakdowns", () => {
           expect(attributeValues.some((value) => value.includes(canary))).toBe(false);
           expect(paginationLinks.some((link) => link.href.includes(canary))).toBe(false);
         }
+      }
+    }
+  });
+
+  it.each([
+    {
+      queryKey: "utm_source",
+      optionKey: "utmSources",
+      safeOption: "newsletter",
+      unsafeValue: dottedPaymentCandidate,
+    },
+    {
+      queryKey: "utm_medium",
+      optionKey: "utmMediums",
+      safeOption: "email",
+      unsafeValue: dottedPaymentCandidate,
+    },
+    {
+      queryKey: "utm_campaign",
+      optionKey: "utmCampaigns",
+      safeOption: "summer",
+      unsafeValue: dottedPaymentCandidate,
+    },
+    {
+      queryKey: "landing_path",
+      optionKey: "landingPaths",
+      safeOption: "/collections/new",
+      unsafeValue: `/campaign/${dottedPaymentCandidate}`,
+    },
+    {
+      queryKey: "referrer_host",
+      optionKey: "referrerHosts",
+      safeOption: "example.test",
+      unsafeValue: `${dottedPaymentCandidate}.invalid`,
+    },
+  ] as const)("removes embedded payment data from $queryKey state and options", ({
+    queryKey,
+    optionKey,
+    safeOption,
+    unsafeValue,
+  }) => {
+    for (const injectionTarget of ["query", "options"] as const) {
+      const overview = createWebsiteFunnelOverview();
+      overview.filterOptions[optionKey] = injectionTarget === "options"
+        ? [safeOption, unsafeValue]
+        : [safeOption];
+      const query = {
+        ...DEFAULT_MOONARQ_OVERVIEW_QUERY,
+        range: "7d",
+        [queryKey]: injectionTarget === "query" ? unsafeValue : "",
+      } as MoonArqOverviewQuery;
+
+      const markup = renderToStaticMarkup(
+        <StorefrontBreakdowns
+          overview={overview}
+          query={query}
+          basePath="/w/moonarq/dashboard"
+        />,
+      );
+      const root = document.createElement("div");
+      root.innerHTML = markup;
+      const select = root.querySelector<HTMLSelectElement>(`select[name="${queryKey}"]`);
+      const attributeValues = [...root.querySelectorAll("*")].flatMap((element) =>
+        [...element.attributes].map((attribute) => attribute.value));
+      const paginationLinks = [...root.querySelectorAll<HTMLAnchorElement>("a[rel][href]")];
+      const canaries = [
+        unsafeValue,
+        dottedPaymentCandidate,
+        syntheticPaymentDigits,
+        encodeURIComponent(unsafeValue),
+      ];
+
+      expect(select).not.toBeNull();
+      expect(select?.value).toBe("");
+      expect([...select!.options].some((option) => option.value === unsafeValue)).toBe(false);
+      expect([...select!.options].some((option) => option.value === safeOption)).toBe(true);
+      expect(paginationLinks.length).toBeGreaterThan(0);
+      for (const link of paginationLinks) {
+        const url = new URL(link.href, "https://data-hub.invalid");
+        expect(url.searchParams.get("range")).toBe("7d");
+        expect(url.searchParams.has(queryKey)).toBe(false);
+      }
+      for (const canary of canaries) {
+        expect(markup).not.toContain(canary);
+        expect(attributeValues.some((value) => value.includes(canary))).toBe(false);
+        expect(paginationLinks.some((link) => link.href.includes(canary))).toBe(false);
       }
     }
   });

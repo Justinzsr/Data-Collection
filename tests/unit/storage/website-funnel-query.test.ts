@@ -185,6 +185,13 @@ describe("Website funnel aggregate SQL", () => {
       "raw_display_values as materialized",
       "display_value_features as materialized",
       "display_value_numeric_features as materialized",
+      "display_value_payment_inputs as materialized",
+      "display_value_payment_segments_raw as materialized",
+      "display_value_payment_segments as materialized",
+      "display_value_payment_digit_contributions as materialized",
+      "display_value_payment_running_sums as materialized",
+      "display_value_payment_prefixes as materialized",
+      "display_value_payment_risks as materialized",
       "display_value_risks as materialized",
       "validated_display_values as materialized",
       "normalized_display_values as materialized",
@@ -195,6 +202,36 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("risk.raw_text !~* '%(25)*(40|3f|23)'");
     expect(sql).toContain("pg_input_is_valid(risk.ipv4_candidate, 'inet') is not true");
     expect(sql).toContain("lower(coalesce(feature.raw_text, '')) ~ '^https?://[^/?#]+(/[^?#]*)?$'");
+    expect(sql).toContain("false as decode_failed");
+    expect(sql).toContain("decoded.decode_valid is not true as decode_failed");
+    expect(sql).toContain("convert_from(decode(encoded.hex_text, 'hex'), 'utf8')");
+    expect(sql).toContain("and position('%' in variant.scan_text) > 0");
+    expect(sql).toContain("risk.decode_failed is true");
+    expect(sql).toContain("risk.decode_pass = 3 and position('%' in risk.scan_text) > 0");
+    expect(sql).toContain('regexp_matches( input.scan_text collate "pg_c_utf8",');
+    expect(sql).toContain("regexp_replace(segment.value, '[^0-9]', '', 'g') as digits");
+    expect(sql).toContain(
+      "unnest( regexp_split_to_array(candidate.match[1], '[0-9]{20,}') )",
+    );
+    expect(sql).toContain("and feature.ascii_digit_count >= 13");
+    expect(sql).toContain("and feature.scan_text ~ '^[^0-9]*[0-9]([^0-9]*[0-9]){12}'");
+    expect(sql).toContain(
+      "coalesce(payment_risk.likely_payment_card, false) as likely_payment_card",
+    );
+    expect(sql).toContain("payment_window_positions(payment_position) as materialized");
+    expect(sql).toContain("where payment_position < 1200");
+    expect(sql).toContain(
+      "cross join ( values (13), (14), (15), (16), (17), (18), (19) ) payment_length(window_length)",
+    );
+    expect(sql).toContain("join payment_window_positions payment_start");
+    expect(sql).toContain("array_agg(running.raw_sum order by running.payment_position)");
+    expect(sql).toContain("prefix.raw_prefix[ payment_start.payment_position + payment_length.window_length ]");
+    expect(sql).toContain(
+      "group by prefix.period_key, prefix.event_id, prefix.value_key, prefix.decode_pass",
+    );
+    expect(sql).not.toContain("regexp_split_to_table(");
+    expect(sql).not.toContain("from '([0-9][0-9 -]{11,22}[0-9])'");
+    expect(sql).not.toContain("as payment_digits");
     expect(sql).toContain(
       "when event.display_presence -> 'first_referrer' = 'true'::jsonb",
     );

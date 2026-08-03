@@ -287,6 +287,13 @@ periods(period_key, start_at, end_at) as (
     ('current'::text, $2::timestamptz, $3::timestamptz),
     ('comparison'::text, $4::timestamptz, $5::timestamptz)
 ),
+payment_window_positions(payment_position) as materialized (
+  select 1::integer
+  union all
+  select payment_position + 1
+  from payment_window_positions
+  where payment_position < 1200
+),
 coverage as (
   select
     min(e.occurred_at) as first_occurred_at,
@@ -470,7 +477,12 @@ display_value_decoded_variants as (
     feature.is_present,
     feature.raw_text,
     0::integer as decode_pass,
-    feature.raw_text as scan_text
+    case
+      when char_length(feature.raw_text) between 1 and feature.maximum_length
+        then feature.raw_text
+      else null
+    end as scan_text,
+    false as decode_failed
   from display_value_features feature
 
   union all
@@ -485,45 +497,60 @@ display_value_decoded_variants as (
     variant.is_present,
     variant.raw_text,
     variant.decode_pass + 1,
-    decoded.scan_text
+    decoded.decoded_text collate "default",
+    decoded.decode_valid is not true as decode_failed
   from display_value_decoded_variants variant
   cross join lateral (
-    select string_agg(
+    select
+      assembled.decode_valid,
       case
-        when token.part[1] ~* '^%[0-7][0-9a-f]$' then
+        when assembled.decode_valid
+          then assembled.candidate_text
+        else null
+      end as decoded_text
+    from (
+      select
+        bool_and(piece.piece_valid) as decode_valid,
+        string_agg(piece.decoded_piece, '' order by piece.part_index) as candidate_text
+      from (
+        select
+          token.part_index,
+          validation.piece_valid,
           case
-            when get_byte(
-              decode(substring(token.part[1] from 2), 'hex'),
-              0
-            ) = 0 then chr(1)
-            else chr(get_byte(
-              decode(substring(token.part[1] from 2), 'hex'),
-              0
-            ))
-          end
-        else token.part[1]
-      end,
-      ''
-      order by token.part_index
-    ) as scan_text
-    from regexp_matches(
-      variant.scan_text,
-      '%[0-9a-f]{2}|.',
-      'gis'
-    ) with ordinality as token(part, part_index)
+            when left(token.part[1], 1) <> '%' then token.part[1]
+            when validation.piece_valid
+              then convert_from(decode(encoded.hex_text, 'hex'), 'UTF8')
+            else null
+          end as decoded_piece
+        from regexp_matches(
+          variant.scan_text collate "pg_c_utf8",
+          '((?:%[0-9a-f]{2})+|.)',
+          'gis'
+        ) with ordinality as token(part, part_index)
+        cross join lateral (
+          select lower(replace(token.part[1], '%', '')) as hex_text
+        ) encoded
+        cross join lateral (
+          select
+            left(token.part[1], 1) <> '%'
+            or encoded.hex_text ~ '^(?:(?:0[1-9a-f]|[1-7][0-9a-f])|(?:c[2-f]|d[0-f])[89ab][0-9a-f]|e0[ab][0-9a-f][89ab][0-9a-f]|(?:e[1-c]|e[ef])[89ab][0-9a-f][89ab][0-9a-f]|ed[89][0-9a-f][89ab][0-9a-f]|f0[9ab][0-9a-f](?:[89ab][0-9a-f]){2}|f[1-3][89ab][0-9a-f](?:[89ab][0-9a-f]){2}|f48[0-9a-f](?:[89ab][0-9a-f]){2})+$'
+              as piece_valid
+        ) validation
+      ) piece
+    ) assembled
   ) decoded
   where variant.decode_pass < 3
+    and variant.decode_failed is false
+    and variant.scan_text is not null
     and char_length(variant.raw_text) between 1 and variant.maximum_length
-    and variant.scan_text ~* '%[0-9a-f]{2}'
+    and position('%' in variant.scan_text) > 0
 ),
 display_value_numeric_features as materialized (
   select
     feature.*,
-    regexp_replace(coalesce(feature.scan_text, ''), '[^0-9]', '', 'g') as digits,
-    substring(
-      coalesce(feature.scan_text, '')
-      from '([0-9][0-9 -]{11,22}[0-9])'
-    ) as payment_candidate,
+    char_length(coalesce(feature.scan_text, ''))
+      - char_length(translate(coalesce(feature.scan_text, ''), '0123456789', ''))
+      as ascii_digit_count,
     substring(
       coalesce(feature.scan_text, '')
       from '([+0-9][+0-9 ().-]{6,24})'
@@ -545,11 +572,158 @@ display_value_numeric_features as materialized (
     end as url_authority
   from display_value_decoded_variants feature
 ),
+display_value_payment_inputs as materialized (
+  select
+    row_number() over () as payment_input_index,
+    feature.*
+  from display_value_numeric_features feature
+  where feature.scan_text is not null
+    and feature.ascii_digit_count >= 13
+    and feature.scan_text ~ '^[^0-9]*[0-9]([^0-9]*[0-9]){12}'
+),
+display_value_payment_segments_raw as materialized (
+  select
+    input.payment_input_index,
+    input.period_key,
+    input.event_id,
+    input.value_key,
+    input.decode_pass,
+    candidate.candidate_index,
+    segment.segment_index,
+    regexp_replace(segment.value, '[^0-9]', '', 'g') as digits
+  from display_value_payment_inputs input
+  cross join lateral regexp_matches(
+    input.scan_text collate "pg_c_utf8",
+    '([0-9[:space:][:punct:]]+)',
+    'g'
+  ) with ordinality candidate(match, candidate_index)
+  cross join lateral unnest(
+    regexp_split_to_array(candidate.match[1], '[0-9]{20,}')
+  ) with ordinality segment(value, segment_index)
+),
+display_value_payment_segments as materialized (
+  select
+    segment.*,
+    char_length(segment.digits)::integer as digit_count
+  from display_value_payment_segments_raw segment
+  where char_length(segment.digits) between 13 and 1200
+),
+display_value_payment_digit_contributions as materialized (
+  select
+    segment.payment_input_index,
+    segment.period_key,
+    segment.event_id,
+    segment.value_key,
+    segment.decode_pass,
+    segment.candidate_index,
+    segment.segment_index,
+    segment.digit_count,
+    position.payment_position,
+    digit.value,
+    case
+      when digit.value * 2 > 9 then digit.value * 2 - 9
+      else digit.value * 2
+    end as doubled_value
+  from display_value_payment_segments segment
+  join payment_window_positions position
+    on position.payment_position <= segment.digit_count
+  cross join lateral (
+    values (substring(segment.digits from position.payment_position for 1)::integer)
+  ) digit(value)
+),
+display_value_payment_running_sums as materialized (
+  select
+    digit.*,
+    sum(digit.value) over payment_order as raw_sum,
+    sum(
+      case
+        when digit.payment_position % 2 = 0
+          then digit.doubled_value - digit.value
+        else 0
+      end
+    ) over payment_order as even_delta_sum,
+    sum(
+      case
+        when digit.payment_position % 2 = 1
+          then digit.doubled_value - digit.value
+        else 0
+      end
+    ) over payment_order as odd_delta_sum
+  from display_value_payment_digit_contributions digit
+  window payment_order as (
+    partition by digit.payment_input_index, digit.candidate_index, digit.segment_index
+    order by digit.payment_position
+    rows between unbounded preceding and current row
+  )
+),
+display_value_payment_prefixes as materialized (
+  select
+    running.payment_input_index,
+    running.period_key,
+    running.event_id,
+    running.value_key,
+    running.decode_pass,
+    running.candidate_index,
+    running.segment_index,
+    max(running.digit_count)::integer as digit_count,
+    array_prepend(
+      0::bigint,
+      array_agg(running.raw_sum order by running.payment_position)
+    ) as raw_prefix,
+    array_prepend(
+      0::bigint,
+      array_agg(running.even_delta_sum order by running.payment_position)
+    ) as even_delta_prefix,
+    array_prepend(
+      0::bigint,
+      array_agg(running.odd_delta_sum order by running.payment_position)
+    ) as odd_delta_prefix
+  from display_value_payment_running_sums running
+  group by
+    running.payment_input_index,
+    running.period_key,
+    running.event_id,
+    running.value_key,
+    running.decode_pass,
+    running.candidate_index,
+    running.segment_index
+),
+display_value_payment_risks as materialized (
+  select
+    prefix.period_key,
+    prefix.event_id,
+    prefix.value_key,
+    prefix.decode_pass,
+    true as likely_payment_card
+  from display_value_payment_prefixes prefix
+  cross join (
+    values (13), (14), (15), (16), (17), (18), (19)
+  ) payment_length(window_length)
+  join payment_window_positions payment_start
+    on payment_start.payment_position <=
+      prefix.digit_count - payment_length.window_length + 1
+  where mod(
+    prefix.raw_prefix[
+      payment_start.payment_position + payment_length.window_length
+    ] - prefix.raw_prefix[payment_start.payment_position]
+    + case
+        when (
+          payment_start.payment_position + payment_length.window_length
+        ) % 2 = 0
+          then prefix.even_delta_prefix[
+            payment_start.payment_position + payment_length.window_length
+          ] - prefix.even_delta_prefix[payment_start.payment_position]
+        else prefix.odd_delta_prefix[
+          payment_start.payment_position + payment_length.window_length
+        ] - prefix.odd_delta_prefix[payment_start.payment_position]
+      end,
+    10
+  ) = 0
+  group by prefix.period_key, prefix.event_id, prefix.value_key, prefix.decode_pass
+),
 display_value_risks as materialized (
   select
     feature.*,
-    regexp_replace(coalesce(feature.payment_candidate, ''), '[^0-9]', '', 'g')
-      as payment_digits,
     case
       when feature.scan_text is null then false
       else exists (
@@ -607,54 +781,28 @@ display_value_risks as materialized (
         )
       )
     end as likely_phone,
-    case
-      when char_length(
-        regexp_replace(coalesce(feature.payment_candidate, ''), '[^0-9]', '', 'g')
-      ) between 13 and 19
-      then (
-        select coalesce(sum(
-          case
-            when (
-              char_length(regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g'))
-              - digit_position
-            ) % 2 = 1
-            then case
-              when substring(
-                regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
-                from digit_position for 1
-              )::integer * 2 > 9
-                then substring(
-                  regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
-                  from digit_position for 1
-                )::integer * 2 - 9
-              else substring(
-                regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
-                from digit_position for 1
-              )::integer * 2
-            end
-            else substring(
-              regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g')
-              from digit_position for 1
-            )::integer
-          end
-        ), 0) % 10 = 0
-        from generate_series(
-          1,
-          char_length(regexp_replace(feature.payment_candidate, '[^0-9]', '', 'g'))
-        ) digit_position
-      )
-      else false
-    end as likely_payment_card
+    coalesce(payment_risk.likely_payment_card, false) as likely_payment_card
   from display_value_numeric_features feature
+  left join display_value_payment_risks payment_risk
+    on payment_risk.period_key = feature.period_key
+    and payment_risk.event_id = feature.event_id
+    and payment_risk.value_key = feature.value_key
+    and payment_risk.decode_pass = feature.decode_pass
 ),
 display_value_scanned_risks as materialized (
   select
     risk.*,
     coalesce(
       bool_or(
-        risk.scan_text is not null
-        and (
-          risk.scan_text ~ '[[:cntrl:]]'
+        risk.decode_failed is true
+        or (
+          risk.scan_text is not null
+          and (
+            (
+              risk.decode_pass = 3
+              and position('%' in risk.scan_text) > 0
+            )
+          or risk.scan_text ~ '[[:cntrl:]]'
           or risk.scan_text
             ~* '(^|[^a-z0-9._%+-])[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}($|[^a-z0-9.-])'
           or regexp_replace(risk.scan_text, '[-_]+', ' ', 'g')
@@ -678,6 +826,7 @@ display_value_scanned_risks as materialized (
           or risk.scan_text
             ~* '(^|[^a-f0-9])([a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}($|[^a-f0-9])'
           or risk.scan_text ~* '^https?://[^/?#]*@'
+          )
         )
       ) over (
         partition by risk.period_key, risk.event_id, risk.value_key

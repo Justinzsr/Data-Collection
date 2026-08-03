@@ -266,6 +266,31 @@ test("malformed acquisition query values are not reflected into rendered control
   }
 });
 
+test("payment data in a literal acquisition query is not reflected into rendered controls", async ({ page }) => {
+  const syntheticPaymentDigits = ["7000", "0000", "0000", "0005"].join("");
+  const dottedPaymentCandidate = syntheticPaymentDigits.match(/.{1,4}/gu)!.join(".");
+  const percentEncodedCandidate = dottedPaymentCandidate.replaceAll(".", "%2E");
+  const response = await page.goto(
+    `/w/moonarq/dashboard?range=7d&utm_campaign=${dottedPaymentCandidate}`,
+  );
+
+  expect(response?.ok()).toBe(true);
+  const finalUrl = new URL(page.url());
+  expect(finalUrl.searchParams.get("range")).toBe("7d");
+  expect(finalUrl.searchParams.has("utm_campaign")).toBe(false);
+  await expect(page.getByLabel("UTM campaign")).toHaveValue("");
+  const markup = await page.evaluate(() => document.documentElement.outerHTML);
+  for (const canary of [
+    dottedPaymentCandidate,
+    syntheticPaymentDigits,
+    percentEncodedCandidate,
+    percentEncodedCandidate.replaceAll("%", "%25"),
+  ]) {
+    expect(finalUrl.href).not.toContain(canary);
+    expect(markup).not.toContain(canary);
+  }
+});
+
 test("Overview muted text, chart ticks, and funnel bars meet contrast requirements", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/w/moonarq/dashboard?demo_state=long-values");
