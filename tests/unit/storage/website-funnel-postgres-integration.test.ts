@@ -469,6 +469,11 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
     )}%20`;
     const plusSeparatedPhone = ["+1", "+202", "+555", "+0100"].join("");
     const syntheticGitHubCredential = `ghp_${"A".repeat(30)}`;
+    const syntheticGitHubFineGrainedCredential = [
+      "github",
+      "pat",
+      "A".repeat(20),
+    ].join("_");
     const syntheticShopifyCredential = `shpat_${"A".repeat(20)}`;
     const safeUtf16Boundary = "😀".repeat(128);
     const unsafeUtf16Boundary = "😀".repeat(129);
@@ -664,6 +669,11 @@ describe.skipIf(!enabled)("Website funnel PostgreSQL aggregate", () => {
       { label: "comma-po-box", value: "P,O,Box,123", expected: "" },
       { label: "long-form-punctuation-po-box", value: "Post.Office.Box/123", expected: "" },
       { label: "synthetic-github-credential", value: syntheticGitHubCredential, expected: "" },
+      {
+        label: "synthetic-github-fine-grained-credential",
+        value: syntheticGitHubFineGrainedCredential,
+        expected: "",
+      },
       { label: "synthetic-shopify-credential", value: syntheticShopifyCredential, expected: "" },
       { label: "canonical-email-key", value: "email=synthetic", expected: "" },
       { label: "canonical-phone-key", value: "mobile_number=synthetic", expected: "" },

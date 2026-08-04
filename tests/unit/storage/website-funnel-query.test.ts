@@ -309,6 +309,9 @@ describe("Website funnel aggregate SQL", () => {
       "position('gh' in privacy_scan.lower_scan_text) > 0",
     );
     expect(genericRiskSql).toContain(
+      "position('github_pat_' in privacy_scan.lower_scan_text) > 0",
+    );
+    expect(genericRiskSql).toContain(
       "when position('=' in privacy_scan.scan_text) = 0 and position(':' in privacy_scan.scan_text) = 0 and position('/' in privacy_scan.scan_text) = 0 then false",
     );
     expect(decodedValueSql).toContain(

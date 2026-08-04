@@ -1309,6 +1309,7 @@ display_value_generic_privacy_risks as materialized (
         end
         or case
           when position('gh' in privacy_scan.lower_scan_text) > 0
+            or position('github_pat_' in privacy_scan.lower_scan_text) > 0
             or position('shpat' in privacy_scan.lower_scan_text) > 0
             or position('xox' in privacy_scan.lower_scan_text) > 0
             or position('akia' in privacy_scan.lower_scan_text) > 0
