@@ -386,14 +386,11 @@ coverage as (
 period_event_candidates as materialized (
   select
     period.period_key,
-    e.source_id,
     e.event_id,
     e.session_id,
     e.anonymous_id,
     e.event_name,
     e.occurred_at,
-    e.received_at,
-    e.path,
     e.referrer,
     e.properties,
     e.attribution_context,
@@ -410,7 +407,17 @@ period_event_candidates as materialized (
     and e.occurred_at < period.end_at
 ),
 all_events as materialized (
-  select *
+  select
+    period_key,
+    event_id,
+    session_id,
+    anonymous_id,
+    event_name,
+    occurred_at,
+    referrer,
+    properties,
+    attribution_context,
+    client_context
   from period_event_candidates
   where delivery_rank = 1
 ),
@@ -420,7 +427,7 @@ known_events as materialized (
   where event_name = any($6::text[])
 ),
 unknown_event_rows as materialized (
-  select *
+  select period_key, event_id, session_id, event_name
   from all_events
   where event_name <> all($6::text[])
 ),
@@ -596,7 +603,17 @@ display_value_features as materialized (
           '',
           'g'
         ))
-    end as raw_text_utf16_length
+    end as raw_text_utf16_length,
+    case
+      when raw.dimension_kind = 'url'
+        and lower(coalesce(normalized.raw_text, ''))
+          ~ '^https?://[^/?#]+(/[^?#]*)?$'
+        then substring(
+          lower(normalized.raw_text)
+          from '^https?://([^/?#]+)'
+        )
+      else null
+    end as url_authority
   from display_value_catalog raw
   cross join lateral (
     -- PostgreSQL 17 carries Unicode 15.1 normalization data. These 37
@@ -618,12 +635,6 @@ display_value_decoded_variants as (
   select
     feature.display_value_id,
     feature.value_key,
-    feature.maximum_length,
-    feature.dimension_kind,
-    feature.raw_json,
-    feature.is_present,
-    feature.raw_text,
-    feature.raw_text_utf16_length,
     0::integer as decode_pass,
     case
       when feature.raw_text_utf16_length between 1 and feature.maximum_length
@@ -638,12 +649,6 @@ display_value_decoded_variants as (
   select
     variant.display_value_id,
     variant.value_key,
-    variant.maximum_length,
-    variant.dimension_kind,
-    variant.raw_json,
-    variant.is_present,
-    variant.raw_text,
-    variant.raw_text_utf16_length,
     variant.decode_pass + 1,
     decoded.decoded_text collate "default",
     decoded.decode_valid is not true as decode_failed
@@ -690,13 +695,15 @@ display_value_decoded_variants as (
   where variant.decode_pass < 3
     and variant.decode_failed is false
     and variant.scan_text is not null
-    and variant.raw_text_utf16_length between 1 and variant.maximum_length
     and position('%' in variant.scan_text) > 0
 ),
 display_value_numeric_features as materialized (
   select
-    feature.*,
-    normalized_scan.trimmed_text as trimmed_scan_text,
+    feature.display_value_id,
+    feature.value_key,
+    feature.decode_pass,
+    feature.scan_text,
+    feature.decode_failed,
     privacy_probe.raw_regex_scan_text,
     privacy_probe.normalized_privacy_scan_text,
     privacy_probe.normalized_privacy_spaced_scan_text,
@@ -710,44 +717,46 @@ display_value_numeric_features as materialized (
     )
       as ascii_digit_count,
     (
-      coalesce(feature.scan_text, '') collate "pg_c_utf8"
-        ~ '(?=(?<![0-9])(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])(?![0-9]))'
-      or numeric_privacy_probe.normalized_numeric_privacy_scan_text collate "pg_c_utf8"
-        ~ '(?=(?<![0-9])(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])(?![0-9]))'
+      (
+        position('.' in coalesce(feature.scan_text, '')) > 0
+        and coalesce(feature.scan_text, '') collate "pg_c_utf8"
+          ~ '(?=(?<![0-9])(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])(?![0-9]))'
+      )
+      or (
+        position('.' in numeric_privacy_probe.normalized_numeric_privacy_scan_text) > 0
+        and numeric_privacy_probe.normalized_numeric_privacy_scan_text collate "pg_c_utf8"
+          ~ '(?=(?<![0-9])(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])(?![0-9]))'
+      )
     )
       as likely_ipv4,
     (
-      numeric_privacy_probe.normalized_numeric_privacy_scan_text
-        ~* '((https?|ftp|ws|wss):[\\\\/]*|file:[\\\\/]{2})([^/?#@\\\\]*@)*(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}\\.?(:[0-9]*)?([/?#\\\\]|$)'
-      or numeric_privacy_probe.normalized_numeric_privacy_scan_text
-        ~* '(^|[^a-z0-9+.-])([0-9+._-][a-z0-9+._-]*:|:)[\\\\/]{2,}([^/?#@\\\\]*@)*(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}\\.?(:[0-9]*)?([/?#\\\\]|$)'
-      or numeric_privacy_probe.normalized_numeric_privacy_scan_text
-        ~* '(^|[^a-z0-9+.-])([0-9+._-][a-z0-9+._-]*:|:)/{2,}([^/?#@]*@)*(0x[0-9a-f]+|[0-9]+)([.](0x[0-9a-f]+|[0-9]+)){0,3}[.]?(:[0-9]*)?([/?#]|$)'
-      or exists (
-        select 1
-        from regexp_matches(
-          numeric_privacy_probe.normalized_numeric_privacy_scan_text collate "pg_c_utf8",
-          '(^|.)([\\\\/]{2,}([^/?#@\\\\]*@)*(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}\\.?(:[0-9]*)?([/?#\\\\]|$))',
-          'g'
-        ) relative_network(match)
-        where relative_network.match[1] = ''
-          or (
-            relative_network.match[1] <> ':'
-            and relative_network.match[1] !~ '[[:alnum:]]'
-          )
+      (
+        position(':' in numeric_privacy_probe.normalized_numeric_privacy_scan_text) > 0
+        or numeric_privacy_probe.normalized_numeric_privacy_scan_text
+          ~ '[\\\\/]{2}'
       )
-    ) as likely_alternative_ipv4_url,
-    case
-      when feature.decode_pass = 0
-        and feature.dimension_kind = 'url'
-        and lower(coalesce(feature.raw_text, ''))
-          ~ '^https?://[^/?#]+(/[^?#]*)?$'
-        then substring(
-          lower(feature.raw_text)
-          from '^https?://([^/?#]+)'
+      and (
+        numeric_privacy_probe.normalized_numeric_privacy_scan_text
+          ~* '((https?|ftp|ws|wss):[\\\\/]*|file:[\\\\/]{2})([^/?#@\\\\]*@)*(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}\\.?(:[0-9]*)?([/?#\\\\]|$)'
+        or numeric_privacy_probe.normalized_numeric_privacy_scan_text
+          ~* '(^|[^a-z0-9+.-])([0-9+._-][a-z0-9+._-]*:|:)[\\\\/]{2,}([^/?#@\\\\]*@)*(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}\\.?(:[0-9]*)?([/?#\\\\]|$)'
+        or numeric_privacy_probe.normalized_numeric_privacy_scan_text
+          ~* '(^|[^a-z0-9+.-])([0-9+._-][a-z0-9+._-]*:|:)/{2,}([^/?#@]*@)*(0x[0-9a-f]+|[0-9]+)([.](0x[0-9a-f]+|[0-9]+)){0,3}[.]?(:[0-9]*)?([/?#]|$)'
+        or exists (
+          select 1
+          from regexp_matches(
+            numeric_privacy_probe.normalized_numeric_privacy_scan_text collate "pg_c_utf8",
+            '(^|.)([\\\\/]{2,}([^/?#@\\\\]*@)*(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}\\.?(:[0-9]*)?([/?#\\\\]|$))',
+            'g'
+          ) relative_network(match)
+          where relative_network.match[1] = ''
+            or (
+              relative_network.match[1] <> ':'
+              and relative_network.match[1] !~ '[[:alnum:]]'
+            )
         )
-      else null
-    end as url_authority
+      )
+    ) as likely_alternative_ipv4_url
   from display_value_decoded_variants feature
   cross join lateral (
     -- The removal probe catches split email/IP/phone/payment values; the
@@ -761,43 +770,65 @@ display_value_numeric_features as materialized (
   ) normalized_scan(trimmed_text)
   cross join lateral (
     values (
-      normalize(
-        translate(
-          normalized_scan.trimmed_text,
-          U&'\\A7F1\\+01CCD6\\+01CCD7\\+01CCD8\\+01CCD9\\+01CCDA\\+01CCDB\\+01CCDC\\+01CCDD\\+01CCDE\\+01CCDF\\+01CCE0\\+01CCE1\\+01CCE2\\+01CCE3\\+01CCE4\\+01CCE5\\+01CCE6\\+01CCE7\\+01CCE8\\+01CCE9\\+01CCEA\\+01CCEB\\+01CCEC\\+01CCED\\+01CCEE\\+01CCEF\\+01CCF0\\+01CCF1\\+01CCF2\\+01CCF3\\+01CCF4\\+01CCF5\\+01CCF6\\+01CCF7\\+01CCF8\\+01CCF9',
-          'SABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-        ),
-        NFKC
-      )
+      octet_length(normalized_scan.trimmed_text)
+        = char_length(normalized_scan.trimmed_text)
+      and normalized_scan.trimmed_text !~ '[[:cntrl:]]'
+    )
+  ) plain_ascii_scan(is_plain_ascii)
+  cross join lateral (
+    values (
+      case
+        when plain_ascii_scan.is_plain_ascii
+          then normalized_scan.trimmed_text
+        else normalize(
+          translate(
+            normalized_scan.trimmed_text,
+            U&'\\A7F1\\+01CCD6\\+01CCD7\\+01CCD8\\+01CCD9\\+01CCDA\\+01CCDB\\+01CCDC\\+01CCDD\\+01CCDE\\+01CCDF\\+01CCE0\\+01CCE1\\+01CCE2\\+01CCE3\\+01CCE4\\+01CCE5\\+01CCE6\\+01CCE7\\+01CCE8\\+01CCE9\\+01CCEA\\+01CCEB\\+01CCEC\\+01CCED\\+01CCEE\\+01CCEF\\+01CCF0\\+01CCF1\\+01CCF2\\+01CCF3\\+01CCF4\\+01CCF5\\+01CCF6\\+01CCF7\\+01CCF8\\+01CCF9',
+            'SABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+          ),
+          NFKC
+        )
+      end
     )
   ) normalized_privacy_probe(nfkc_scan_text)
   cross join lateral (
     values (
-      translate(
-        normalized_scan.trimmed_text,
-        U&'\\017F\\212A\\FEFF',
-        U&'\\0073\\006B\\0020'
-      ),
-      translate(
-        regexp_replace(
-          normalized_privacy_probe.nfkc_scan_text,
-          U&'[\\00AD\\034F\\0600-\\0605\\061C\\06DD\\070F\\0890-\\0891\\08E2\\115F-\\1160\\17B4-\\17B5\\180B-\\180F\\200B-\\200F\\202A-\\202E\\2060-\\2064\\2066-\\206F\\2800\\3164\\FE00-\\FE0F\\FEFF\\FFA0\\FFF9-\\FFFB\\+0110BD\\+0110CD\\+013430-\\+01343F\\+01BCA0-\\+01BCA3\\+01D173-\\+01D17A\\+0E0001\\+0E0020-\\+0E007F\\+0E0100-\\+0E01EF]',
-          '',
-          'g'
-        ),
-        U&'\\3002\\FF0E\\FF61',
-        '...'
-      ),
-      translate(
-        regexp_replace(
-          normalized_privacy_probe.nfkc_scan_text,
-          U&'[\\00AD\\034F\\0600-\\0605\\061C\\06DD\\070F\\0890-\\0891\\08E2\\115F-\\1160\\17B4-\\17B5\\180B-\\180F\\200B-\\200F\\202A-\\202E\\2060-\\2064\\2066-\\206F\\2800\\3164\\FE00-\\FE0F\\FEFF\\FFA0\\FFF9-\\FFFB\\+0110BD\\+0110CD\\+013430-\\+01343F\\+01BCA0-\\+01BCA3\\+01D173-\\+01D17A\\+0E0001\\+0E0020-\\+0E007F\\+0E0100-\\+0E01EF]',
-          ' ',
-          'g'
-        ),
-        U&'\\3002\\FF0E\\FF61',
-        '...'
-      )
+      case
+        when plain_ascii_scan.is_plain_ascii then normalized_scan.trimmed_text
+        else translate(
+          normalized_scan.trimmed_text,
+          U&'\\017F\\212A\\FEFF',
+          U&'\\0073\\006B\\0020'
+        )
+      end,
+      case
+        when plain_ascii_scan.is_plain_ascii
+          then normalized_privacy_probe.nfkc_scan_text
+        else translate(
+          regexp_replace(
+            normalized_privacy_probe.nfkc_scan_text,
+            U&'[\\00AD\\034F\\0600-\\0605\\061C\\06DD\\070F\\0890-\\0891\\08E2\\115F-\\1160\\17B4-\\17B5\\180B-\\180F\\200B-\\200F\\202A-\\202E\\2060-\\2064\\2066-\\206F\\2800\\3164\\FE00-\\FE0F\\FEFF\\FFA0\\FFF9-\\FFFB\\+0110BD\\+0110CD\\+013430-\\+01343F\\+01BCA0-\\+01BCA3\\+01D173-\\+01D17A\\+0E0001\\+0E0020-\\+0E007F\\+0E0100-\\+0E01EF]',
+            '',
+            'g'
+          ),
+          U&'\\3002\\FF0E\\FF61',
+          '...'
+        )
+      end,
+      case
+        when plain_ascii_scan.is_plain_ascii
+          then normalized_privacy_probe.nfkc_scan_text
+        else translate(
+          regexp_replace(
+            normalized_privacy_probe.nfkc_scan_text,
+            U&'[\\00AD\\034F\\0600-\\0605\\061C\\06DD\\070F\\0890-\\0891\\08E2\\115F-\\1160\\17B4-\\17B5\\180B-\\180F\\200B-\\200F\\202A-\\202E\\2060-\\2064\\2066-\\206F\\2800\\3164\\FE00-\\FE0F\\FEFF\\FFA0\\FFF9-\\FFFB\\+0110BD\\+0110CD\\+013430-\\+01343F\\+01BCA0-\\+01BCA3\\+01D173-\\+01D17A\\+0E0001\\+0E0020-\\+0E007F\\+0E0100-\\+0E01EF]',
+            ' ',
+            'g'
+          ),
+          U&'\\3002\\FF0E\\FF61',
+          '...'
+        )
+      end
     )
   ) privacy_probe_prepared(
     raw_regex_scan_text,
@@ -807,18 +838,26 @@ display_value_numeric_features as materialized (
   cross join lateral (
     values (
       privacy_probe_prepared.raw_regex_scan_text,
-      regexp_replace(
-        privacy_probe_prepared.normalized_privacy_scan_text collate "pg_c_utf8",
-        U&'[^\\0020-\\007E[:alnum:][:space:]]',
-        '',
-        'g'
-      ),
-      regexp_replace(
-        privacy_probe_prepared.normalized_privacy_spaced_scan_text collate "pg_c_utf8",
-        U&'[^\\0020-\\007E[:alnum:][:space:]]',
-        ' ',
-        'g'
-      )
+      case
+        when plain_ascii_scan.is_plain_ascii
+          then privacy_probe_prepared.normalized_privacy_scan_text
+        else regexp_replace(
+          privacy_probe_prepared.normalized_privacy_scan_text collate "pg_c_utf8",
+          U&'[^\\0020-\\007E[:alnum:][:space:]]',
+          '',
+          'g'
+        )
+      end,
+      case
+        when plain_ascii_scan.is_plain_ascii
+          then privacy_probe_prepared.normalized_privacy_spaced_scan_text
+        else regexp_replace(
+          privacy_probe_prepared.normalized_privacy_spaced_scan_text collate "pg_c_utf8",
+          U&'[^\\0020-\\007E[:alnum:][:space:]]',
+          ' ',
+          'g'
+        )
+      end
     )
   ) privacy_probe(
     raw_regex_scan_text,
@@ -826,27 +865,11 @@ display_value_numeric_features as materialized (
     normalized_privacy_spaced_scan_text
   )
   cross join lateral (
-    select
-      max(regexp_replace(
-        mapped.mapped_text collate "pg_c_utf8",
-        U&'[^\\0020-\\007E[:alnum:][:space:]]',
-        '',
-        'g'
-      )) filter (where mapped.probe_kind = 'removed')
-        as normalized_numeric_privacy_scan_text,
-      max(regexp_replace(
-        mapped.mapped_text collate "pg_c_utf8",
-        U&'[^\\0020-\\007E[:alnum:][:space:]]',
-        ' ',
-        'g'
-      )) filter (where mapped.probe_kind = 'spaced')
-        as normalized_numeric_privacy_spaced_scan_text
-    from (
-      select
-        numeric_probe.probe_kind,
-        case
-        when octet_length(numeric_probe.scan_text) = char_length(numeric_probe.scan_text)
-          then numeric_probe.scan_text
+    values (
+      case
+        when octet_length(privacy_probe_prepared.normalized_privacy_scan_text)
+            = char_length(privacy_probe_prepared.normalized_privacy_scan_text)
+          then privacy_probe_prepared.normalized_privacy_scan_text
         else (
           select string_agg(
             case
@@ -856,20 +879,60 @@ display_value_numeric_features as materialized (
             '' order by character.character_index
           )
           from regexp_split_to_table(
-            numeric_probe.scan_text collate "pg_c_utf8",
+            privacy_probe_prepared.normalized_privacy_scan_text collate "pg_c_utf8",
             ''
           ) with ordinality character(value, character_index)
           left join unicode_decimal_digit_blocks digit
             on ascii(character.value) between digit.block_start and digit.block_start + 9
         )
-      end as mapped_text
-      from (
-        values
-          ('removed', privacy_probe_prepared.normalized_privacy_scan_text),
-          ('spaced', privacy_probe_prepared.normalized_privacy_spaced_scan_text)
-      ) numeric_probe(probe_kind, scan_text)
-    ) mapped
-  ) numeric_privacy_probe
+      end,
+      case
+        when octet_length(privacy_probe_prepared.normalized_privacy_spaced_scan_text)
+            = char_length(privacy_probe_prepared.normalized_privacy_spaced_scan_text)
+          then privacy_probe_prepared.normalized_privacy_spaced_scan_text
+        else (
+          select string_agg(
+            case
+              when digit.block_start is null then character.value
+              else chr(48 + ascii(character.value) - digit.block_start)
+            end,
+            '' order by character.character_index
+          )
+          from regexp_split_to_table(
+            privacy_probe_prepared.normalized_privacy_spaced_scan_text collate "pg_c_utf8",
+            ''
+          ) with ordinality character(value, character_index)
+          left join unicode_decimal_digit_blocks digit
+            on ascii(character.value) between digit.block_start and digit.block_start + 9
+        )
+      end
+    )
+  ) numeric_mapped_probe(removed_scan_text, spaced_scan_text)
+  cross join lateral (
+    values (
+      case
+        when plain_ascii_scan.is_plain_ascii then numeric_mapped_probe.removed_scan_text
+        else regexp_replace(
+          numeric_mapped_probe.removed_scan_text collate "pg_c_utf8",
+          U&'[^\\0020-\\007E[:alnum:][:space:]]',
+          '',
+          'g'
+        )
+      end,
+      case
+        when plain_ascii_scan.is_plain_ascii then numeric_mapped_probe.spaced_scan_text
+        else regexp_replace(
+          numeric_mapped_probe.spaced_scan_text collate "pg_c_utf8",
+          U&'[^\\0020-\\007E[:alnum:][:space:]]',
+          ' ',
+          'g'
+        )
+      end
+    )
+  ) numeric_privacy_probe(
+    normalized_numeric_privacy_scan_text,
+    normalized_numeric_privacy_spaced_scan_text
+  )
 ),
 display_value_payment_inputs as materialized (
   select
@@ -886,9 +949,10 @@ display_value_payment_inputs as materialized (
         (feature.scan_text),
         (feature.normalized_numeric_privacy_scan_text),
         (feature.normalized_numeric_privacy_spaced_scan_text)
-    ) candidate(scan_text)
+      ) candidate(scan_text)
   ) probe
-  where probe.scan_text is not null
+  where feature.ascii_digit_count >= 7
+    and probe.scan_text is not null
     and probe.scan_text ~ '^[^0-9]*[0-9]([^0-9]*[0-9]){6}'
 ),
 display_value_payment_segments_raw as materialized (
@@ -1135,25 +1199,46 @@ display_value_generic_privacy_inputs as materialized (
 ),
 display_value_generic_privacy_risks as materialized (
   select
-    input.*,
-    exists (
-      select 1
-      from (
-        select distinct
-          candidate.scan_text,
-          lower(candidate.scan_text) as lower_scan_text,
-          regexp_replace(lower(candidate.scan_text), '[^a-z0-9]', '', 'g')
-            as canonical_scan_text
+    candidate.raw_regex_scan_text,
+    candidate.normalized_privacy_scan_text,
+    candidate.normalized_privacy_spaced_scan_text,
+    candidate.normalized_numeric_privacy_scan_text,
+    candidate.normalized_numeric_privacy_spaced_scan_text
+  from (
+    select
+      input.*,
+      exists (
+        select 1
         from (
-          values
-            (input.raw_regex_scan_text),
-            (input.normalized_privacy_scan_text),
-            (input.normalized_privacy_spaced_scan_text),
-            (input.normalized_numeric_privacy_scan_text),
-            (input.normalized_numeric_privacy_spaced_scan_text)
-        ) candidate(scan_text)
-      ) privacy_scan
-      where privacy_scan.scan_text ~ '[[:cntrl:]]'
+          select
+            candidate.scan_text,
+            lower(candidate.scan_text) as lower_scan_text,
+            regexp_replace(lower(candidate.scan_text), '[^a-z0-9]', '', 'g')
+              as canonical_scan_text
+          from (
+            select input.raw_regex_scan_text as scan_text
+
+            union all
+
+            select candidate.scan_text
+            from (
+              values
+              (input.normalized_privacy_scan_text),
+              (input.normalized_privacy_spaced_scan_text),
+              (input.normalized_numeric_privacy_scan_text),
+              (input.normalized_numeric_privacy_spaced_scan_text)
+            ) candidate(scan_text)
+            where input.normalized_privacy_scan_text
+                    is distinct from input.raw_regex_scan_text
+              or input.normalized_privacy_spaced_scan_text
+                    is distinct from input.raw_regex_scan_text
+              or input.normalized_numeric_privacy_scan_text
+                    is distinct from input.raw_regex_scan_text
+              or input.normalized_numeric_privacy_spaced_scan_text
+                    is distinct from input.raw_regex_scan_text
+          ) candidate
+        ) privacy_scan
+        where privacy_scan.scan_text ~ '[[:cntrl:]]'
         or case
           when position('@' in privacy_scan.scan_text) > 0
             then privacy_scan.scan_text collate "pg_c_utf8"
@@ -1169,6 +1254,8 @@ display_value_generic_privacy_risks as materialized (
         or case
           when translate(privacy_scan.scan_text, '0123456789', '')
               <> privacy_scan.scan_text
+            and privacy_scan.scan_text
+              ~* '(^|[^[:alnum:]])(street|st|road|rd|avenue|ave|boulevard|blvd|lane|ln|drive|dr|court|ct|way|highway|hwy|place|pl|terrace|ter|trail|trl|parkway|pkwy|circle|cir|crescent|cres)($|[^[:alnum:]])'
             then regexp_replace(privacy_scan.scan_text, '[-_,.;:/\\\\]+', ' ', 'g')
               ~* '(^|[^[:alnum:]])[0-9]{1,6}[[:alpha:]]?[[:space:]]+([[:alnum:].''-]+[[:space:]]+){0,5}(street|st|road|rd|avenue|ave|boulevard|blvd|lane|ln|drive|dr|court|ct|way|highway|hwy|place|pl|terrace|ter|trail|trl|parkway|pkwy|circle|cir|crescent|cres)($|[^[:alnum:]])'
           else false
@@ -1221,8 +1308,9 @@ display_value_generic_privacy_risks as materialized (
           else false
         end
         or case
-          when position('_' in privacy_scan.scan_text) > 0
-            or position('-' in privacy_scan.scan_text) > 0
+          when position('gh' in privacy_scan.lower_scan_text) > 0
+            or position('shpat' in privacy_scan.lower_scan_text) > 0
+            or position('xox' in privacy_scan.lower_scan_text) > 0
             or position('akia' in privacy_scan.lower_scan_text) > 0
             or position('asia' in privacy_scan.lower_scan_text) > 0
             then privacy_scan.scan_text
@@ -1230,6 +1318,10 @@ display_value_generic_privacy_risks as materialized (
           else false
         end
         or case
+          when position('=' in privacy_scan.scan_text) = 0
+            and position(':' in privacy_scan.scan_text) = 0
+            and position('/' in privacy_scan.scan_text) = 0
+            then false
           when privacy_scan.canonical_scan_text collate "pg_c_utf8"
               ~ sensitive_key.family_pattern
             or position('ip' in privacy_scan.canonical_scan_text) > 0
@@ -1298,53 +1390,19 @@ display_value_generic_privacy_risks as materialized (
                   relative_userinfo.match[1] <> ':'
                   and relative_userinfo.match[1] !~ '[[:alnum:]]'
                 )
-            )
+              )
       else false
         end
-    ) as has_unsafe_text
-  from display_value_generic_privacy_inputs input
-  cross join sensitive_display_key_contract sensitive_key
+      ) as has_unsafe_text
+    from display_value_generic_privacy_inputs input
+    cross join sensitive_display_key_contract sensitive_key
+  ) candidate
+  where candidate.has_unsafe_text is true
 ),
-display_value_scanned_risks as materialized (
+display_value_unsafe_keys as materialized (
   select
-    risk.*,
-    coalesce(
-      bool_or(
-        risk.decode_failed is true
-        or (
-          risk.scan_text is not null
-          and (
-            (
-              risk.decode_pass = 3
-              and position('%' in risk.scan_text) > 0
-            )
-          or regexp_count(
-              risk.normalized_privacy_scan_text collate "pg_c_utf8",
-              '%[0-9a-f]{2}',
-              1,
-              'i'
-            ) > regexp_count(
-              risk.scan_text collate "pg_c_utf8",
-              '%[0-9a-f]{2}',
-              1,
-              'i'
-            )
-          or generic_privacy.has_unsafe_text is true
-          or risk.likely_phone is true
-          or risk.likely_payment_card is true
-          or risk.likely_ipv4 is true
-          or risk.likely_alternative_ipv4_url is true
-          or risk.scan_text
-              ~* '(^|[^a-f0-9])([a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}($|[^a-f0-9])'
-          or risk.normalized_privacy_scan_text
-              ~* '(^|[^a-f0-9])([a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}($|[^a-f0-9])'
-          )
-        )
-      ) over (
-        partition by risk.display_value_id, risk.value_key
-      ),
-      false
-    ) as has_unsafe_content
+    risk.display_value_id,
+    risk.value_key
   from display_value_risks risk
   left join display_value_generic_privacy_risks generic_privacy
     on generic_privacy.raw_regex_scan_text = risk.raw_regex_scan_text
@@ -1356,48 +1414,90 @@ display_value_scanned_risks as materialized (
       = risk.normalized_numeric_privacy_scan_text
     and generic_privacy.normalized_numeric_privacy_spaced_scan_text
       = risk.normalized_numeric_privacy_spaced_scan_text
+  where risk.decode_failed is true
+    or (
+      risk.scan_text is not null
+      and (
+        (
+          risk.decode_pass = 3
+          and position('%' in risk.scan_text) > 0
+        )
+      or regexp_count(
+          risk.normalized_privacy_scan_text collate "pg_c_utf8",
+          '%[0-9a-f]{2}',
+          1,
+          'i'
+        ) > regexp_count(
+          risk.scan_text collate "pg_c_utf8",
+          '%[0-9a-f]{2}',
+          1,
+          'i'
+        )
+      or generic_privacy.raw_regex_scan_text is not null
+      or risk.likely_phone is true
+      or risk.likely_payment_card is true
+      or risk.likely_ipv4 is true
+      or risk.likely_alternative_ipv4_url is true
+      or risk.scan_text
+          ~* '(^|[^a-f0-9])([a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}($|[^a-f0-9])'
+      or risk.normalized_privacy_scan_text
+          ~* '(^|[^a-f0-9])([a-f0-9]{0,4}:){2,}[a-f0-9:]{0,39}($|[^a-f0-9])'
+      )
+    )
+  group by risk.display_value_id, risk.value_key
 ),
 validated_display_values as materialized (
   select
-    risk.*,
+    risk.display_value_id,
+    risk.value_key,
+    feature.is_present,
+    feature.raw_text,
+    feature.dimension_kind,
+    feature.url_authority,
     coalesce(
-      jsonb_typeof(risk.raw_json) = 'string'
-      and risk.raw_text_utf16_length between 1 and risk.maximum_length
-      and risk.has_unsafe_content is not true
-      and risk.raw_text !~* '%(25)*(40|3f|23)'
+      jsonb_typeof(feature.raw_json) = 'string'
+      and feature.raw_text_utf16_length between 1 and feature.maximum_length
+      and unsafe.display_value_id is null
+      and feature.raw_text !~* '%(25)*(40|3f|23)'
       and risk.likely_ipv4 is not true
-      and position('?' in risk.raw_text) = 0
-      and position('#' in risk.raw_text) = 0
+      and position('?' in feature.raw_text) = 0
+      and position('#' in feature.raw_text) = 0
       and case
-        when risk.dimension_kind = 'event_name' then
-          risk.raw_text ~ '^[a-zA-Z0-9_.:-]+$'
-        when risk.dimension_kind = 'path' then
-          risk.raw_text ~ '^/[^?#]*$'
-          and risk.raw_text !~ '^//'
-        when risk.dimension_kind = 'url' then
-          risk.url_authority is not null
-          and risk.url_authority !~ '@'
-          and risk.url_authority
+        when feature.dimension_kind = 'event_name' then
+          feature.raw_text ~ '^[a-zA-Z0-9_.:-]+$'
+        when feature.dimension_kind = 'path' then
+          feature.raw_text ~ '^/[^?#]*$'
+          and feature.raw_text !~ '^//'
+        when feature.dimension_kind = 'url' then
+          feature.url_authority is not null
+          and feature.url_authority !~ '@'
+          and feature.url_authority
             ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[0-9]{1,5})?$'
-          and char_length(split_part(risk.url_authority, ':', 1)) <= 253
-          and split_part(risk.url_authority, ':', 1)
+          and char_length(split_part(feature.url_authority, ':', 1)) <= 253
+          and split_part(feature.url_authority, ':', 1)
             !~ '^([0-9]{1,3}\\.){3}[0-9]{1,3}$'
-          and split_part(risk.url_authority, ':', 1)
+          and split_part(feature.url_authority, ':', 1)
             !~* '^(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}$'
-          and pg_input_is_valid(split_part(risk.url_authority, ':', 1), 'inet')
+          and pg_input_is_valid(split_part(feature.url_authority, ':', 1), 'inet')
             is not true
           and case
-            when position(':' in risk.url_authority) = 0 then true
-            when split_part(risk.url_authority, ':', 2) ~ '^[0-9]{1,5}$'
-              then split_part(risk.url_authority, ':', 2)::integer between 1 and 65535
+            when position(':' in feature.url_authority) = 0 then true
+            when split_part(feature.url_authority, ':', 2) ~ '^[0-9]{1,5}$'
+              then split_part(feature.url_authority, ':', 2)::integer between 1 and 65535
             else false
           end
         else
-          risk.raw_text !~* '^https?://[^/?#]*@'
+          feature.raw_text !~* '^https?://[^/?#]*@'
       end,
       false
     ) as is_safe
-  from display_value_scanned_risks risk
+  from display_value_risks risk
+  join display_value_features feature
+    on feature.display_value_id = risk.display_value_id
+    and feature.value_key = risk.value_key
+  left join display_value_unsafe_keys unsafe
+    on unsafe.display_value_id = risk.display_value_id
+    and unsafe.value_key = risk.value_key
   where risk.decode_pass = 0
 ),
 normalized_display_value_catalog as materialized (
@@ -1565,7 +1665,17 @@ event_property_primitives as materialized (
 ),
 classified_known_events as materialized (
   select
-    event.*,
+    event.period_key,
+    event.event_id,
+    event.session_id,
+    event.anonymous_id,
+    event.event_name,
+    event.occurred_at,
+    event.properties,
+    event.client_context,
+    event.properties_have_only_finite_numbers,
+    event.display_presence,
+    event.display_values,
     (
       case
         when jsonb_typeof(event.properties) is distinct from 'object' then false
@@ -1815,7 +1925,13 @@ period_event_counts as (
   from periods period
 ),
 diagnostic_known_events as materialized (
-  select event.*
+  select
+    event.period_key,
+    event.session_id,
+    event.anonymous_id,
+    event.event_name,
+    event.property_valid,
+    event.properties_have_only_finite_numbers
   from classified_known_events event
   where (
     (
@@ -1864,14 +1980,33 @@ diagnostic_unknown_events as materialized (
   )
 ),
 classified_events as materialized (
-  select event.*
+  select
+    event.period_key,
+    event.event_id,
+    event.session_id,
+    event.anonymous_id,
+    event.event_name,
+    event.occurred_at,
+    event.properties,
+    event.display_values,
+    event.property_valid,
+    event.has_ready_made_item
   from classified_known_events event
   join filtered_session_context session
     on session.period_key = event.period_key
    and session.session_id = event.session_id
 ),
 events as materialized (
-  select *
+  select
+    period_key,
+    event_id,
+    session_id,
+    anonymous_id,
+    event_name,
+    occurred_at,
+    properties,
+    display_values,
+    has_ready_made_item
   from classified_events
   where property_valid is true
 ),

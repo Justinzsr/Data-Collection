@@ -1,10 +1,17 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   captureChromiumVersion,
+  normalizeVitestFailureEnvelope,
   validatePlaywrightReport,
 } from "../../../scripts/ci/funnel-overview-evidence.mjs";
 
@@ -24,6 +31,47 @@ const migrationFilenames = [
   "0009_website_event_contract_v1.sql",
   "0010_rebuild_authoritative_website_metrics.sql",
 ] as const;
+const postgresTestPath = path.resolve(
+  "tests/unit/storage/website-funnel-postgres-integration.test.ts",
+);
+const scaleTestTitle = "keeps the fixed privacy aggregate within its timeout";
+
+function failedVitestReport(input: {
+  title?: string;
+  duration?: number;
+  failureMessages?: string[];
+  fileName?: string;
+  fileMessage?: string;
+  includeAssertion?: boolean;
+} = {}) {
+  const includeAssertion = input.includeAssertion ?? true;
+  return {
+    success: false,
+    numTotalTests: 1,
+    numPassedTests: 0,
+    numFailedTests: includeAssertion ? 1 : 0,
+    numPendingTests: includeAssertion ? 0 : 1,
+    numTodoTests: 0,
+    testResults: [{
+      name: input.fileName ?? postgresTestPath,
+      status: "failed",
+      message: input.fileMessage ?? "",
+      assertionResults: includeAssertion
+        ? [{
+            title: input.title ?? scaleTestTitle,
+            status: "failed",
+            duration: input.duration ?? 20,
+            failureMessages: input.failureMessages ?? ["Error: synthetic failure"],
+          }]
+        : [{
+            title: input.title ?? scaleTestTitle,
+            status: "skipped",
+            duration: 0,
+            failureMessages: [],
+          }],
+    }],
+  };
+}
 
 function browserFixture(overrides: {
   browserName?: string;
@@ -148,6 +196,296 @@ function runAssembly(
   });
   return { temporaryDirectory, outputPath, result };
 }
+
+describe("Vitest failure evidence", () => {
+  it.each([
+    {
+      label: "ordinary test timeout",
+      report: failedVitestReport({
+        duration: 5_001,
+        failureMessages: ["Error: Test timed out in 5000ms."],
+      }),
+      category: "test_timeout",
+    },
+    {
+      label: "Vitest JSON timeout sentinel",
+      report: failedVitestReport({
+        duration: 5_025,
+        failureMessages: ["Error: STACK_TRACE_ERROR\n    at synthetic-internal-frame"],
+      }),
+      category: "test_timeout",
+    },
+    {
+      label: "database statement timeout",
+      report: failedVitestReport({
+        failureMessages: [
+          "database error: canceling statement due to statement timeout; raw SQL omitted",
+        ],
+      }),
+      category: "database_statement_timeout",
+    },
+    {
+      label: "assertion failure",
+      report: failedVitestReport({
+        failureMessages: [
+          "AssertionError: expected synthetic result to equal another synthetic result",
+        ],
+      }),
+      category: "assertion",
+    },
+    {
+      label: "setup or hook failure",
+      report: failedVitestReport({
+        includeAssertion: false,
+        fileMessage: "synthetic beforeAll failure",
+      }),
+      category: "setup_or_hook",
+    },
+  ])("classifies a $label without returning raw diagnostics", ({ report, category }) => {
+    const envelope = normalizeVitestFailureEnvelope("postgresql", report);
+
+    expect(envelope).toEqual({
+      stage: "postgresql",
+      test_file: "website-funnel-postgres-integration.test.ts",
+      test_title: category === "setup_or_hook" ? null : scaleTestTitle,
+      failure_count: 1,
+      category,
+    });
+    const serialized = JSON.stringify(envelope);
+    expect(serialized).not.toContain("synthetic");
+    expect(serialized).not.toContain("statement due");
+    expect(serialized).not.toContain("STACK_TRACE_ERROR");
+  });
+
+  it("treats an unrecognized failed assertion as unknown", () => {
+    const report = failedVitestReport({
+      failureMessages: ["Error: synthetic runtime failure"],
+    });
+
+    expect(normalizeVitestFailureEnvelope("postgresql", report)).toEqual({
+      stage: "postgresql",
+      test_file: "website-funnel-postgres-integration.test.ts",
+      test_title: scaleTestTitle,
+      failure_count: 1,
+      category: "unknown",
+    });
+  });
+
+  it("does not treat a sub-timeout stack sentinel as a test timeout", () => {
+    const report = failedVitestReport({
+      duration: 4_999,
+      failureMessages: ["Error: STACK_TRACE_ERROR\n    at synthetic-internal-frame"],
+    });
+
+    expect(normalizeVitestFailureEnvelope("postgresql", report)).toEqual({
+      stage: "postgresql",
+      test_file: "website-funnel-postgres-integration.test.ts",
+      test_title: scaleTestTitle,
+      failure_count: 1,
+      category: "unknown",
+    });
+  });
+
+  it("requires the timeout stack sentinel to be the first line", () => {
+    const report = failedVitestReport({
+      duration: 5_025,
+      failureMessages: [
+        "Error: synthetic runtime failure\nError: STACK_TRACE_ERROR",
+      ],
+    });
+
+    expect(normalizeVitestFailureEnvelope("postgresql", report)).toEqual({
+      stage: "postgresql",
+      test_file: "website-funnel-postgres-integration.test.ts",
+      test_title: scaleTestTitle,
+      failure_count: 1,
+      category: "unknown",
+    });
+  });
+
+  it("fails closed to unknown for mixed failure categories", () => {
+    const report = failedVitestReport({
+      failureMessages: ["AssertionError: synthetic mismatch"],
+    });
+    report.numTotalTests = 2;
+    report.numPendingTests = 1;
+    report.testResults.push({
+      name: postgresTestPath,
+      status: "failed",
+      message: "synthetic setup failure",
+      assertionResults: [{
+        title: scaleTestTitle,
+        status: "skipped",
+        duration: 0,
+        failureMessages: [],
+      }],
+    });
+
+    expect(normalizeVitestFailureEnvelope("postgresql", report)).toEqual({
+      stage: "postgresql",
+      test_file: null,
+      test_title: null,
+      failure_count: 2,
+      category: "unknown",
+    });
+  });
+
+  it("counts the actual beforeAll report shape as one setup or hook failure", () => {
+    const report = failedVitestReport({
+      includeAssertion: false,
+      fileMessage: "synthetic beforeAll failure",
+    });
+
+    expect(report).toMatchObject({
+      numTotalTests: 1,
+      numFailedTests: 0,
+      numPendingTests: 1,
+      testResults: [{ status: "failed" }],
+    });
+    expect(normalizeVitestFailureEnvelope("postgresql", report)).toEqual({
+      stage: "postgresql",
+      test_file: "website-funnel-postgres-integration.test.ts",
+      test_title: null,
+      failure_count: 1,
+      category: "setup_or_hook",
+    });
+  });
+
+  it("withholds unvalidated file and title values", () => {
+    const rawPathSentinel = "private-path-sentinel.test.ts";
+    const rawTitleSentinel = "private-title-sentinel";
+    const rawMessageSentinel = "private-message-sentinel";
+    const report = failedVitestReport({
+      fileName: path.join(tmpdir(), rawPathSentinel),
+      title: rawTitleSentinel,
+      failureMessages: [rawMessageSentinel],
+    });
+    const serialized = JSON.stringify(
+      normalizeVitestFailureEnvelope("postgresql", report),
+    );
+
+    expect(JSON.parse(serialized)).toEqual({
+      stage: "postgresql",
+      test_file: null,
+      test_title: null,
+      failure_count: 1,
+      category: "unknown",
+    });
+    for (const sentinel of [rawPathSentinel, rawTitleSentinel, rawMessageSentinel]) {
+      expect(serialized).not.toContain(sentinel);
+    }
+  });
+
+  it("rejects report count and failure-message shape mismatches generically", () => {
+    const countMismatch = failedVitestReport();
+    countMismatch.numFailedTests = 0;
+    countMismatch.numPendingTests = 1;
+    const rawCountSentinel = "private-count-sentinel";
+    countMismatch.testResults[0]!.assertionResults[0]!.failureMessages = [
+      rawCountSentinel,
+    ];
+    const countError = (() => {
+      try {
+        normalizeVitestFailureEnvelope("postgresql", countMismatch);
+      } catch (error) {
+        return error;
+      }
+      return null;
+    })();
+    expect(countError).toBeInstanceOf(Error);
+    expect(String(countError)).toContain("totals do not reconcile");
+    expect(String(countError)).not.toContain(rawCountSentinel);
+
+    const messageMismatch = failedVitestReport();
+    const rawShapeSentinel = "private-shape-sentinel";
+    messageMismatch.testResults[0]!.assertionResults[0]!.failureMessages = [
+      rawShapeSentinel,
+      ...Array.from({ length: 100 }, () => "synthetic"),
+    ];
+    const shapeError = (() => {
+      try {
+        normalizeVitestFailureEnvelope("postgresql", messageMismatch);
+      } catch (error) {
+        return error;
+      }
+      return null;
+    })();
+    expect(shapeError).toBeInstanceOf(Error);
+    expect(String(shapeError)).toContain("invalid or unbounded shape");
+    expect(String(shapeError)).not.toContain(rawShapeSentinel);
+  });
+
+  it("prints only the sanitized envelope and creates no summary on CLI failure", () => {
+    const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "vitest-failure-envelope-"));
+    const rawReportPath = path.join(temporaryDirectory, "raw.json");
+    const metadataPath = path.join(temporaryDirectory, "metadata.json");
+    const summaryPath = path.join(temporaryDirectory, "summary.json");
+    const rawSentinels = [
+      ["private-person", "example.invalid"].join("@"),
+      ["https:", "//private.invalid/referrer?fixture=raw"].join(""),
+      ["postgresql:", "//private.invalid/fixture"].join(""),
+      ["DATABASE", "_URL=private-value"].join(""),
+      ["Authorization", ": Bearer private-token-value"].join(""),
+      "select private_value from private_fixture",
+      JSON.stringify({ anonymous_id: "private-browser-identifier" }),
+      "00000000-0000-4000-8000-000000000000",
+    ];
+    const rawReport = failedVitestReport({
+      duration: 5_025,
+      fileMessage: rawSentinels[5],
+      failureMessages: [
+        `Error: STACK_TRACE_ERROR\n${rawSentinels.join("\n")}`,
+      ],
+    });
+    Object.assign(rawReport.testResults[0]!.assertionResults[0]!, {
+      fullName: rawSentinels[0],
+      ancestorTitles: [rawSentinels[1]],
+      location: { line: 1, column: 1, source: rawSentinels[2] },
+      meta: { fixture: rawSentinels[6] },
+      tags: [rawSentinels[3]],
+    });
+    writeFileSync(rawReportPath, JSON.stringify(rawReport));
+
+    try {
+      const result = spawnSync(process.execPath, [
+        evidenceScript,
+        "summarize-vitest",
+        "postgresql",
+        rawReportPath,
+        metadataPath,
+        summaryPath,
+      ], {
+        cwd: path.resolve("."),
+        encoding: "utf8",
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toBe("");
+      expect(JSON.parse(result.stderr)).toEqual({
+        stage: "postgresql",
+        test_file: "website-funnel-postgres-integration.test.ts",
+        test_title: scaleTestTitle,
+        failure_count: 1,
+        category: "test_timeout",
+      });
+      const processOutput = `${result.stdout}${result.stderr}`;
+      for (const sentinel of rawSentinels) expect(processOutput).not.toContain(sentinel);
+      for (const transientPath of [
+        temporaryDirectory,
+        rawReportPath,
+        metadataPath,
+        summaryPath,
+      ]) {
+        expect(processOutput).not.toContain(transientPath);
+      }
+      expect(() => readFileSync(summaryPath)).toThrow();
+      expect(() => readFileSync(metadataPath)).toThrow();
+      expect(() => readFileSync(path.join(temporaryDirectory, "artifact.json"))).toThrow();
+      expect(readdirSync(temporaryDirectory)).toEqual(["raw.json"]);
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("Chromium binary evidence", () => {
   it("captures the actual canonical version and closes the browser exactly once", async () => {

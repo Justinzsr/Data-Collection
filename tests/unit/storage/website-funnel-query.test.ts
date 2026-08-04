@@ -245,6 +245,26 @@ describe("Website funnel aggregate SQL", () => {
     const referenceStart = sql.indexOf("display_value_references as materialized");
     const referenceEnd = sql.indexOf("display_value_features as materialized");
     const referenceSql = sql.slice(referenceStart, referenceEnd);
+    const decodedValueStart = sql.indexOf("display_value_decoded_variants as");
+    const numericValueStart = sql.indexOf(
+      "display_value_numeric_features as materialized",
+    );
+    const paymentInputStart = sql.indexOf(
+      "display_value_payment_inputs as materialized",
+    );
+    const genericRiskStart = sql.indexOf(
+      "display_value_generic_privacy_risks as materialized",
+    );
+    const unsafeKeyStart = sql.indexOf("display_value_unsafe_keys as materialized");
+    const validatedValueStart = sql.indexOf("validated_display_values as materialized");
+    const normalizedCatalogStart = sql.indexOf(
+      "normalized_display_value_catalog as materialized",
+    );
+    const genericRiskSql = sql.slice(genericRiskStart, unsafeKeyStart);
+    const decodedValueSql = sql.slice(decodedValueStart, numericValueStart);
+    const numericValueSql = sql.slice(numericValueStart, paymentInputStart);
+    const unsafeKeySql = sql.slice(unsafeKeyStart, validatedValueStart);
+    const validatedValueSql = sql.slice(validatedValueStart, normalizedCatalogStart);
 
     for (const cte of [
       "raw_display_values as materialized",
@@ -260,6 +280,8 @@ describe("Website funnel aggregate SQL", () => {
       "display_value_payment_prefixes as materialized",
       "display_value_payment_risks as materialized",
       "display_value_risks as materialized",
+      "display_value_generic_privacy_risks as materialized",
+      "display_value_unsafe_keys as materialized",
       "validated_display_values as materialized",
       "normalized_display_value_catalog as materialized",
       "normalized_display_values as materialized",
@@ -267,7 +289,68 @@ describe("Website funnel aggregate SQL", () => {
     ]) {
       expect(sql).toContain(cte);
     }
-    expect(sql).toContain("risk.raw_text !~* '%(25)*(40|3f|23)'");
+    expect(sql).toContain(
+      "all_events as materialized ( select period_key, event_id, session_id, anonymous_id, event_name, occurred_at, referrer, properties, attribution_context, client_context",
+    );
+    expect(sql).toContain(
+      "unknown_event_rows as materialized ( select period_key, event_id, session_id, event_name",
+    );
+    expect(sql).toContain(
+      "events as materialized ( select period_key, event_id, session_id, anonymous_id, event_name, occurred_at, properties, display_values, has_ready_made_item from classified_events",
+    );
+    expect(genericRiskSql).toContain("where candidate.has_unsafe_text is true");
+    expect(genericRiskSql).toContain(
+      "select input.raw_regex_scan_text as scan_text union all select candidate.scan_text",
+    );
+    expect(genericRiskSql).toContain(
+      "is distinct from input.raw_regex_scan_text",
+    );
+    expect(genericRiskSql).toContain(
+      "position('gh' in privacy_scan.lower_scan_text) > 0",
+    );
+    expect(genericRiskSql).toContain(
+      "when position('=' in privacy_scan.scan_text) = 0 and position(':' in privacy_scan.scan_text) = 0 and position('/' in privacy_scan.scan_text) = 0 then false",
+    );
+    expect(decodedValueSql).toContain(
+      "select feature.display_value_id, feature.value_key, 0::integer as decode_pass",
+    );
+    expect(decodedValueSql).toContain(
+      "select variant.display_value_id, variant.value_key, variant.decode_pass + 1",
+    );
+    expect(decodedValueSql).not.toContain("variant.raw_json");
+    expect(numericValueSql).not.toContain("feature.*");
+    expect(numericValueSql).toContain(
+      "and normalized_scan.trimmed_text !~ '[[:cntrl:]]'",
+    );
+    expect(numericValueSql).toContain(
+      "position('.' in coalesce(feature.scan_text, '')) > 0",
+    );
+    expect(numericValueSql).toContain(
+      "position(':' in numeric_privacy_probe.normalized_numeric_privacy_scan_text) > 0",
+    );
+    expect(unsafeKeySql).toContain(
+      "select risk.display_value_id, risk.value_key from display_value_risks risk left join display_value_generic_privacy_risks generic_privacy",
+    );
+    expect(unsafeKeySql).toContain(
+      "or generic_privacy.raw_regex_scan_text is not null",
+    );
+    expect(unsafeKeySql).toContain(
+      "group by risk.display_value_id, risk.value_key",
+    );
+    expect(unsafeKeySql).not.toContain("bool_or(");
+    expect(validatedValueSql).toContain(
+      "select risk.display_value_id, risk.value_key, feature.is_present, feature.raw_text, feature.dimension_kind, feature.url_authority, coalesce(",
+    );
+    expect(validatedValueSql).toContain("and unsafe.display_value_id is null");
+    expect(validatedValueSql).toContain(
+      "left join display_value_unsafe_keys unsafe on unsafe.display_value_id = risk.display_value_id and unsafe.value_key = risk.value_key",
+    );
+    expect(validatedValueSql).not.toContain("risk.*");
+    expect(validatedValueSql).toContain(
+      "join display_value_features feature on feature.display_value_id = risk.display_value_id and feature.value_key = risk.value_key",
+    );
+    expect(sql).not.toContain("display_value_scanned_risks");
+    expect(sql).toContain("feature.raw_text !~* '%(25)*(40|3f|23)'");
     expect(sql).toContain("risk.likely_ipv4 is not true");
     expect(sql).toContain(
       "coalesce(feature.scan_text, '') collate \"pg_c_utf8\" ~ '(?=(?<![0-9])",
@@ -281,7 +364,7 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+)){0,3}");
     expect(sql).toContain("feature.scan_text collate \"pg_c_utf8\" ~ '(?:\\+");
     expect(sql).toContain("or feature.normalized_numeric_privacy_scan_text collate \"pg_c_utf8\" ~ '(?:\\+");
-    expect(sql).toContain("lower(coalesce(feature.raw_text, '')) ~ '^https?://[^/?#]+(/[^?#]*)?$'");
+    expect(sql).toContain("lower(coalesce(normalized.raw_text, '')) ~ '^https?://[^/?#]+(/[^?#]*)?$'");
     expect(sql).toContain("false as decode_failed");
     expect(sql).toContain("decoded.decode_valid is not true as decode_failed");
     expect(sql).toContain("convert_from(decode(encoded.hex_text, 'hex'), 'utf8')");
@@ -294,9 +377,9 @@ describe("Website funnel aggregate SQL", () => {
     expect(sql).toContain("u&'\\a7f1\\+01ccd6");
     expect(sql).toContain("normalized_privacy_spaced_scan_text");
     expect(sql).toContain("unicode_decimal_digit_blocks(block_start) as materialized");
-    expect(sql).toContain("when octet_length(numeric_probe.scan_text) = char_length(numeric_probe.scan_text)");
-    expect(sql).toContain("('removed', privacy_probe_prepared.normalized_privacy_scan_text)");
-    expect(sql).toContain("('spaced', privacy_probe_prepared.normalized_privacy_spaced_scan_text)");
+    expect(sql).toContain("when octet_length(privacy_probe_prepared.normalized_privacy_scan_text) = char_length(privacy_probe_prepared.normalized_privacy_scan_text)");
+    expect(sql).toContain("when octet_length(privacy_probe_prepared.normalized_privacy_spaced_scan_text) = char_length(privacy_probe_prepared.normalized_privacy_spaced_scan_text)");
+    expect(sql).toContain(") numeric_mapped_probe(removed_scan_text, spaced_scan_text)");
     expect(sql).toContain("normalized_numeric_privacy_spaced_scan_text");
     expect(sql).toContain("u&'[^\\0020-\\007e[:alnum:][:space:]]'");
     expect(sql).toContain("u&'[\\00ad\\034f\\0600-\\0605\\061c");
@@ -354,6 +437,7 @@ describe("Website funnel aggregate SQL", () => {
       "unnest( regexp_split_to_array(candidate.match[1], '[0-9]{20,}') )",
     );
     expect(sql).toContain("values (feature.scan_text), (feature.normalized_numeric_privacy_scan_text), (feature.normalized_numeric_privacy_spaced_scan_text)");
+    expect(sql).toContain("where feature.ascii_digit_count >= 7 and probe.scan_text is not null");
     expect(sql).toContain("probe.scan_text ~ '^[^0-9]*[0-9]([^0-9]*[0-9]){6}'");
     expect(sql).toContain("display_value_phone_risks as materialized");
     expect(sql).toContain("run.match[1] as run_digits");

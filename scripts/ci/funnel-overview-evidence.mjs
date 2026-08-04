@@ -22,6 +22,23 @@ const REQUIRED_VIEWPORT_WIDTHS = [1440, 1024, 768, 390, 360, 320];
 const REQUIRED_PLAYWRIGHT_PROJECTS = ["chromium", "mobile"];
 const POSTGRES_INTEGRATION_TEST_SUFFIX =
   "/tests/unit/storage/website-funnel-postgres-integration.test.ts";
+const POSTGRES_INTEGRATION_TEST_BASENAME =
+  "website-funnel-postgres-integration.test.ts";
+const POSTGRES_FAILURE_TITLES = new Set([
+  "keeps PostgreSQL payment-span separators exhaustive with the frozen Unicode 17 contract",
+  "executes the fixed query and preserves strict first-party semantics",
+  "normalizes unsafe historical display dimensions before aggregate output",
+  "rejects missing, null, whitespace, and mixed item arrays without SQL NULL escapes",
+  "keeps every tied earliest page-view context for conflict normalization",
+  "matches recursive ECMAScript finite-number semantics for raw JSONB page-view properties",
+  "projects top-level attribution and rejects recursive overflow before funnel classification",
+  "matches ECMAScript trimming for commerce, signup, and ready-made classification",
+  "keeps the fixed privacy aggregate within its timeout",
+]);
+const VITEST_DEFAULT_TEST_TIMEOUT_MS = 5_000;
+const MAX_VITEST_ASSERTIONS = 100_000;
+const MAX_VITEST_FAILURE_MESSAGES = 100;
+const MAX_VITEST_FAILURE_MESSAGE_LENGTH = 256 * 1024;
 const EXPECTED_MIGRATIONS = [
   "0001_initial.sql",
   "0002_reporting_layer.sql",
@@ -263,6 +280,176 @@ function vitestCounts(report) {
   };
 }
 
+function validatedVitestFailureFile(kind, fileResult) {
+  if (kind !== "postgresql" || typeof fileResult?.name !== "string") return null;
+  const expectedPath = path.join(
+    repoRoot,
+    "tests/unit/storage/website-funnel-postgres-integration.test.ts",
+  );
+  const resolvedPath = path.resolve(repoRoot, fileResult.name);
+  return resolvedPath === expectedPath ? POSTGRES_INTEGRATION_TEST_BASENAME : null;
+}
+
+function validatedVitestAssertion(assertion) {
+  if (
+    !assertion
+    || typeof assertion !== "object"
+    || Array.isArray(assertion)
+    || typeof assertion.title !== "string"
+    || assertion.title.length === 0
+    || assertion.title.length > 500
+    || !["passed", "failed", "skipped", "pending", "todo", "disabled"]
+      .includes(assertion.status)
+    || !Array.isArray(assertion.failureMessages)
+    || assertion.failureMessages.length > MAX_VITEST_FAILURE_MESSAGES
+    || assertion.failureMessages.some((message) => (
+      typeof message !== "string"
+      || message.length > MAX_VITEST_FAILURE_MESSAGE_LENGTH
+    ))
+    || (
+      assertion.duration !== undefined
+      && assertion.duration !== null
+      && (!Number.isFinite(assertion.duration) || assertion.duration < 0)
+    )
+  ) {
+    fail("Vitest assertion results have an invalid or unbounded shape.");
+  }
+  return assertion;
+}
+
+function validatedVitestFileResult(fileResult, maximumAssertions) {
+  if (
+    !fileResult
+    || typeof fileResult !== "object"
+    || Array.isArray(fileResult)
+    || typeof fileResult.name !== "string"
+    || fileResult.name.length === 0
+    || fileResult.name.length > 4_096
+    || !["passed", "failed"].includes(fileResult.status)
+    || typeof fileResult.message !== "string"
+    || fileResult.message.length > MAX_VITEST_FAILURE_MESSAGE_LENGTH
+    || !Array.isArray(fileResult.assertionResults)
+    || fileResult.assertionResults.length > maximumAssertions
+  ) {
+    fail("Vitest file results have an invalid or unbounded shape.");
+  }
+  return fileResult.assertionResults.map(validatedVitestAssertion);
+}
+
+function failureMessages(assertion, fileResult) {
+  return [
+    ...(assertion?.failureMessages ?? []),
+    ...(fileResult.message.length > 0 ? [fileResult.message] : []),
+  ];
+}
+
+function firstFailureLine(message) {
+  return message.split(/\r?\n/u, 1)[0];
+}
+
+function classifyVitestFailure(assertion, fileResult, validatedTitle) {
+  const messages = failureMessages(assertion, fileResult);
+  if (messages.some((message) => (
+    message.toLowerCase().includes("canceling statement due to statement timeout")
+  ))) {
+    return "database_statement_timeout";
+  }
+  if (
+    assertion
+    && messages.some((message) => (
+      /^Error: Test timed out in [0-9]+ms\.$/u.test(firstFailureLine(message))
+    ))
+  ) {
+    return "test_timeout";
+  }
+  if (
+    assertion
+    && validatedTitle !== null
+    && Number.isFinite(assertion.duration)
+    && assertion.duration >= VITEST_DEFAULT_TEST_TIMEOUT_MS
+    && messages.some((message) => (
+      firstFailureLine(message) === "Error: STACK_TRACE_ERROR"
+    ))
+  ) {
+    return "test_timeout";
+  }
+  if (!assertion) return "setup_or_hook";
+  if (messages.some((message) => (
+    /^AssertionError(?: \[[A-Z0-9_]+\])?:/u.test(firstFailureLine(message))
+  ))) {
+    return "assertion";
+  }
+  return "unknown";
+}
+
+export function normalizeVitestFailureEnvelope(kind, report) {
+  if (!["quality", "postgresql"].includes(kind)) {
+    fail("Unknown Vitest evidence kind.");
+  }
+  const tests = vitestCounts(report);
+  if (report.success !== false) {
+    fail("Vitest failure evidence does not describe a failed run.");
+  }
+  const failures = [];
+  let assertionCount = 0;
+  let failedAssertionCount = 0;
+  for (const fileResult of report.testResults) {
+    const testFile = validatedVitestFailureFile(kind, fileResult);
+    const assertions = validatedVitestFileResult(
+      fileResult,
+      Math.min(tests.total, MAX_VITEST_ASSERTIONS),
+    );
+    assertionCount += assertions.length;
+    if (assertionCount > MAX_VITEST_ASSERTIONS) {
+      fail("Vitest assertion results are unbounded.");
+    }
+    const failedAssertions = assertions.filter((assertion) => assertion?.status === "failed");
+    failedAssertionCount += failedAssertions.length;
+    if (failedAssertions.length > 0 && fileResult.status !== "failed") {
+      fail("Vitest failed assertions do not match their file result.");
+    }
+    for (const assertion of failedAssertions) {
+      const testTitle = testFile !== null
+        && typeof assertion?.title === "string"
+        && POSTGRES_FAILURE_TITLES.has(assertion.title)
+        ? assertion.title
+        : null;
+      failures.push({
+        testFile,
+        testTitle,
+        category: classifyVitestFailure(assertion, fileResult, testTitle),
+      });
+    }
+    if (fileResult?.status === "failed" && failedAssertions.length === 0) {
+      failures.push({
+        testFile,
+        testTitle: null,
+        category: classifyVitestFailure(null, fileResult, null),
+      });
+    }
+  }
+
+  if (assertionCount !== tests.total || failedAssertionCount !== tests.failed) {
+    fail("Vitest assertion totals do not reconcile with file results.");
+  }
+
+  const categories = new Set(failures.map((failure) => failure.category));
+  const reconciles = failures.length > 0;
+  const singularFailure = reconciles && failures.length === 1 ? failures[0] : null;
+  const envelope = {
+    stage: kind,
+    test_file: singularFailure?.testFile ?? null,
+    test_title: singularFailure?.testTitle ?? null,
+    failure_count: failures.length,
+    category: reconciles && categories.size === 1
+      ? failures[0].category
+      : "unknown",
+  };
+  const serialized = JSON.stringify(envelope);
+  assertArtifactSafe(serialized);
+  return envelope;
+}
+
 function assertOnlyExpectedQualitySkips(report, expectedSkipped) {
   let observedSkipped = 0;
   for (const fileResult of report.testResults) {
@@ -297,7 +484,7 @@ function summarizeVitest(kind, rawReportPath, metadataPath, outputPath) {
     || tests.passed === 0
     || tests.failed !== 0
   ) {
-    fail("Vitest did not complete successfully.");
+    fail(JSON.stringify(normalizeVitestFailureEnvelope(kind, report)));
   }
 
   const common = {
