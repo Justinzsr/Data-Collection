@@ -12,12 +12,13 @@ function webEvent(
   url: string,
   occurredAt = "2026-07-15T20:00:00.000Z",
   sourceId = "website-source",
+  eventSource: WebEvent["event_source"] = "first_party_tracker",
 ): WebEvent {
   return {
     id,
     event_id: id,
     schema_version: "legacy",
-    event_source: "first_party_tracker",
+    event_source: eventSource,
     source_id: sourceId,
     public_tracking_key: null,
     anonymous_id: anonymousId,
@@ -61,6 +62,15 @@ describe("web event UTM aggregation", () => {
       webEvent("wrong", "visitor-3", { attribution: { utm: { ...MOONARQ_FIRST_STORY_UTM, content: "feed_v1" } } }, "https://www.moonarqstudio.com/core-collection"),
       webEvent("partial-conflict", "visitor-4", { attribution: { utm: { source: "instagram" } } }, "https://www.moonarqstudio.com/core-collection?utm_source=facebook&utm_medium=paid_social&utm_campaign=bracelet_grid_jul2026&utm_content=story_v1"),
       webEvent("anonymous", "", { attribution: { utm: MOONARQ_FIRST_STORY_UTM } }, "https://www.moonarqstudio.com/core-collection"),
+      webEvent(
+        "drain",
+        "drain-visitor",
+        { attribution: { utm: MOONARQ_FIRST_STORY_UTM } },
+        "https://www.moonarqstudio.com/core-collection",
+        "2026-07-15T20:00:00.000Z",
+        "website-source",
+        "vercel_drain",
+      ),
     );
 
     const counts = await countWebPageViewsByUtm({
@@ -91,6 +101,15 @@ describe("web event UTM aggregation", () => {
       webEvent("return-7-day-seven", "return-7", {}, plainUrl, "2026-07-09T20:00:00.000Z"),
       webEvent("no-return-touch", "no-return", exactProperties, landingUrl, "2026-07-03T20:00:00.000Z"),
       webEvent("no-return-same-day", "no-return", {}, plainUrl, "2026-07-03T22:00:00.000Z"),
+      webEvent(
+        "no-return-drain",
+        "no-return",
+        {},
+        plainUrl,
+        "2026-07-04T20:00:00.000Z",
+        "website-source",
+        "vercel_drain",
+      ),
       webEvent("no-return-other-source", "no-return", {}, plainUrl, "2026-07-04T20:00:00.000Z", "other-source"),
       webEvent("one-day-only-touch", "one-day-only", exactProperties, landingUrl, "2026-07-10T20:00:00.000Z"),
       webEvent("one-day-only-return", "one-day-only", {}, plainUrl, "2026-07-11T20:00:00.000Z"),

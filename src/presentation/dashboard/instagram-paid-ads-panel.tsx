@@ -89,7 +89,7 @@ export function InstagramPaidAdsPanel({ summary, instagramSourceId, dataSpaceSlu
   const utm = summary.campaign.utm;
 
   return (
-    <section className="min-w-0 rounded-xl border border-fuchsia-300/15 bg-fuchsia-300/[0.035] p-3 sm:p-4" data-testid="instagram-paid-ads-panel">
+    <section className="min-w-0 rounded-xl border border-fuchsia-300/15 bg-fuchsia-300/[0.035] p-3 [&_a]:!min-h-11 [&_button]:!min-h-11 sm:p-4" data-testid="instagram-paid-ads-panel">
       <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -167,7 +167,12 @@ export function InstagramPaidAdsPanel({ summary, instagramSourceId, dataSpaceSlu
             <div className="grid h-32 place-items-center rounded-lg border border-white/10 bg-black/20 px-4 text-center">
               <div>
                 <p className="text-sm font-medium text-slate-200">{emptyStateCopy(summary)[0]}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{emptyStateCopy(summary)[1]}</p>
+                <p
+                  className="mt-1 text-xs leading-5 text-[var(--muted)]"
+                  data-contrast-normal-text="paid-empty-state"
+                >
+                  {emptyStateCopy(summary)[1]}
+                </p>
               </div>
             </div>
           )}
@@ -313,17 +318,32 @@ export function InstagramPaidAdsPanel({ summary, instagramSourceId, dataSpaceSlu
             <div className="rounded-lg border border-indigo-300/15 bg-indigo-300/[0.05] p-3">
             <p className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-indigo-200"><Megaphone className="h-3 w-3" /> Meta reported</p>
             <p className="mt-2 text-sm text-slate-200">{stateText(summary.funnel.metaPurchases)} purchases · {stateText(summary.outcomes.metaPurchaseValue)}</p>
-            <p className="mt-1 text-[11px] leading-5 text-slate-500">Includes Meta&apos;s selected click/view attribution window.</p>
+            <p
+              className="mt-1 text-[11px] leading-5 text-[var(--muted)]"
+              data-contrast-normal-text="paid-attribution-reconciliation"
+            >
+              Includes Meta&apos;s selected click/view attribution window.
+            </p>
             </div>
             <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.05] p-3">
             <p className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-cyan-200"><MousePointerClick className="h-3 w-3" /> UTM observed</p>
             <p className="mt-2 text-sm text-slate-200">{summary.observed.utmVisitors} visitors · {summary.observed.utmPageViews} page views</p>
-            <p className="mt-1 text-[11px] leading-5 text-slate-500">Exact first-party campaign/content tuple from Vercel Drain.</p>
+            <p
+              className="mt-1 text-[11px] leading-5 text-[var(--muted)]"
+              data-contrast-normal-text="paid-attribution-reconciliation"
+            >
+              Exact campaign/content tuple from the first-party Website Tracker.
+            </p>
             </div>
             <div className="rounded-lg border border-emerald-300/15 bg-emerald-300/[0.05] p-3">
             <p className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-emerald-200"><ShoppingCart className="h-3 w-3" /> Shopify matched</p>
             <p className="mt-2 text-sm text-slate-200">{stateText(summary.outcomes.attributedOrders)} orders · {stateText(summary.outcomes.attributedNetRevenue)}</p>
-            <p className="mt-1 text-[11px] leading-5 text-slate-500">Exact last-visit UTM; refunds are reflected in net payment.</p>
+            <p
+              className="mt-1 text-[11px] leading-5 text-[var(--muted)]"
+              data-contrast-normal-text="paid-attribution-reconciliation"
+            >
+              Exact last-visit UTM; refunds are reflected in net payment.
+            </p>
             </div>
           </div>
           <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-4">

@@ -28,6 +28,30 @@ Website event-day grouping uses `occurred_at`, not `received_at`. Idempotent dup
 
 Vercel Drain events remain available as auxiliary request and infrastructure evidence but must not be added to these first-party funnel totals. Raw first-party events are retained even when Drain reports a related request.
 
+### MoonArq Storefront funnel V1
+
+The MoonArq Overview derives an on-demand, first-party, distinct-session funnel
+from valid Contract V1 events:
+
+1. `page_view`
+2. `view_item` or `build_start` strictly after the visit
+3. `add_to_cart` strictly after product intent
+4. `begin_checkout` strictly after add to cart
+
+Repeated events count once per session at each stage. Progression requires
+`occurred_at` to be strictly greater than the preceding stage timestamp;
+equal-time, skipped, and out-of-order signals are excluded from the monotonic
+funnel and disclosed separately. Stage rates use starting or immediately
+preceding distinct-session counts as documented in
+[MoonArq Website Funnel Overview V1](website-funnel-overview-v1.md).
+
+Ready-made uses `page_view -> view_item -> add_to_cart -> begin_checkout`.
+Build starts, completions, and saves are separate outcomes; builder cart and
+checkout are not measured until a reliable shared identity/order contract is
+proven. `email_signup` is Website engagement, not a confirmed persisted
+subscriber. Shopify orders and revenue remain separately labelled commerce
+outcomes and are never presented as a session-linked fifth stage.
+
 ## Source-of-truth policy
 
 - First-party MoonArq tracker: funnel behavior, pseudonymous identity, sessions, and attribution context.
