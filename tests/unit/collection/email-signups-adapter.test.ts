@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   EmailSignupSourceError,
@@ -168,5 +170,18 @@ describe("MoonArq email signup Supabase adapter", () => {
         message: "The email signup source returned an invalid response.",
       }),
     );
+  });
+
+  it("keeps the production adapter SELECT-only with ordered ranged reads", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/collection/connectors/supabase/email-signups-adapter.ts"),
+      "utf8",
+    );
+
+    expect(source).toMatch(/\.from\(EMAIL_SIGNUPS_TABLE\)[\s\S]*?\.select\(EMAIL_SIGNUP_COLUMNS\)/u);
+    expect(source.match(/\.order\(/gu)).toHaveLength(2);
+    expect(source).toMatch(/\.range\(from, from \+ EMAIL_SIGNUPS_PAGE_SIZE - 1\)/u);
+    expect(source).not.toMatch(/\.(?:insert|update|upsert|delete|rpc)\s*\(/iu);
+    expect(source).not.toMatch(/fetch\([^)]*zapier|\/api\/.*zapier/iu);
   });
 });

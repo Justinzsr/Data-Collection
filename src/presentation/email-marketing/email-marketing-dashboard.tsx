@@ -10,6 +10,7 @@ import {
   Database,
   Inbox,
   LoaderCircle,
+  LockKeyhole,
   MailPlus,
   RefreshCw,
   Search,
@@ -185,6 +186,24 @@ function EmptyState({ refresh }: { refresh: () => Promise<void> }) {
         </Button>
       </div>
     </GlassPanel>
+  );
+}
+
+function LockedState({ dataSpaceSlug }: { dataSpaceSlug: string }) {
+  const nextPath = dashboardPath(dataSpaceSlug, "/supabase/email-marketing");
+  return (
+    <div className="mx-auto grid min-h-[60vh] w-full max-w-2xl place-items-center">
+      <GlassPanel className="w-full border-amber-300/20 p-6 text-center sm:p-8" role="alert" aria-live="assertive">
+        <LockKeyhole className="mx-auto h-8 w-8 text-amber-100" />
+        <h1 className="mt-4 text-xl font-semibold text-white">Email Marketing is locked</h1>
+        <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-300">
+          Your private dashboard session is no longer authorized. Protected marketing data has been cleared from this page.
+        </p>
+        <LinkButton href={`/login?next=${encodeURIComponent(nextPath)}`} variant="primary" className="mt-5">
+          Return to private login
+        </LinkButton>
+      </GlassPanel>
+    </div>
   );
 }
 
@@ -456,10 +475,12 @@ export function EmailMarketingDashboardView({
   isLoading,
   isRefreshing,
   isStale,
+  isAuthLocked,
   error,
   refresh,
 }: ViewProps) {
   const [chartDays, setChartDays] = useState(30);
+  if (isAuthLocked) return <LockedState dataSpaceSlug={dataSpaceSlug} />;
   const basePath = dashboardPath(dataSpaceSlug);
 
   return (

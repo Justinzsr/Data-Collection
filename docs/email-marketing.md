@@ -29,6 +29,8 @@ The authenticated API snapshot preserves all 16 source fields: `id`, `email`, `e
 
 The client fetches immediately, then refreshes every 60 seconds while the view is mounted and the browser tab is visible. Polling pauses while hidden, prevents overlapping requests, and cleans up its interval and active request on unmount. Manual refresh uses the same internal endpoint.
 
-If a later refresh fails, the most recent successful dataset remains visible and is marked stale. The application does not silently downgrade to an hourly cadence because the current Next.js/Vercel runtime supports visible-page polling.
+If a later refresh fails because of a network error, timeout, or 5xx response, the most recent successful dataset remains visible and is marked stale. A 401 or 403 immediately clears the snapshot and replaces the dashboard with a locked login state, so Email addresses, Shopify customer IDs, search input, and other protected row content are removed from the DOM. Other non-transient client errors and invalid success payloads also clear the snapshot instead of preserving stale data. Non-2xx response bodies are not rendered or logged.
+
+The application does not silently downgrade to an hourly cadence because the current Next.js/Vercel runtime supports visible-page polling.
 
 Source timestamps remain UTC in the data model and are displayed in `America/Los_Angeles` (PT), matching the rest of the Data Hub.

@@ -10,6 +10,7 @@ export type EmailMarketingLoadState = {
   isLoading: boolean;
   isRefreshing: boolean;
   isStale: boolean;
+  isAuthLocked: boolean;
   error: string | null;
 };
 
@@ -18,13 +19,16 @@ export const INITIAL_EMAIL_MARKETING_STATE: EmailMarketingLoadState = {
   isLoading: true,
   isRefreshing: false,
   isStale: false,
+  isAuthLocked: false,
   error: null,
 };
 
 export type EmailMarketingLoadAction =
   | { type: "start" }
   | { type: "success"; snapshot: EmailMarketingSnapshot }
-  | { type: "failure"; error: string };
+  | { type: "authFailure" }
+  | { type: "transientFailure"; error: string }
+  | { type: "fatalFailure"; error: string };
 
 export function reduceEmailMarketingLoadState(
   state: EmailMarketingLoadState,
@@ -43,7 +47,28 @@ export function reduceEmailMarketingLoadState(
       isLoading: false,
       isRefreshing: false,
       isStale: false,
+      isAuthLocked: false,
       error: null,
+    };
+  }
+  if (action.type === "authFailure") {
+    return {
+      snapshot: null,
+      isLoading: false,
+      isRefreshing: false,
+      isStale: false,
+      isAuthLocked: true,
+      error: null,
+    };
+  }
+  if (action.type === "fatalFailure") {
+    return {
+      snapshot: null,
+      isLoading: false,
+      isRefreshing: false,
+      isStale: false,
+      isAuthLocked: false,
+      error: action.error,
     };
   }
   return {
@@ -51,6 +76,7 @@ export function reduceEmailMarketingLoadState(
     isLoading: false,
     isRefreshing: false,
     isStale: state.snapshot !== null,
+    isAuthLocked: false,
     error: action.error,
   };
 }
@@ -78,8 +104,10 @@ export function useEmailMarketingData(dataSpaceSlug: string) {
   const [state, dispatch] = useReducer(reduceEmailMarketingLoadState, INITIAL_EMAIL_MARKETING_STATE);
   const activeRequest = useRef<ActiveRequest | null>(null);
   const mounted = useRef(false);
+  const authLocked = useRef(false);
 
   const refresh = useCallback(() => {
+    if (!mounted.current || authLocked.current) return Promise.resolve();
     if (activeRequest.current) return activeRequest.current.promise;
 
     const id = Symbol("email-marketing-request");
@@ -96,26 +124,47 @@ export function useEmailMarketingData(dataSpaceSlug: string) {
             signal: controller.signal,
           },
         );
-        const payload = (await response.json().catch(() => null)) as
-          | { snapshot?: unknown; error?: unknown }
-          | null;
+        if (response.status === 401 || response.status === 403) {
+          authLocked.current = true;
+          if (mounted.current) dispatch({ type: "authFailure" });
+          return;
+        }
         if (!response.ok) {
-          const message =
-            payload && typeof payload.error === "string"
-              ? payload.error
-              : "Email marketing data could not be refreshed.";
-          throw new Error(message);
+          if (response.status === 408 || response.status >= 500) {
+            if (mounted.current) {
+              dispatch({
+                type: "transientFailure",
+                error: "Email marketing data could not be refreshed. Try again when the source is available.",
+              });
+            }
+          } else if (mounted.current) {
+            dispatch({
+              type: "fatalFailure",
+              error: "Email marketing data could not be loaded safely. Try again after checking the source configuration.",
+            });
+          }
+          return;
         }
+        const payload = (await response.json().catch(() => null)) as
+          | { snapshot?: unknown }
+          | null;
         if (!isSnapshot(payload?.snapshot)) {
-          throw new Error("Email marketing data returned an invalid response.");
+          if (mounted.current) {
+            dispatch({
+              type: "fatalFailure",
+              error: "Email marketing data returned an invalid response.",
+            });
+          }
+          return;
         }
+        authLocked.current = false;
         if (mounted.current) dispatch({ type: "success", snapshot: payload.snapshot });
-      } catch (error) {
+      } catch {
         if (controller.signal.aborted) return;
         if (mounted.current) {
           dispatch({
-            type: "failure",
-            error: error instanceof Error ? error.message : "Email marketing data could not be refreshed.",
+            type: "transientFailure",
+            error: "Email marketing data could not be refreshed. Try again when the source is available.",
           });
         }
       } finally {
@@ -129,6 +178,7 @@ export function useEmailMarketingData(dataSpaceSlug: string) {
 
   useEffect(() => {
     mounted.current = true;
+    authLocked.current = false;
     void refresh();
 
     const interval = window.setInterval(() => {

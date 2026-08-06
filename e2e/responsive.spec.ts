@@ -36,6 +36,14 @@ for (const width of [390, 320]) {
       await page.getByTestId(`overview-module-summary-${type}`).click();
       await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", true);
     }
+    const emailMarketingLink = page
+      .getByTestId("overview-module-supabase")
+      .getByRole("link", { name: "Email Marketing", exact: true });
+    await expect(emailMarketingLink).toBeVisible();
+    await expect(emailMarketingLink).toHaveAttribute(
+      "href",
+      "/w/moonarq/dashboard/supabase/email-marketing",
+    );
 
     const instagram = page.locator("details.overview-social-card").filter({
       has: page.getByText("Instagram Graph API", { exact: true }),
@@ -107,6 +115,14 @@ for (const width of [390, 320]) {
           return { left: rect.left, right: rect.right, width: rect.width };
         }),
         socialTouchTargets,
+        emailMarketingLink: (() => {
+          const element = document.querySelector<HTMLElement>(
+            "[data-testid='overview-module-supabase'] a[href$='/supabase/email-marketing']",
+          );
+          if (!element) return null;
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+        })(),
         viewportWidth: document.documentElement.clientWidth,
       };
     });
@@ -118,6 +134,11 @@ for (const width of [390, 320]) {
     expect(layout.paidPanel!.overflow).toBeLessThanOrEqual(1);
     expect(layout.aidmaStageRects).toHaveLength(5);
     expect(layout.aidmaStageRects.every((rect) => rect.left >= -1 && rect.right <= layout.viewportWidth + 1 && rect.width > 0)).toBe(true);
+    expect(layout.emailMarketingLink).not.toBeNull();
+    expect(layout.emailMarketingLink!.left).toBeGreaterThanOrEqual(-1);
+    expect(layout.emailMarketingLink!.right).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.emailMarketingLink!.width).toBeGreaterThanOrEqual(40);
+    expect(layout.emailMarketingLink!.height).toBeGreaterThanOrEqual(40);
     expect(layout.socialTouchTargets.length).toBeGreaterThanOrEqual(5);
     expect(
       layout.socialTouchTargets.every((target) => target.width >= 40 && target.height >= 40),

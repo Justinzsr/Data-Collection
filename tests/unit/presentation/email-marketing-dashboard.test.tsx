@@ -36,6 +36,7 @@ const commonProps = {
   dataSpaceSlug: "moonarq",
   isRefreshing: false,
   isStale: false,
+  isAuthLocked: false,
   error: null,
   refresh: vi.fn(async () => undefined),
 };
@@ -69,5 +70,52 @@ describe("EmailMarketingDashboardView states", () => {
     expect(markup).toContain("moonarq-web.public.email_signups");
     expect(markup).toContain('role="status"');
     expect(markup).not.toContain("Loading marketing email signups");
+  });
+
+  it("renders only the locked state and removes protected snapshot and search content", () => {
+    const protectedEmail = "locked-person@example.com";
+    const protectedShopifyId = "gid://shopify/Customer/locked-101";
+    const protectedSnapshot: EmailMarketingSnapshot = {
+      ...emptySnapshot,
+      rows: [
+        {
+          id: "locked-signup",
+          email: protectedEmail,
+          email_normalized: protectedEmail,
+          source: "synthetic-test",
+          discount_code: "EXAMPLE",
+          consent_email_marketing: true,
+          page_url: "https://store.example.com/newsletter",
+          referrer: "https://referrer.example.com/",
+          utm_source: "example",
+          utm_medium: "test",
+          utm_campaign: "locked-state",
+          promo_email_sent: true,
+          zapier_sent_at: "2026-07-18T17:02:00.000Z",
+          shopify_customer_id: protectedShopifyId,
+          created_at: "2026-07-18T17:00:00.000Z",
+          updated_at: "2026-07-18T17:02:00.000Z",
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <EmailMarketingDashboardView
+        {...commonProps}
+        snapshot={protectedSnapshot}
+        isLoading={false}
+        isStale
+        isAuthLocked
+      />,
+    );
+
+    expect(markup).toContain("Email Marketing is locked");
+    expect(markup).toContain("Protected marketing data has been cleared from this page");
+    expect(markup).toContain("/login?next=%2Fw%2Fmoonarq%2Fdashboard%2Fsupabase%2Femail-marketing");
+    expect(markup).not.toContain(protectedEmail);
+    expect(markup).not.toContain(protectedShopifyId);
+    expect(markup).not.toContain("Search email");
+    expect(markup).not.toContain("Marketing email signups");
+    expect(markup).not.toContain("Stale");
+    expect(markup).not.toContain("Showing the last successful dataset");
   });
 });
