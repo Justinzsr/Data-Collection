@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, settleResponsiveLayout, test } from "./test";
 import { loginDashboard } from "./auth";
 
 test.beforeEach(async ({ page }) => {
@@ -16,6 +16,7 @@ for (const viewport of [
   test(`dashboard has no horizontal overflow at ${viewport.width}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/w/moonarq/dashboard");
+    await settleResponsiveLayout(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(overflow).toBe(false);
   });
@@ -26,7 +27,12 @@ for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/w/moonarq/dashboard");
 
-    for (const type of ["website", "supabase", "tiktok", "instagram", "shopify"]) {
+    await expect(page.getByTestId("business-pulse")).toBeVisible();
+    await expect(page.getByTestId("storefront-funnel")).toBeVisible();
+    await expect(page.getByTestId("storefront-conversion-trend")).toBeVisible();
+    await expect(page.getByTestId("commerce-outcomes")).toBeVisible();
+
+    for (const type of ["supabase", "tiktok", "instagram"]) {
       await page.getByTestId(`overview-module-summary-${type}`).click();
       await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", true);
     }
@@ -36,6 +42,14 @@ for (const width of [390, 320]) {
     });
     await instagram.locator("summary").first().click();
     await expect(instagram).toHaveJSProperty("open", true);
+    await instagram.getByText("Organic account & media details", { exact: true }).click();
+
+    const tiktok = page.locator("details.overview-social-card").filter({
+      has: page.getByText("TikTok official API", { exact: true }),
+    });
+    await tiktok.locator("summary").first().click();
+    await expect(tiktok).toHaveJSProperty("open", true);
+
     const paidPanel = page.getByTestId("instagram-paid-ads-panel");
     await expect(paidPanel).toBeVisible();
     await expect(paidPanel.getByText("Paid Story attribution", { exact: true })).toBeVisible();
@@ -58,25 +72,44 @@ for (const width of [390, 320]) {
       await expect(detail).toHaveJSProperty("open", true);
     }
 
-    const layout = await page.evaluate(() => ({
-      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      chartRights: Array.from(document.querySelectorAll<HTMLElement>("[data-overview-chart='true']")).map((element) => element.getBoundingClientRect().right),
-      paidPanel: (() => {
-        const element = document.querySelector<HTMLElement>("[data-testid='instagram-paid-ads-panel']");
-        if (!element) return null;
-        const rect = element.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          overflow: element.scrollWidth - element.clientWidth,
-        };
-      })(),
-      aidmaStageRects: Array.from(document.querySelectorAll<HTMLElement>("[data-aidma-stage]")).map((element) => {
-        const rect = element.getBoundingClientRect();
-        return { left: rect.left, right: rect.right, width: rect.width };
-      }),
-      viewportWidth: document.documentElement.clientWidth,
-    }));
+    await settleResponsiveLayout(page);
+    const layout = await page.evaluate(() => {
+      const socialRoot = document.querySelector<HTMLElement>("[data-testid='social-platform-detail-modules']");
+      const socialTouchTargets = socialRoot
+        ? Array.from(socialRoot.querySelectorAll<HTMLElement>("a,button"))
+          .filter((element) => {
+            const style = getComputedStyle(element);
+            return style.display !== "none"
+              && style.visibility !== "hidden"
+              && !element.closest("details:not([open])")
+              && element.getClientRects().length > 0;
+          })
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { width: rect.width, height: rect.height };
+          })
+        : [];
+      return {
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        chartRights: Array.from(document.querySelectorAll<HTMLElement>("[data-overview-chart='true']")).map((element) => element.getBoundingClientRect().right),
+        paidPanel: (() => {
+          const element = document.querySelector<HTMLElement>("[data-testid='instagram-paid-ads-panel']");
+          if (!element) return null;
+          const rect = element.getBoundingClientRect();
+          return {
+            left: rect.left,
+            right: rect.right,
+            overflow: element.scrollWidth - element.clientWidth,
+          };
+        })(),
+        aidmaStageRects: Array.from(document.querySelectorAll<HTMLElement>("[data-aidma-stage]")).map((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right, width: rect.width };
+        }),
+        socialTouchTargets,
+        viewportWidth: document.documentElement.clientWidth,
+      };
+    });
     expect(layout.overflow).toBeLessThanOrEqual(1);
     expect(layout.chartRights.every((right) => right <= layout.viewportWidth + 1)).toBe(true);
     expect(layout.paidPanel).not.toBeNull();
@@ -85,6 +118,10 @@ for (const width of [390, 320]) {
     expect(layout.paidPanel!.overflow).toBeLessThanOrEqual(1);
     expect(layout.aidmaStageRects).toHaveLength(5);
     expect(layout.aidmaStageRects.every((rect) => rect.left >= -1 && rect.right <= layout.viewportWidth + 1 && rect.width > 0)).toBe(true);
+    expect(layout.socialTouchTargets.length).toBeGreaterThanOrEqual(5);
+    expect(
+      layout.socialTouchTargets.every((target) => target.width >= 40 && target.height >= 40),
+    ).toBe(true);
   });
 }
 
@@ -126,6 +163,7 @@ for (const path of [
   test(`${path} has no horizontal overflow on narrow mobile`, async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 780 });
     await page.goto(path);
+    await settleResponsiveLayout(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(overflow).toBe(false);
   });

@@ -152,6 +152,7 @@ function setupKindLabel(kind: SetupKind) {
 }
 
 function syncModesFor(sourceType: SourceTypeDefinition): SyncMode[] {
+  if (sourceType.key === "website") return ["webhook"];
   const modes: SyncMode[] = [];
   if (sourceType.capabilities.supportsWebhook && sourceType.capabilities.supportsPolling) modes.push("hybrid");
   if (sourceType.capabilities.supportsPolling) modes.push("hourly");
@@ -203,9 +204,9 @@ function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePat
       <div className="grid gap-4">
         <div>
           <Badge tone="cyan">Official Vercel Drain</Badge>
-          <h3 className="mt-3 text-base font-semibold text-white">Send Web Analytics to this source</h3>
+          <h3 className="mt-3 text-base font-semibold text-white">Add auxiliary request-level evidence</h3>
           <p className="mt-1 text-sm leading-6 text-slate-400">
-            Add one Web Analytics Drain in Vercel, paste the endpoint below, then send JSON or NDJSON events.
+            Vercel Drain records infrastructure and request-level events. Add the first-party Website Tracker separately for authoritative funnels, sessions, identity, and attribution.
           </p>
         </div>
         <div className="rounded-xl border border-white/10 bg-black/20 p-3">
@@ -219,7 +220,7 @@ function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePat
         <ol className="grid gap-2 text-sm leading-6 text-slate-300">
           <li>1. Open the Vercel project and create a Web Analytics Drain.</li>
           <li>2. Paste the endpoint and choose JSON or NDJSON delivery.</li>
-          <li>3. Save the same required signature secret under security settings below.</li>
+          <li>3. Save the required signature secret below; do not use Drain totals as funnel truth.</li>
         </ol>
         <div className="flex flex-col gap-2 sm:flex-row">
           <LinkButton href={`${basePath}/sources/${source.id}`} variant="primary">
@@ -236,7 +237,7 @@ function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePat
     <div className="grid gap-4">
       <div>
         <Badge tone="cyan">First-party tracker</Badge>
-        <h3 className="mt-3 text-base font-semibold text-white">Install the lightweight website tracker</h3>
+        <h3 className="mt-3 text-base font-semibold text-white">Install the authoritative website tracker</h3>
         <p className="mt-1 text-sm leading-6 text-slate-400">
           The source detail page contains the exact snippet and custom-event helper for this source.
         </p>
@@ -277,7 +278,7 @@ export function AddSourceWizard({
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [selectedTypeKey, setSelectedTypeKey] = useState<string | null>(null);
-  const [websiteMode, setWebsiteMode] = useState<"vercel_web_analytics_drain" | "website">("vercel_web_analytics_drain");
+  const [websiteMode, setWebsiteMode] = useState<"vercel_web_analytics_drain" | "website">("website");
   const [inputUrl, setInputUrl] = useState("");
   const [detections, setDetections] = useState<Detection[]>([]);
   const [appliedDetection, setAppliedDetection] = useState<Detection | null>(null);
@@ -488,7 +489,7 @@ export function AddSourceWizard({
     setSelectedTypeKey(null);
     setSavedSource(null);
     setSyncRunId(null);
-    setWebsiteMode("vercel_web_analytics_drain");
+    setWebsiteMode("website");
     resetDetection("");
   }
 
@@ -618,22 +619,22 @@ export function AddSourceWizard({
 
                   {selectedType.key === "website" ? (
                     <fieldset>
-                      <legend className="text-sm font-medium text-slate-200">Choose one website data path</legend>
+                      <legend className="text-sm font-medium text-slate-200">Choose the website source to add</legend>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         {([
                           {
-                            key: "vercel_web_analytics_drain" as const,
-                            title: "Vercel Web Analytics Drain",
-                            description: "Best when the site is on Vercel Pro. Events arrive through one official drain endpoint.",
-                            badge: "Recommended",
-                            icon: Orbit,
-                          },
-                          {
                             key: "website" as const,
                             title: "First-party Website Tracker",
-                            description: "Use the lightweight snippet for any site or for custom product and marketing events.",
-                            badge: "Flexible fallback",
+                            description: "Authoritative funnel, pseudonymous identity, session, attribution, and product-event source.",
+                            badge: "Recommended",
                             icon: Globe2,
+                          },
+                          {
+                            key: "vercel_web_analytics_drain" as const,
+                            title: "Vercel Web Analytics Drain",
+                            description: "Optional auxiliary infrastructure and request evidence; retained separately from funnel totals.",
+                            badge: "Auxiliary",
+                            icon: Orbit,
                           },
                         ]).map((option) => {
                           const Icon = option.icon;

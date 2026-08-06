@@ -1,9 +1,25 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 import type { RawPayload } from "@/collection/connectors/types";
 import type { WebsiteEventIngestionInput } from "@/collection/tracking/website-event-ingestion";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 
 export const VERCEL_DRAIN_WEBHOOK_PAYLOAD_KIND = "vercel_analytics_drain";
+
+const MAX_DRAIN_EVENTS = 500;
+const MAX_DRAIN_EVENT_DEPTH = 6;
+const MAX_DRAIN_EVENT_KEYS = 64;
+const MAX_DRAIN_EVENT_NODES = 256;
+const MAX_DRAIN_EVENT_DATA_BYTES = 16 * 1024;
+const MAX_DRAIN_QUERY_PARAMS_BYTES = 8 * 1024;
+const MAX_DRAIN_QUERY_PARAMS = 32;
+const MAX_PERSISTED_PROPERTIES_BYTES = 8 * 1024;
+const MAX_PERSISTED_RAW_EVENT_BYTES = 12 * 1024;
+const MAX_DIAGNOSTIC_VALUE_LENGTH = 256;
+const MAX_UTM_VALUE_LENGTH = 100;
+const MAX_PATH_LENGTH = 500;
+const MAX_URL_LENGTH = 1_200;
+const REDACTED_VALUE = "[redacted]";
 
 type VercelDrainEvent = {
   schema?: string;
@@ -34,13 +50,133 @@ type VercelDrainEvent = {
   deployment?: string;
 };
 
-function parseJsonObject(input: string | undefined) {
-  if (!input) return {};
+function decodedTextVariants(value: string) {
+  const variants = new Set([value]);
+  let candidate = value;
+  for (let pass = 0; pass < 3; pass += 1) {
+    try {
+      const decoded = decodeURIComponent(candidate);
+      if (decoded === candidate) break;
+      variants.add(decoded);
+      candidate = decoded;
+    } catch {
+      // Invalid percent encoding is treated as the last valid variant.
+      break;
+    }
+  }
+  return [...variants];
+}
+
+function looksLikeHighEntropySecret(value: string) {
+  const compact = value.replace(/\s+/gu, "");
+  if (compact.length < 24) return false;
+  if (/^(?:prj|team|user|dpl)_[A-Za-z0-9_-]{8,80}$/u.test(compact)) return false;
+  if (/^[A-Fa-f0-9]{32,}$/u.test(compact) || /^[A-Za-z0-9+/=_-]{32,}$/u.test(compact)) return true;
+  const characterClasses = [/[a-z]/u, /[A-Z]/u, /[0-9]/u, /[^A-Za-z0-9]/u]
+    .filter((pattern) => pattern.test(compact)).length;
+  if (characterClasses < 3) return false;
+  const counts = new Map<string, number>();
+  for (const character of compact) counts.set(character, (counts.get(character) ?? 0) + 1);
+  const entropy = [...counts.values()].reduce((total, count) => {
+    const probability = count / compact.length;
+    return total - probability * Math.log2(probability);
+  }, 0);
+  return entropy >= 3.5;
+}
+
+function containsIpLiteral(value: string) {
+  const ipv4Candidates = value.match(/(?:\d{1,3}\.){3}\d{1,3}/gu) ?? [];
+  if (ipv4Candidates.some((candidate) => isIP(candidate) === 4)) return true;
+
+  return value
+    .split(/[\s/?&#()[\]{},="'<>]+/u)
+    .filter(Boolean)
+    .some((rawCandidate) => {
+      const candidate = rawCandidate.replace(/^\[|\]$/gu, "");
+      if (isIP(candidate) !== 0) return true;
+      const ipv4WithPort = candidate.match(/^((?:\d{1,3}\.){3}\d{1,3}):\d{1,5}$/u);
+      return ipv4WithPort ? isIP(ipv4WithPort[1]) === 4 : false;
+    });
+}
+
+function containsSensitiveText(value: string) {
+  return decodedTextVariants(value).some((candidate) => {
+    const normalized = candidate.normalize("NFKC");
+    const addressCandidate = normalized.replace(/[-_/]+/gu, " ");
+    return (
+      /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(normalized) ||
+      /(?:^|\D)\+?\d[\d\s().-]{7,}\d(?:\D|$)/u.test(normalized) ||
+      /\b\d{1,6}\s+[A-Z0-9.'-]+(?:\s+[A-Z0-9.'-]+){0,4}\s+(?:STREET|ST|ROAD|RD|AVENUE|AVE|BOULEVARD|BLVD|LANE|LN|DRIVE|DR|COURT|CT|HIGHWAY|HWY)\b/iu.test(addressCandidate) ||
+      /\b(?:bearer|basic)\s+[A-Z0-9._~+/=-]{8,}\b/iu.test(normalized) ||
+      /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9_-]{8,}\b/iu.test(normalized) ||
+      /\beyJ[A-Z0-9_-]{8,}\.[A-Z0-9_-]{8,}\.[A-Z0-9_-]{8,}\b/iu.test(normalized) ||
+      /(?:^|[?&#/_.-])(?:authorization|cookie|credential|password|passwd|secret|token|api[_-]?key|access[_-]?key|session[_-]?id)(?:[=:/_.-]|$)/iu.test(normalized) ||
+      /[?&][^=&#]{1,120}=[^&#]*/u.test(normalized) ||
+      containsIpLiteral(normalized) ||
+      looksLikeHighEntropySecret(normalized)
+    );
+  });
+}
+
+function isSafeUtmValue(value: string) {
+  return (
+    value.length <= MAX_UTM_VALUE_LENGTH &&
+    /^[A-Za-z0-9][A-Za-z0-9 ._~:+-]*$/u.test(value) &&
+    !containsSensitiveText(value) &&
+    !looksLikeHighEntropySecret(value)
+  );
+}
+
+function sanitizeDiagnosticValue(value: unknown, maxLength = MAX_DIAGNOSTIC_VALUE_LENGTH) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/[\u0000-\u001F\u007F]/gu, "");
+  if (!trimmed) return null;
+  if (containsSensitiveText(trimmed)) return REDACTED_VALUE;
+  return trimmed.slice(0, maxLength);
+}
+
+function assertStringBytes(value: unknown, maximum: number, label: string) {
+  if (typeof value === "string" && Buffer.byteLength(value, "utf8") > maximum) {
+    throw new VercelDrainIngestionError(`${label} exceeds the permitted size.`, 413);
+  }
+}
+
+function assertPayloadComplexity(value: unknown, label: string) {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  let keyCount = 0;
+  let nodeCount = 0;
+
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    nodeCount += 1;
+    if (nodeCount > MAX_DRAIN_EVENT_NODES) {
+      throw new VercelDrainIngestionError(`${label} contains too many values.`, 413);
+    }
+    if (current.depth > MAX_DRAIN_EVENT_DEPTH) {
+      throw new VercelDrainIngestionError(`${label} exceeds the permitted nesting depth.`, 413);
+    }
+    if (Array.isArray(current.value)) {
+      for (const nested of current.value) pending.push({ value: nested, depth: current.depth + 1 });
+      continue;
+    }
+    if (typeof current.value !== "object" || current.value === null) continue;
+    const entries = Object.entries(current.value as Record<string, unknown>);
+    keyCount += entries.length;
+    if (keyCount > MAX_DRAIN_EVENT_KEYS) {
+      throw new VercelDrainIngestionError(`${label} contains too many fields.`, 413);
+    }
+    for (const [, nested] of entries) pending.push({ value: nested, depth: current.depth + 1 });
+  }
+}
+
+function assertEmbeddedJsonComplexity(value: string | undefined, label: string) {
+  if (!value?.trim()) return;
   try {
-    const parsed = JSON.parse(input);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as JsonRecord) : {};
-  } catch {
-    return { raw: input };
+    assertPayloadComplexity(JSON.parse(value), label);
+  } catch (error) {
+    if (error instanceof VercelDrainIngestionError) throw error;
+    // Malformed embedded JSON is never persisted and is recorded only as a
+    // boolean diagnostic marker.
   }
 }
 
@@ -53,8 +189,12 @@ const UTM_PROPERTY_KEYS = {
 } as const;
 
 type ParsedQueryParams = {
-  entries: Array<[string, string]>;
+  safeEntries: Array<[string, string]>;
   utm: JsonRecord | null;
+  receivedCount: number;
+  retainedCount: number;
+  discardedCount: number;
+  malformed: boolean;
 };
 
 function queryParamScalar(value: unknown) {
@@ -65,44 +205,83 @@ function queryParamScalar(value: unknown) {
 }
 
 function parseVercelQueryParams(input: unknown): ParsedQueryParams {
-  if (typeof input !== "string") return { entries: [], utm: null };
+  const empty = {
+    safeEntries: [],
+    utm: null,
+    receivedCount: 0,
+    retainedCount: 0,
+    discardedCount: 0,
+    malformed: false,
+  } satisfies ParsedQueryParams;
+  if (typeof input !== "string") return empty;
 
   const trimmed = input.trim();
-  if (!trimmed) return { entries: [], utm: null };
+  if (!trimmed) return empty;
 
   let parsedInput: unknown = trimmed;
+  let parsedAsJson = false;
   if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith('"')) {
     try {
       parsedInput = JSON.parse(trimmed);
+      parsedAsJson = true;
     } catch {
-      // A payload that looks like JSON but is malformed is retained verbatim in
-      // properties.vercel.query_params, but is not promoted into a URL or attribution.
-      return { entries: [], utm: null };
+      return {
+        ...empty,
+        receivedCount: 1,
+        discardedCount: 1,
+        malformed: true,
+      };
     }
   }
+  if (parsedAsJson) assertPayloadComplexity(parsedInput, "Vercel Drain queryParams");
 
-  let entries: Array<[string, string]> = [];
+  let entries: Array<[string, unknown]> = [];
   if (typeof parsedInput === "string") {
     const queryString = parsedInput.startsWith("?") ? parsedInput.slice(1) : parsedInput;
     entries = Array.from(new URLSearchParams(queryString).entries());
   } else if (typeof parsedInput === "object" && parsedInput !== null && !Array.isArray(parsedInput)) {
-    entries = Object.entries(parsedInput).flatMap(([key, value]) => {
-      const scalar = queryParamScalar(value);
-      return scalar === null ? [] : [[key, scalar] as [string, string]];
-    });
+    entries = Object.entries(parsedInput);
+  } else {
+    return {
+      ...empty,
+      receivedCount: 1,
+      discardedCount: 1,
+      malformed: true,
+    };
+  }
+  if (entries.length > MAX_DRAIN_QUERY_PARAMS) {
+    throw new VercelDrainIngestionError("Vercel Drain queryParams contains too many fields.", 413);
   }
 
   const utm: JsonRecord = {};
-  for (const [rawKey, rawValue] of entries) {
+  const safeEntries: Array<[string, string]> = [];
+  let discardedCount = 0;
+  for (const [rawKey, unknownValue] of entries) {
     const key = rawKey.trim().toLowerCase() as keyof typeof UTM_PROPERTY_KEYS;
     const propertyKey = UTM_PROPERTY_KEYS[key];
-    const value = rawValue.trim();
-    if (propertyKey && value && utm[propertyKey] === undefined) {
+    const scalar = queryParamScalar(unknownValue);
+    const value = scalar?.trim() ?? "";
+    if (
+      propertyKey &&
+      value &&
+      isSafeUtmValue(value) &&
+      utm[propertyKey] === undefined
+    ) {
       utm[propertyKey] = value;
+      safeEntries.push([key, value]);
+    } else {
+      discardedCount += 1;
     }
   }
 
-  return { entries, utm: Object.keys(utm).length > 0 ? utm : null };
+  return {
+    safeEntries,
+    utm: Object.keys(utm).length > 0 ? utm : null,
+    receivedCount: entries.length,
+    retainedCount: safeEntries.length,
+    discardedCount,
+    malformed: false,
+  };
 }
 
 function parseBody(rawBody: string) {
@@ -151,10 +330,14 @@ function assertVercelDrainPayload(rawBody: string) {
   if (events.length === 0) {
     throw new VercelDrainIngestionError("Vercel Drain payload does not contain any events.", 400);
   }
+  if (events.length > MAX_DRAIN_EVENTS) {
+    throw new VercelDrainIngestionError("Vercel Drain payload contains too many events.", 413);
+  }
   for (const event of events) {
     if (typeof event !== "object" || event === null || Array.isArray(event)) {
       throw new VercelDrainIngestionError("Vercel Drain events must be JSON objects.", 400);
     }
+    assertPayloadComplexity(event, "Vercel Drain event");
     if (event.eventType !== "pageview" && event.eventType !== "event") {
       throw new VercelDrainIngestionError("Vercel Drain eventType must be pageview or event.", 400);
     }
@@ -173,6 +356,10 @@ function assertVercelDrainPayload(rawBody: string) {
     if (event.queryParams !== undefined && typeof event.queryParams !== "string") {
       throw new VercelDrainIngestionError("Vercel Drain queryParams must be a JSON or query string.", 400);
     }
+    assertStringBytes(event.eventData, MAX_DRAIN_EVENT_DATA_BYTES, "Vercel Drain eventData");
+    assertStringBytes(event.queryParams, MAX_DRAIN_QUERY_PARAMS_BYTES, "Vercel Drain queryParams");
+    assertEmbeddedJsonComplexity(event.eventData, "Vercel Drain eventData");
+    parseVercelQueryParams(event.queryParams);
   }
 }
 
@@ -224,88 +411,188 @@ export function readVercelDrainWebhookPayload(payload: JsonRecord | null | undef
   return { rawBody: payload.rawBody, signature: payload.signature };
 }
 
-function resolvedUrl(event: VercelDrainEvent, source: Source) {
-  const queryParams = parseVercelQueryParams(event.queryParams);
-  let baseUrl: string;
-  if (event.origin && event.path) {
-    try {
-      baseUrl = new URL(event.path, event.origin).toString();
-    } catch {
-      baseUrl = `${event.origin}${event.path}`;
-    }
-  } else if (event.origin) {
-    baseUrl = event.origin;
-  } else if (source.normalized_url) {
-    try {
-      baseUrl = new URL(event.path ?? "/", source.normalized_url).toString();
-    } catch {
-      baseUrl = source.normalized_url;
-    }
-  } else {
-    baseUrl = "https://moonarqstudio.com";
-  }
-
-  if (queryParams.entries.length === 0) return baseUrl;
-
+function sanitizePath(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return "/";
+  const sanitizedInput = value.trim().replace(/[\u0000-\u001F\u007F]/gu, "");
+  if (!sanitizedInput) return "/";
+  let pathname: string;
   try {
-    const url = new URL(baseUrl);
-    const replacedKeys = new Set<string>();
-    for (const [key, value] of queryParams.entries) {
-      if (!replacedKeys.has(key)) {
-        url.searchParams.delete(key);
-        replacedKeys.add(key);
-      }
-      url.searchParams.append(key, value);
-    }
-    return url.toString();
+    pathname = new URL(sanitizedInput, "https://drain.invalid").pathname;
   } catch {
-    const queryString = new URLSearchParams(queryParams.entries).toString();
-    if (!queryString) return baseUrl;
-    return `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}${queryString}`;
+    pathname = sanitizedInput.split(/[?#]/u, 1)[0] ?? "/";
   }
+  if (!pathname.startsWith("/")) pathname = `/${pathname}`;
+  if (containsSensitiveText(pathname)) return "/[redacted]";
+  return pathname.slice(0, MAX_PATH_LENGTH) || "/";
+}
+
+function sanitizeHttpUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const hostname = url.hostname.replace(/^\[|\]$/gu, "");
+    if (isIP(hostname)) return null;
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    url.pathname = sanitizePath(url.pathname);
+    const sanitized = url.toString();
+    return sanitized.length <= MAX_URL_LENGTH ? sanitized : null;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeUrlLikeValue(value: unknown) {
+  const httpUrl = sanitizeHttpUrl(value);
+  if (httpUrl) return httpUrl;
+  if (typeof value !== "string") return null;
+  if (/^https?:\/\//iu.test(value.trim())) return null;
+  return sanitizeDiagnosticValue(value.split(/[?#]/u, 1)[0]);
+}
+
+function resolvedUrl(event: VercelDrainEvent, source: Source, queryParams: ParsedQueryParams) {
+  const baseUrl = sanitizeHttpUrl(event.origin)
+    ?? sanitizeHttpUrl(source.normalized_url)
+    ?? "https://moonarqstudio.com/";
+  const url = new URL(sanitizePath(event.path), baseUrl);
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  for (const [key, value] of queryParams.safeEntries) {
+    url.searchParams.set(key, value);
+    if (url.toString().length > MAX_URL_LENGTH) url.searchParams.delete(key);
+  }
+  return url.toString();
 }
 
 function eventName(event: VercelDrainEvent) {
-  return event.eventType === "pageview" ? "page_view" : event.eventName || "custom_event";
+  if (event.eventType === "pageview") return "page_view";
+  const candidate = sanitizeDiagnosticValue(event.eventName, 80);
+  if (!candidate || candidate === REDACTED_VALUE) return "custom_event";
+  return candidate.replace(/[^A-Za-z0-9_.:-]+/gu, "_").replace(/^_+|_+$/gu, "") || "custom_event";
 }
 
-function eventProperties(event: VercelDrainEvent) {
-  const eventData = parseJsonObject(event.eventData);
-  const queryParams = parseVercelQueryParams(event.queryParams);
-  const rawAttribution = eventData.attribution;
-  const attribution =
-    typeof rawAttribution === "object" && rawAttribution !== null && !Array.isArray(rawAttribution)
-      ? (rawAttribution as JsonRecord)
-      : {};
-
+function queryDiagnostics(queryParams: ParsedQueryParams) {
   return {
-    ...eventData,
+    received: queryParams.receivedCount,
+    retained: queryParams.retainedCount,
+    discarded: queryParams.discardedCount,
+    malformed: queryParams.malformed,
+  } satisfies JsonRecord;
+}
+
+function eventProperties(event: VercelDrainEvent, queryParams: ParsedQueryParams) {
+  const properties = {
     vercel: {
-      schema: event.schema ?? "vercel.analytics.v2",
-      project_id: event.projectId ?? null,
-      owner_id: event.ownerId ?? null,
-      query_params: event.queryParams ?? null,
-      route: event.route ?? null,
-      os_name: event.osName ?? null,
-      os_version: event.osVersion ?? null,
-      client_name: event.clientName ?? null,
-      client_type: event.clientType ?? null,
-      client_version: event.clientVersion ?? null,
-      vercel_environment: event.vercelEnvironment ?? null,
-      vercel_url: event.vercelUrl ?? null,
-      sdk_name: event.sdkName ?? null,
-      sdk_version: event.sdkVersion ?? null,
-      deployment: event.deployment ?? null,
+      schema: sanitizeDiagnosticValue(event.schema) ?? "vercel.analytics.v2",
+      project_id: sanitizeDiagnosticValue(event.projectId),
+      owner_id: sanitizeDiagnosticValue(event.ownerId),
+      route: event.route ? sanitizePath(event.route) : null,
+      os_name: sanitizeDiagnosticValue(event.osName),
+      os_version: sanitizeDiagnosticValue(event.osVersion),
+      client_name: sanitizeDiagnosticValue(event.clientName),
+      client_type: sanitizeDiagnosticValue(event.clientType),
+      client_version: sanitizeDiagnosticValue(event.clientVersion),
+      vercel_environment: sanitizeDiagnosticValue(event.vercelEnvironment),
+      vercel_url: sanitizeUrlLikeValue(event.vercelUrl),
+      sdk_name: sanitizeDiagnosticValue(event.sdkName),
+      sdk_version: sanitizeDiagnosticValue(event.sdkVersion),
+      deployment: sanitizeDiagnosticValue(event.deployment),
+      query_parameters: queryDiagnostics(queryParams),
+      event_data_discarded: Boolean(event.eventData?.trim()),
     },
     ...(queryParams.utm
       ? {
           attribution: {
-            ...attribution,
             utm: queryParams.utm,
           },
         }
       : {}),
   } as JsonRecord;
+  if (Buffer.byteLength(JSON.stringify(properties), "utf8") > MAX_PERSISTED_PROPERTIES_BYTES) {
+    throw new VercelDrainIngestionError("Sanitized Vercel Drain properties exceed the permitted size.", 413);
+  }
+  return properties;
+}
+
+function pseudonymousDeviceId(
+  sourceId: string,
+  deviceId: VercelDrainEvent["deviceId"],
+) {
+  if (deviceId === undefined || deviceId === null || String(deviceId).trim() === "") return "vercel-device";
+  const pseudonymKey = process.env.APP_ENCRYPTION_KEY?.trim();
+  if (!pseudonymKey) {
+    throw new VercelDrainIngestionError("Vercel Drain pseudonymization is unavailable.", 503);
+  }
+  const digest = createHmac("sha256", pseudonymKey)
+    .update("vercel-drain-device\0")
+    .update(sourceId)
+    .update("\0")
+    .update(String(deviceId))
+    .digest("hex")
+    .slice(0, 32);
+  return `vercel-device-${digest}`;
+}
+
+function diagnosticRawEvent(
+  event: VercelDrainEvent,
+  source: Source,
+  queryParams: ParsedQueryParams,
+  anonymousId: string,
+) {
+  const payload = {
+    schema: sanitizeDiagnosticValue(event.schema) ?? "vercel.analytics.v2",
+    eventType: event.eventType ?? "event",
+    eventName: eventName(event),
+    timestamp: event.timestamp ?? null,
+    projectId: sanitizeDiagnosticValue(event.projectId),
+    ownerId: sanitizeDiagnosticValue(event.ownerId),
+    deviceId: anonymousId,
+    origin: sanitizeHttpUrl(event.origin) ?? sanitizeHttpUrl(source.normalized_url),
+    path: sanitizePath(event.path),
+    referrer: sanitizeHttpUrl(event.referrer),
+    route: event.route ? sanitizePath(event.route) : null,
+    country: sanitizeDiagnosticValue(event.country, 80),
+    osName: sanitizeDiagnosticValue(event.osName),
+    osVersion: sanitizeDiagnosticValue(event.osVersion),
+    clientName: sanitizeDiagnosticValue(event.clientName),
+    clientType: sanitizeDiagnosticValue(event.clientType),
+    clientVersion: sanitizeDiagnosticValue(event.clientVersion),
+    deviceType: sanitizeDiagnosticValue(event.deviceType),
+    vercelEnvironment: sanitizeDiagnosticValue(event.vercelEnvironment),
+    vercelUrl: sanitizeUrlLikeValue(event.vercelUrl),
+    sdkName: sanitizeDiagnosticValue(event.sdkName),
+    sdkVersion: sanitizeDiagnosticValue(event.sdkVersion),
+    deployment: sanitizeDiagnosticValue(event.deployment),
+    queryParameters: queryDiagnostics(queryParams),
+    utm: queryParams.utm,
+    eventDataDiscarded: Boolean(event.eventData?.trim()),
+  } as JsonRecord;
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_PERSISTED_RAW_EVENT_BYTES) {
+    throw new VercelDrainIngestionError("Sanitized Vercel Drain event exceeds the permitted size.", 413);
+  }
+  return payload;
+}
+
+function deterministicEventId(sourceId: string, event: JsonRecord, index: number) {
+  const bytes = Buffer.from(
+    createHash("sha256")
+      .update(sourceId)
+      .update("\0")
+      .update(JSON.stringify(event))
+      .update("\0")
+      .update(String(index))
+      .digest()
+      .subarray(0, 16),
+  );
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function prepareVercelAnalyticsDrain(input: {
@@ -318,34 +605,62 @@ export function prepareVercelAnalyticsDrain(input: {
 
   const events = parseBody(input.rawBody);
   const fetchedAt = new Date().toISOString();
-  const rawPayloads: RawPayload[] = events.map((event, index) => ({
-    externalId: `${event.eventType ?? "event"}:${event.timestamp ?? "missing"}:${event.deviceId ?? "unknown"}:${event.sessionId ?? "unknown"}:${index}`,
-    fetchedAt,
-    payload: event as JsonRecord,
-    cursor: { timestamp: event.timestamp ?? null },
-  }));
-
-  const webEvents: WebsiteEventIngestionInput[] = events.map((event) => {
+  const normalizedEvents = events.map((event, index) => {
+    const queryParams = parseVercelQueryParams(event.queryParams);
+    const anonymousId = pseudonymousDeviceId(input.source.id, event.deviceId);
+    const rawEvent = diagnosticRawEvent(event, input.source, queryParams, anonymousId);
+    const eventId = deterministicEventId(input.source.id, rawEvent, index);
     const occurredAt =
       typeof event.timestamp === "number" ? new Date(event.timestamp).toISOString() : new Date().toISOString();
+    const properties = eventProperties(event, queryParams);
+    const attribution = properties.attribution;
+    const clientName = sanitizeDiagnosticValue(event.clientName);
+    const clientVersion = sanitizeDiagnosticValue(event.clientVersion);
+    const deviceCategory = sanitizeDiagnosticValue(event.deviceType ?? event.clientType)?.toLowerCase();
     return {
-      sourceTypeKey: "vercel_web_analytics_drain",
-      sourceId: input.source.id,
-      publicTrackingKey: null,
-      anonymousId: String(event.deviceId ?? "vercel-device"),
-      sessionId: "vercel-session-unavailable",
-      includeSessionMetric: false,
-      eventName: eventName(event),
-      path: event.path ?? "/",
-      url: resolvedUrl(event, input.source),
-      referrer: event.referrer ?? null,
-      userAgent: event.clientName ? `${event.clientName}${event.clientVersion ? ` ${event.clientVersion}` : ""}` : null,
-      country: event.country ?? null,
-      deviceType: event.deviceType ?? null,
-      properties: eventProperties(event),
-      occurredAt,
+      rawPayload: {
+        externalId: eventId,
+        fetchedAt,
+        payload: rawEvent,
+        cursor: { timestamp: event.timestamp ?? null },
+      } satisfies RawPayload,
+      webEvent: {
+        eventId,
+        schemaVersion: "vercel.analytics.v2",
+        eventSource: "vercel_drain",
+        sourceTypeKey: "vercel_web_analytics_drain",
+        sourceId: input.source.id,
+        publicTrackingKey: null,
+        anonymousId,
+        sessionId: "vercel-session-unavailable",
+        includeSessionMetric: false,
+        eventName: eventName(event),
+        path: sanitizePath(event.path),
+        url: resolvedUrl(event, input.source, queryParams),
+        referrer: sanitizeHttpUrl(event.referrer),
+        userAgent: clientName
+          ? `${clientName}${clientVersion ? ` ${clientVersion}` : ""}`.slice(0, MAX_DIAGNOSTIC_VALUE_LENGTH)
+          : null,
+        country: sanitizeDiagnosticValue(event.country, 80),
+        deviceType: sanitizeDiagnosticValue(event.deviceType, 80),
+        properties,
+        attributionContext: attribution && typeof attribution === "object" && !Array.isArray(attribution)
+          ? attribution as JsonRecord
+          : {},
+        consentStatus: { analytics: "unknown", marketing: "unknown" },
+        clientContext: {
+          device_category: deviceCategory && ["mobile", "tablet", "desktop", "bot"].includes(deviceCategory)
+            ? deviceCategory
+            : "unknown",
+        },
+        occurredAt,
+        receivedAt: fetchedAt,
+      } satisfies WebsiteEventIngestionInput,
     };
   });
+
+  const rawPayloads = normalizedEvents.map((event) => event.rawPayload);
+  const webEvents = normalizedEvents.map((event) => event.webEvent);
 
   return {
     count: webEvents.length,

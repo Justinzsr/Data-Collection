@@ -1,6 +1,11 @@
 import { z } from "zod";
-import { getConnector, getConnectorUnavailableReason } from "@/collection/connectors/registry";
+import {
+  getConnector,
+  getConnectorUnavailableReason,
+  getInitialSourceStatus,
+} from "@/collection/connectors/registry";
 import type { JsonRecord, SyncMode } from "@/storage/db/schema";
+import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
 import { resolveDataSpaceFromRequest } from "@/app/api/data-space";
 import { getDataSpaceBySlug, getDefaultDataSpace } from "@/storage/repositories/data-spaces-repository";
 import { createSource, listSources } from "@/storage/repositories/sources-repository";
@@ -75,10 +80,11 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    const syncMode = body.sync_mode ?? connector.defaultSyncMode;
-    if (!supportsSyncMode(syncMode, connector.capabilities)) {
-      return Response.json({ error: `${syncMode} sync is not supported by this connector.` }, { status: 400 });
+    const requestedSyncMode = body.sync_mode ?? connector.defaultSyncMode;
+    if (!supportsSyncMode(requestedSyncMode, connector.capabilities)) {
+      return Response.json({ error: `${requestedSyncMode} sync is not supported by this connector.` }, { status: 400 });
     }
+    const syncMode = connector.key === "website" ? connector.defaultSyncMode : requestedSyncMode;
     const shopifyDetection = connector.key === "shopify" && body.input_url
       ? connector.detect(body.input_url)
       : null;
@@ -88,23 +94,38 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    const websiteDetection = connector.key === "website" && body.input_url
+      ? connector.detect(body.input_url)
+      : null;
+    if (connector.key === "website" && !websiteDetection) {
+      return Response.json(
+        { error: "Website Tracker sources require a valid HTTP(S) URL." },
+        { status: 400 },
+      );
+    }
     const dataSpace = body.data_space_slug
       ? await getDataSpaceBySlug(body.data_space_slug)
       : await getDefaultDataSpace();
     if (!dataSpace) return Response.json({ error: "Unknown data space." }, { status: 400 });
-    const needsCredentials = connector.requiredFields.some((field) => field.required) || connector.key === "supabase";
+    const databaseConfigured = isRuntimeDatabaseConfigured();
+    const metadata = { ...(body.metadata ?? {}) } as JsonRecord;
+    if (connector.key === "website") {
+      delete metadata.demo;
+      delete metadata.public_tracking_key;
+      delete metadata.allowed_origins;
+    }
     const source = await createSource({
       data_space_id: dataSpace.id,
       source_type_key: connector.key,
       display_name: body.display_name ?? connector.displayName,
       input_url: body.input_url ?? null,
-      normalized_url: shopifyDetection?.normalizedUrl ?? body.normalized_url ?? null,
+      normalized_url: shopifyDetection?.normalizedUrl ?? websiteDetection?.normalizedUrl ?? body.normalized_url ?? null,
       external_account_id: shopifyDetection?.externalAccountId ?? body.external_account_id ?? null,
       account_name: shopifyDetection?.accountName ?? body.account_name ?? null,
       sync_mode: syncMode,
       supports_webhook: connector.capabilities.supportsWebhook,
-      status: needsCredentials ? "needs_credentials" : "demo",
-      metadata: body.metadata as JsonRecord | undefined,
+      status: getInitialSourceStatus(connector, databaseConfigured),
+      metadata,
     });
     return Response.json({ source }, { status: 201 });
   } catch (error) {

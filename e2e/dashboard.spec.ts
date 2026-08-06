@@ -1,12 +1,15 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./test";
 import { loginDashboard } from "./auth";
 
 test("dashboard login loads demo data", async ({ page }) => {
   await loginDashboard(page);
-  await expect(page.getByRole("heading", { name: "MoonArq command center" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "MoonArq Website / Vercel" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Indexed source momentum" })).toBeVisible();
-  await expect(page.getByText("Run All Due Sources")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "MoonArq Overview" })).toBeVisible();
+  await expect(page.getByTestId("business-pulse")).toBeVisible();
+  await expect(page.getByTestId("storefront-funnel")).toBeVisible();
+  await expect(page.getByTestId("storefront-conversion-trend")).toBeVisible();
+  const overview = page.getByTestId("dashboard-overview");
+  await expect(overview.getByRole("link", { name: "Sources", exact: true })).toBeVisible();
+  await expect(overview.getByRole("link", { name: "Sync Center", exact: true })).toBeVisible();
 });
 
 test("add source wizard detects Supabase and website", async ({ page }) => {

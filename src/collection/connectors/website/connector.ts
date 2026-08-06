@@ -17,7 +17,7 @@ function normalizeWebsiteUrl(inputUrl: string) {
 export const websiteConnector: ConnectorDefinition = {
   key: "website",
   displayName: "Website Tracker",
-  description: "First-party tracker fallback/helper for MoonArq's website when Vercel Drain is unavailable or when custom event helpers are needed.",
+  description: "Authoritative first-party source for MoonArq website funnels, identity, sessions, attribution, and product events.",
   category: "Website",
   icon: "Globe2",
   availability: "live",
@@ -29,7 +29,7 @@ export const websiteConnector: ConnectorDefinition = {
     {
       key: "allowed_origins",
       label: "Allowed origins",
-      description: "Optional comma-separated origins that may send events to /api/track.",
+      description: "Required in production. Comma-separated exact origins that may send events to /api/track.",
       required: false,
       secret: false,
       type: "text",
@@ -59,9 +59,9 @@ export const websiteConnector: ConnectorDefinition = {
       normalizedUrl: normalized,
       reasons: isMoonArq ? ["MoonArq website URL detected."] : ["HTTP(S) URL can be instrumented with MoonArq first-party tracking."],
       requiredSetup: [
-        "Choose whether MoonArq website should use the official Vercel Drain or the Website Tracker fallback/helper path.",
-        "Install the generated JavaScript snippet or React/Next helper on the website if you choose the tracker path.",
-        "Links identify the source. Private metrics require real drain events or first-party tracking events.",
+        "Install the generated JavaScript snippet or React/Next helper on the website.",
+        "Configure every production origin that may send first-party events.",
+        "Keep Vercel Drain as an auxiliary infrastructure source; first-party events remain authoritative for funnels and attribution.",
       ],
       possibleMetrics: ["page_views", "unique_visitors", "sessions", "custom_events", "events_by_path", "events_by_referrer"],
       demoAvailable: true,
@@ -117,10 +117,11 @@ export const websiteConnector: ConnectorDefinition = {
   },
   getSetupInstructions(source) {
     return [
-      "Use this as the fallback/helper path for MoonArq website if Vercel Drain is unavailable or if you want direct custom-event helpers.",
+      "Use this first-party tracker as the authoritative source for website funnels, identity, sessions, and attribution.",
       "Add the generated script before </body> or use the React/Next helper.",
-      "The snippet automatically sends page_view events and exposes window.moonarqTrack(eventName, properties).",
+      "The v1 snippet automatically sends page_view events and preserves window.moonarqTrack(eventName, properties) for existing installations.",
       "Configure allowed origins on the website source when moving from demo to production.",
+      "Vercel Drain events may be stored alongside tracker events, but aggregation selects the first-party tracker to avoid double counting.",
       `Tracking key: ${String(source?.metadata.public_tracking_key ?? "created after saving")}`,
     ];
   },

@@ -1,0 +1,395 @@
+name: MoonArq Funnel Overview PR validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/moonarq-funnel-overview-pr-validation.yml"
+      - "scripts/ci/funnel-overview-evidence.mjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "playwright.config.ts"
+      - "vitest.config.ts"
+      - "src/storage/db/migrations/**"
+      - "src/storage/repositories/website-funnel-repository.ts"
+      - "src/aggregation/**/website-funnel*"
+      - "src/aggregation/services/platform-modules-service.ts"
+      - "src/app/w/**/dashboard/page.tsx"
+      - "src/presentation/dashboard/comparison-display.ts"
+      - "src/presentation/dashboard/commerce-outcomes.tsx"
+      - "src/presentation/dashboard/moonarq-overview-*"
+      - "src/presentation/dashboard/storefront-*"
+      - "src/presentation/dashboard/website-business-pulse.tsx"
+      - "src/collection/tracking/website-display-privacy.ts"
+      - "tests/unit/storage/website-funnel*"
+      - "tests/unit/aggregation/website-funnel*"
+      - "tests/unit/presentation/**"
+      - "e2e/*.ts"
+      - "docs/metric-definitions.md"
+      - "docs/website-funnel-overview-v1.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: moonarq-funnel-overview-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI: "1"
+  CI_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out the exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert the exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$CI_PR_HEAD_SHA" ]]; then
+            echo "Checked-out HEAD does not match the immutable PR-head SHA." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js 22.22.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Activate pnpm 10.33.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.33.2 --activate
+          [[ "$(node --version)" == "v22.22.0" ]]
+          [[ "$(pnpm --version)" == "10.33.2" ]]
+
+      - name: Install from the frozen lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run unit tests and write sanitized counts
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_report="$RUNNER_TEMP/unit-vitest-raw.json"
+          summary="$RUNNER_TEMP/quality-summary.json"
+          set +e
+          pnpm test --reporter=json --outputFile="$raw_report"
+          test_status=$?
+          set -e
+          node scripts/ci/funnel-overview-evidence.mjs \
+            summarize-vitest quality "$raw_report" "$summary"
+          if [[ "$test_status" -ne 0 ]]; then
+            exit "$test_status"
+          fi
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check whitespace in the worktree and full PR diff
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git cat-file -e "$PR_BASE_SHA^{commit}"
+          git diff --check "$PR_BASE_SHA...$CI_PR_HEAD_SHA"
+
+      - name: Upload sanitized quality fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: funnel-quality-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quality-summary.json
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 2
+
+  postgresql:
+    name: PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: moonarq_funnel_ci
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d moonarq_funnel_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://postgres@127.0.0.1:5432/moonarq_funnel_ci
+      DATABASE_SSL_MODE: disable
+      NODE_ENV: test
+      RUN_WEBSITE_FUNNEL_POSTGRES_TEST: "true"
+    steps:
+      - name: Check out the exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Assert the exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$CI_PR_HEAD_SHA" ]]; then
+            echo "Checked-out HEAD does not match the immutable PR-head SHA." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js 22.22.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Activate pnpm 10.33.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.33.2 --activate
+          [[ "$(node --version)" == "v22.22.0" ]]
+          [[ "$(pnpm --version)" == "10.33.2" ]]
+
+      - name: Install from the frozen lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Guard the disposable database target
+        run: node scripts/ci/funnel-overview-evidence.mjs assert-local-postgres
+
+      - name: Prepare Supabase-compatible local database roles
+        run: node scripts/ci/funnel-overview-evidence.mjs prepare-local-postgres
+
+      - name: Apply exactly migrations 0001 through 0010
+        run: pnpm db:migrate -- --to 0010_rebuild_authoritative_website_metrics.sql
+
+      - name: Run the dedicated PostgreSQL regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_report="$RUNNER_TEMP/postgresql-vitest-raw.json"
+          metadata="$RUNNER_TEMP/postgresql-metadata.json"
+          summary="$RUNNER_TEMP/postgresql-summary.json"
+          set +e
+          pnpm exec vitest run \
+            tests/unit/storage/website-funnel-postgres-integration.test.ts \
+            --reporter=json \
+            --outputFile="$raw_report"
+          test_status=$?
+          set -e
+          node scripts/ci/funnel-overview-evidence.mjs verify-postgres "$metadata"
+          node scripts/ci/funnel-overview-evidence.mjs \
+            summarize-vitest postgresql "$raw_report" "$metadata" "$summary"
+          if [[ "$test_status" -ne 0 ]]; then
+            exit "$test_status"
+          fi
+
+      - name: Upload sanitized PostgreSQL fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: funnel-postgresql-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/postgresql-summary.json
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 2
+
+  playwright:
+    name: Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PLAYWRIGHT_REUSE_SERVER: "false"
+    steps:
+      - name: Check out the exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Assert the exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$CI_PR_HEAD_SHA" ]]; then
+            echo "Checked-out HEAD does not match the immutable PR-head SHA." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js 22.22.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Activate pnpm 10.33.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.33.2 --activate
+          [[ "$(node --version)" == "v22.22.0" ]]
+          [[ "$(pnpm --version)" == "10.33.2" ]]
+
+      - name: Install from the frozen lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Install locked Chromium
+        run: timeout 15m pnpm exec playwright install --with-deps chromium
+
+      - name: Run complete E2E and six-viewport contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_report="$RUNNER_TEMP/playwright-raw.json"
+          summary="$RUNNER_TEMP/playwright-summary.json"
+          export PLAYWRIGHT_JSON_OUTPUT_NAME="$raw_report"
+          set +e
+          timeout --signal=TERM --kill-after=20s 25m \
+            pnpm test:e2e \
+              --reporter=json \
+              --output="$RUNNER_TEMP/playwright-output"
+          test_status=$?
+          set -e
+          node scripts/ci/funnel-overview-evidence.mjs \
+            summarize-playwright "$raw_report" "$summary"
+          if [[ "$test_status" -ne 0 ]]; then
+            exit "$test_status"
+          fi
+
+      - name: Bound browser and localhost server cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          browser_is_running() {
+            pgrep -f "chrome-headless-shell|chromium" >/dev/null 2>&1
+          }
+          port_is_open() {
+            timeout 1 bash -c "</dev/tcp/127.0.0.1/4000" >/dev/null 2>&1
+          }
+          pkill -TERM -f "chrome-headless-shell" >/dev/null 2>&1 || true
+          pkill -TERM -f "chromium" >/dev/null 2>&1 || true
+          if command -v fuser >/dev/null 2>&1; then
+            fuser -k -TERM 4000/tcp >/dev/null 2>&1 || true
+          fi
+          for _ in {1..10}; do
+            if ! browser_is_running && ! port_is_open; then
+              exit 0
+            fi
+            sleep 1
+          done
+          pkill -KILL -f "chrome-headless-shell" >/dev/null 2>&1 || true
+          pkill -KILL -f "chromium" >/dev/null 2>&1 || true
+          if command -v fuser >/dev/null 2>&1; then
+            fuser -k 4000/tcp >/dev/null 2>&1 || true
+          fi
+          if browser_is_running || port_is_open; then
+            echo "Playwright browser or local server did not stop within the cleanup bound." >&2
+            exit 1
+          fi
+
+      - name: Upload sanitized Playwright fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: funnel-playwright-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/playwright-summary.json
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 2
+
+  evidence:
+    name: Sanitized evidence
+    needs: [quality, postgresql, playwright]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Assert the exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$CI_PR_HEAD_SHA" ]]; then
+            echo "Checked-out HEAD does not match the immutable PR-head SHA." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js 22.22.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Download quality fragment
+        uses: actions/download-artifact@v4
+        with:
+          name: funnel-quality-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fragments/quality
+
+      - name: Download PostgreSQL fragment
+        uses: actions/download-artifact@v4
+        with:
+          name: funnel-postgresql-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fragments/postgresql
+
+      - name: Download Playwright fragment
+        uses: actions/download-artifact@v4
+        with:
+          name: funnel-playwright-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fragments/playwright
+
+      - name: Assemble bounded sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ci/funnel-overview-evidence.mjs assemble \
+            "$RUNNER_TEMP/fragments/quality/quality-summary.json" \
+            "$RUNNER_TEMP/fragments/postgresql/postgresql-summary.json" \
+            "$RUNNER_TEMP/fragments/playwright/playwright-summary.json" \
+            "$RUNNER_TEMP/final-evidence"
+          (
+            cd "$RUNNER_TEMP/final-evidence"
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Upload exact-head sanitized evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: moonarq-funnel-overview-evidence-${{ github.event.pull_request.head.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/final-evidence
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 14

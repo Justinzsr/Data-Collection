@@ -100,6 +100,24 @@ describe("platform modules service", () => {
     expect(modules.find((module) => module.sourceTypeKey === "website")?.rangeLabel).toBe("Last 30 days");
   });
 
+  it("labels a healthy first-party source as the authoritative Website Tracker", async () => {
+    const source = getDemoStore().sources.find((item) => item.id === DEMO_SOURCE_IDS.website);
+    if (!source) throw new Error("Website fixture is missing.");
+    source.status = "healthy";
+    source.metadata = { ...source.metadata, demo: false };
+
+    const website = (await getPlatformModules("30d")).find((module) => module.sourceTypeKey === "website");
+    expect(website).toMatchObject({
+      sourceId: source.id,
+      status: "healthy",
+      sourceModeLabel: "Website Tracker",
+      setupState: {
+        label: "Connected",
+        severity: "ok",
+      },
+    });
+  });
+
   it("computes delta vs previous period", () => {
     expect(calculateDelta(150, 100)).toBe(50);
     expect(calculateDelta(0, 0)).toBe(0);
@@ -475,8 +493,10 @@ describe("platform modules service", () => {
     expect(modules.find((module) => module.sourceTypeKey === "website")?.primaryMetric.value).toBe(30);
   });
 
-  it("marks Vercel Drain sessions unavailable instead of showing a fabricated total", async () => {
+  it("keeps Vercel Drain auxiliary when the first-party tracker is disabled", async () => {
     process.env.DEMO_NOW = "2026-07-14T20:00:00.000Z";
+    const firstPartySource = getDemoStore().sources.find((candidate) => candidate.id === DEMO_SOURCE_IDS.website);
+    if (firstPartySource) firstPartySource.status = "disabled";
     const source = await createSource({
       data_space_id: DATA_SPACE_IDS.moonarq,
       source_type_key: "vercel_web_analytics_drain",
@@ -494,10 +514,12 @@ describe("platform modules service", () => {
     const website = (await getPlatformModules("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq }))
       .find((module) => module.sourceTypeKey === "website");
 
-    expect(website?.sourceModeLabel).toBe("Vercel Drain");
+    expect(website?.sourceId).toBeNull();
+    expect(website?.primaryMetric.value).toBe(0);
+    expect(website?.sourceModeLabel).toBe("Demo");
     expect(website?.secondaryMetrics.find((metric) => metric.key === "sessions")).toMatchObject({
-      value: "Unavailable",
-      unit: "status",
+      value: 0,
+      unit: "count",
     });
   });
 
@@ -505,5 +527,24 @@ describe("platform modules service", () => {
     const { getGlobalPlatformHealth } = await import("@/aggregation/services/platform-modules-service");
     const health = await getGlobalPlatformHealth("30d");
     expect(health.dataFreshness).toBe("Fresh");
+  });
+
+  it("excludes auxiliary Drain observations from global tracked event totals", async () => {
+    const { getGlobalPlatformHealth } = await import("@/aggregation/services/platform-modules-service");
+    const before = await getGlobalPlatformHealth("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq });
+    const drain = await createSource({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "vercel_web_analytics_drain",
+      display_name: "Auxiliary Vercel Drain",
+      status: "healthy",
+      sync_mode: "webhook",
+      supports_webhook: true,
+    });
+    await upsertMetrics([
+      { date: "2026-04-22", sourceId: drain.id, sourceTypeKey: "vercel_web_analytics_drain", metricKey: "page_views", metricValue: 999, unit: "count", dimensions: { rollup: "daily" } },
+    ]);
+
+    const after = await getGlobalPlatformHealth("30d", { dataSpaceId: DATA_SPACE_IDS.moonarq });
+    expect(after.trackedEvents).toBe(before.trackedEvents);
   });
 });

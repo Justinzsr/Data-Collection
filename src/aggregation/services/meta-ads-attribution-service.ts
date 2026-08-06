@@ -1,5 +1,5 @@
 import { getDateRange, type DateRangeKey } from "@/aggregation/services/summary-service";
-import { isWebsiteSourceKey } from "@/collection/tracking/website-sources";
+import { resolveAuthoritativeWebsiteSource } from "@/collection/tracking/website-sources";
 import { MOONARQ_FIRST_STORY_CAMPAIGN_NAME, MOONARQ_FIRST_STORY_UTM_TAGS } from "@/collection/connectors/meta-ads/constants";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { JsonRecord, MetricDaily, RawIngestion, Source, WebEvent } from "@/storage/db/schema";
@@ -308,8 +308,10 @@ function utmFromQueryString(value: string | null | undefined): Partial<CampaignU
   });
 }
 
-export function extractWebEventUtm(event: Pick<WebEvent, "url" | "properties">): Partial<CampaignUtm> | null {
-  const attribution = isRecord(event.properties.attribution) ? event.properties.attribution : null;
+export function extractWebEventUtm(event: Pick<WebEvent, "url" | "properties" | "attribution_context">): Partial<CampaignUtm> | null {
+  const attribution = isRecord(event.attribution_context) && Object.keys(event.attribution_context).length > 0
+    ? event.attribution_context
+    : isRecord(event.properties.attribution) ? event.properties.attribution : null;
   const normalized = attribution ? utmFromRecord(attribution.utm) : null;
   if (normalized) return normalized;
 
@@ -1230,11 +1232,14 @@ export async function getInstagramPaidAdsSummary(options: {
   const shopifySource = (linkedShopifySourceId
     ? shopifySources.find((source) => source.id === linkedShopifySourceId)
     : shopifySources.length === 1 ? shopifySources[0] : null) ?? null;
-  const websiteSources = sources.filter((source) => isWebsiteSourceKey(source.source_type_key) && source.status !== "disabled");
+  const websiteSources = sources.filter((source) => source.source_type_key === "website" && source.status !== "disabled");
   const linkedWebsiteSourceId = metaSource ? stringValue(metaSource.metadata.linked_website_source_id) : null;
-  const websiteSource = (linkedWebsiteSourceId
-    ? websiteSources.find((source) => source.id === linkedWebsiteSourceId)
-    : websiteSources.length === 1 ? websiteSources[0] : null) ?? null;
+  const websiteResolution = resolveAuthoritativeWebsiteSource(websiteSources);
+  const websiteSource = linkedWebsiteSourceId
+    ? websiteSources.find((source) => source.id === linkedWebsiteSourceId) ?? null
+    : websiteResolution.status === "resolved"
+      ? websiteResolution.source
+      : null;
   const expectedUtm = sourceUtm(metaSource);
   const [metaRows, shopifyRows, websiteEventCounts, shopifyCapability, metaSnapshot] = await Promise.all([
     metaSource

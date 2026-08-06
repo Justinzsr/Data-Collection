@@ -68,7 +68,7 @@ export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug 
       if (!response.ok) throw new Error(body.error ?? "Could not save credentials.");
       setSaved(body.saved ?? []);
       setValues({});
-      toast.success("Credentials saved", { description: "Secrets are encrypted server-side and only masked hints are returned." });
+      toast.success("Connection settings saved", { description: "Secrets are encrypted and non-secret settings remain server-side." });
     } catch (error) {
       toast.error("Could not save credentials", { description: error instanceof Error ? error.message : "Unknown error" });
     } finally {
@@ -111,7 +111,7 @@ export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug 
           <KeyRound className="h-4 w-4 text-cyan-200" />
           {title}
         </h3>
-        <Badge tone="amber">server encrypted</Badge>
+        <Badge tone="amber">server-side</Badge>
       </div>
       <div className="grid gap-3">
         {fields.map((field) => {

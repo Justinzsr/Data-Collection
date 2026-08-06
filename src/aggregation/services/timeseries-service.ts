@@ -1,6 +1,17 @@
 import { listMetrics } from "@/storage/repositories/metrics-repository";
 import type { SourceTypeKey } from "@/storage/db/schema";
 import { getDateRange, type DateRangeKey } from "@/aggregation/services/summary-service";
+import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
+import { listSources } from "@/storage/repositories/sources-repository";
+
+const WEBSITE_METRIC_KEYS = new Set([
+  "page_views",
+  "unique_visitors",
+  "sessions",
+  "custom_events",
+  "events_by_path",
+  "events_by_referrer",
+]);
 
 function enumerateDays(startDate: string, endDate: string) {
   const days: string[] = [];
@@ -22,12 +33,19 @@ export async function getMetricTimeseries(options: {
 } = {}) {
   const metricKey = options.metricKey ?? "page_views";
   const range = getDateRange(options.range ?? "30d");
+  const requiresAuthoritativeWebsiteSource = !options.sourceId && !options.sourceTypeKey && WEBSITE_METRIC_KEYS.has(metricKey);
+  const authoritativeWebsiteSource = requiresAuthoritativeWebsiteSource
+    ? resolvePrimaryWebsiteSource(await listSources({ dataSpaceId: options.dataSpaceId }))
+    : null;
+  if (requiresAuthoritativeWebsiteSource && !authoritativeWebsiteSource) {
+    return enumerateDays(range.startDate, range.endDate).map((date) => ({ date, value: 0 }));
+  }
   const rows = await listMetrics({
     metricKeys: [metricKey],
     startDate: range.startDate,
     endDate: range.endDate,
-    sourceId: options.sourceId,
-    sourceTypeKey: options.sourceTypeKey,
+    sourceId: options.sourceId ?? authoritativeWebsiteSource?.id,
+    sourceTypeKey: options.sourceTypeKey ?? authoritativeWebsiteSource?.source_type_key,
     dataSpaceId: options.dataSpaceId,
   });
   return enumerateDays(range.startDate, range.endDate).map((date) => ({

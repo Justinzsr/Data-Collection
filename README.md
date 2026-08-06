@@ -63,13 +63,13 @@ Do not use Vercel Deployment Protection for the whole app if it would block webh
 
 ## Demo Mode
 
-When `DATABASE_URL` is missing, the app seeds in-memory demo data for MoonArq website traffic, unique visitors, sessions, custom events, Supabase signups/users, source health, sync runs, and content placeholders. Shopify remains an empty live-connector state until a real store is configured.
+When `DATABASE_URL` is missing, the app seeds in-memory demo data for MoonArq website traffic, unique visitors, sessions, custom events, Supabase signups/users, source health, sync runs, and content placeholders. The demo Website source and its generated-looking public key exist only in memory. Shopify remains an empty live-connector state until a real store is configured.
 
 ```bash
 pnpm db:seed
 ```
 
-When `DATABASE_URL` is configured, `pnpm db:seed` seeds the runtime catalog tables (`source_types`, `metric_definitions`) for the real app database.
+When `DATABASE_URL` is configured, `pnpm db:seed` seeds only the runtime catalog tables (`source_types`, `metric_definitions`) for the real app database. It does not create source rows or tracking credentials.
 
 ## Add A Source
 
@@ -192,14 +192,14 @@ The browser uses an authenticated internal API and refreshes every 60 seconds wh
 
 ## MoonArq Website / Vercel
 
-The website module supports two ingestion modes:
+The website module retains two complementary event streams:
 
 1. `vercel_web_analytics_drain`
-   the official Vercel Web Analytics Drain path for the existing MoonArq Vercel project.
+   the official Vercel Web Analytics Drain path for auxiliary infrastructure and request-level evidence.
 2. `website`
-   the first-party Website Tracker fallback/helper path.
+   the authoritative first-party source for funnel behavior, pseudonymous identity, sessions, and attribution.
 
-Only one of these should be treated as the primary live website ingestion mode at a time to avoid double counting.
+Raw events from both streams are retained. First-party `page_view` events are never discarded because a Drain source also exists; aggregation selects the authoritative source for each metric so overlapping observations are not summed.
 
 ### Vercel Drain
 
@@ -211,9 +211,21 @@ If you set a Signature Verification Secret in Vercel, save the same value as the
 
 ### Website Tracker
 
-Use `/dashboard/events` to copy the lightweight JavaScript snippet or the React/Next helper with `usePageViewTracking()` and `trackEvent(name, properties)` after a real Website Tracker source exists. The tracker posts to `POST /api/track`.
+Use `/dashboard/events` to copy the lightweight JavaScript snippet or the React/Next helper with `usePageViewTracking()` and `trackEvent(name, properties)` after a real Website Tracker source exists. The tracker posts Website Event Contract v1 events to `POST /api/track` while preserving the existing helper APIs.
 
-The tracker path remains available as the fallback/helper even when Vercel Drain is the preferred production mode. In production, tracker events must include a valid `source_id` or `public_tracking_key` and must come from an allowed origin configured on that Website Tracker source.
+The source lifecycle is server-owned. A Website Tracker created through the normal flow is inserted atomically as `healthy` with `metadata.demo = false` when runtime Postgres persistence is configured; without runtime Postgres it remains the in-memory `demo` fixture with `metadata.demo = true`. The server generates its source UUID, public tracking key, exact allowed origin, and webhook URL. Credential-required connectors continue to start as `needs_credentials`, and public create/update requests cannot promote a source by submitting a lifecycle status.
+
+In production, v1 tracker events must include a valid `source_id` and matching `public_tracking_key`, and must come from an allowed origin configured on that Website Tracker source. Legacy payloads remain accepted with either source identifier. New payloads include a client UUID `event_id`, `schema_version: "1.0"`, event time, consent, attribution, and client context; retries reuse `event_id` for idempotent delivery.
+
+See [Website Event Contract v1](docs/website-event-contract-v1.md) for payload, privacy, validation, rate-limit, and compatibility details. Set optional `WEBSITE_TRACKING_RATE_LIMIT_PER_MINUTE` to tune the default 600 requests per minute per source/client.
+
+The canonical MoonArq Overview uses a strict, same-session, first-party funnel
+that ends at checkout started. See
+[MoonArq Website Funnel Overview V1](docs/website-funnel-overview-v1.md) for
+stage denominators, ordering policy, filters, privacy boundaries, and honest
+data states.
+
+Source roles are explicit: the first-party tracker is authoritative for funnel/session/identity/attribution; Vercel Drain is auxiliary; Shopify is authoritative for commerce; and Meta is authoritative for paid media delivery and spend.
 
 ## Manual Sync
 

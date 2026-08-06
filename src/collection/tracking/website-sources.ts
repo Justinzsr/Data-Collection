@@ -3,11 +3,24 @@ import type { Source, SourceTypeKey } from "@/storage/db/schema";
 export const WEBSITE_SOURCE_KEYS = ["vercel_web_analytics_drain", "website"] as const;
 
 export type WebsiteSourceKey = (typeof WEBSITE_SOURCE_KEYS)[number];
+export type AuthoritativeWebsiteSource = Source & { source_type_key: "website" };
 
-const preference: Record<WebsiteSourceKey, number> = {
-  vercel_web_analytics_drain: 0,
-  website: 1,
-};
+export type AuthoritativeWebsiteSourceResolution =
+  | {
+    status: "missing";
+    source: null;
+    candidates: [];
+  }
+  | {
+    status: "resolved";
+    source: AuthoritativeWebsiteSource;
+    candidates: [AuthoritativeWebsiteSource];
+  }
+  | {
+    status: "ambiguous";
+    source: null;
+    candidates: AuthoritativeWebsiteSource[];
+  };
 
 const statusPreference: Record<Source["status"], number> = {
   healthy: 0,
@@ -22,6 +35,24 @@ export function isWebsiteSourceKey(value: SourceTypeKey): value is WebsiteSource
   return WEBSITE_SOURCE_KEYS.includes(value as WebsiteSourceKey);
 }
 
+export function getWebsiteSourceRole(sourceTypeKey: WebsiteSourceKey) {
+  return sourceTypeKey === "website" ? "authoritative" as const : "auxiliary" as const;
+}
+
+export function normalizeAllowedOrigins(value: string) {
+  const candidates = value.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean);
+  if (candidates.length === 0 || candidates.length > 20) {
+    throw new Error("Provide between 1 and 20 allowed HTTP(S) origins.");
+  }
+  return [...new Set(candidates.map((candidate) => {
+    const url = new URL(candidate);
+    if (!["http:", "https:"].includes(url.protocol) || url.origin !== candidate) {
+      throw new Error("Allowed origins must be exact HTTP(S) origins without paths or query strings.");
+    }
+    return url.origin;
+  }))];
+}
+
 export function getWebsiteModeLabel(source: Pick<Source, "source_type_key" | "status"> | null | undefined) {
   if (!source) return "Demo";
   if (source.source_type_key === "vercel_web_analytics_drain") return "Vercel Drain";
@@ -31,12 +62,24 @@ export function getWebsiteModeLabel(source: Pick<Source, "source_type_key" | "st
 
 export function resolvePrimaryWebsiteSource(sources: Source[]) {
   return sources
-    .filter((source): source is Source & { source_type_key: WebsiteSourceKey } => isWebsiteSourceKey(source.source_type_key) && source.status !== "disabled")
-    .sort(
-      (left, right) =>
-        statusPreference[left.status] - statusPreference[right.status] ||
-        preference[left.source_type_key] - preference[right.source_type_key],
-    )[0] ?? null;
+    .filter((source): source is Source & { source_type_key: "website" } => source.source_type_key === "website" && source.status !== "disabled")
+    .sort((left, right) => statusPreference[left.status] - statusPreference[right.status])[0] ?? null;
+}
+
+export function resolveAuthoritativeWebsiteSource(
+  sources: readonly Source[],
+): AuthoritativeWebsiteSourceResolution {
+  const candidates = sources.filter(
+    (source): source is AuthoritativeWebsiteSource => source.source_type_key === "website" && source.status !== "disabled",
+  );
+
+  if (candidates.length === 0) {
+    return { status: "missing", source: null, candidates: [] };
+  }
+  if (candidates.length === 1) {
+    return { status: "resolved", source: candidates[0], candidates: [candidates[0]] };
+  }
+  return { status: "ambiguous", source: null, candidates };
 }
 
 export function listSecondaryWebsiteSources(sources: Source[]) {

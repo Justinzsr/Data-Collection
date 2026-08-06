@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ingestTrackEvent } from "@/collection/tracking/track-endpoint";
+import { ingestTrackEvent as ingestTrackEventAtRuntime } from "@/collection/tracking/track-endpoint";
 import { generateReactHelper, generateTrackingSnippet } from "@/collection/tracking/snippet-generator";
+import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store";
 import { listWebEvents } from "@/storage/repositories/events-repository";
 import { listMetrics } from "@/storage/repositories/metrics-repository";
@@ -18,25 +19,35 @@ const baseEvent = {
   occurred_at: "2026-04-22T12:00:00.000Z",
 };
 
+function ingestTrackEvent(input: unknown, meta: { origin?: string | null; ip?: string | null; userAgent?: string | null }) {
+  const occurredAt = input && typeof input === "object" && "occurred_at" in input && typeof input.occurred_at === "string"
+    ? Date.parse(input.occurred_at)
+    : Date.parse(baseEvent.occurred_at);
+  return ingestTrackEventAtRuntime(input, {
+    ...meta,
+    receivedAt: new Date(occurredAt + 60_000),
+  });
+}
+
 describe("website tracker validation", () => {
   beforeEach(() => resetDemoStore());
 
   it("accepts valid page_view events", async () => {
     const event = await ingestTrackEvent(baseEvent, { origin: "https://moonarqstudio.com" });
-    expect(event.event_name).toBe("page_view");
-    expect(event.ip_hash).toBeNull();
-    expect(event.source_id).not.toBeNull();
+    expect(event.event.event_name).toBe("page_view");
+    expect(event.event.ip_hash).toBeNull();
+    expect(event.event.source_id).not.toBeNull();
   });
 
   it("rejects tracker events without a source id or public tracking key", async () => {
     const eventWithoutKey = { ...baseEvent, public_tracking_key: undefined };
-    await expect(ingestTrackEvent(eventWithoutKey, { origin: "https://moonarqstudio.com" })).rejects.toThrow(/source_id or public_tracking_key/i);
+    await expect(ingestTrackEvent(eventWithoutKey, { origin: "https://moonarqstudio.com" })).rejects.toThrow(/invalid/i);
   });
 
   it("rejects unknown public tracking keys", async () => {
     await expect(
       ingestTrackEvent({ ...baseEvent, public_tracking_key: "mq_unknown_key" }, { origin: "https://moonarqstudio.com" }),
-    ).rejects.toThrow(/not found/i);
+    ).rejects.toThrow(/credentials are invalid/i);
   });
 
   it("rejects disabled website sources before storing an event", async () => {
@@ -94,7 +105,7 @@ describe("website tracker validation", () => {
         { ...baseEvent, source_id: nonWebsiteSource.id, public_tracking_key: undefined },
         { origin: "https://moonarqstudio.com" },
       ),
-    ).rejects.toThrow(/does not accept website tracker events/i);
+    ).rejects.toThrow(/does not accept first-party website events/i);
 
     expect((await listWebEvents(100)).length).toBe(before);
   });
@@ -118,7 +129,7 @@ describe("website tracker validation", () => {
       });
       await expect(
         ingestTrackEvent({ ...baseEvent, source_id: source.id, public_tracking_key: undefined }, { origin: "https://tracker.example" }),
-      ).rejects.toThrow(/allowed origins/i);
+      ).rejects.toThrow(/not configured for the request origin/i);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -235,7 +246,7 @@ describe("website tracker validation", () => {
     }
   });
 
-  it("stores tracker page views as raw events but suppresses rollups when Vercel Drain is primary", async () => {
+  it("keeps first-party page views authoritative while retaining an auxiliary Vercel Drain source", async () => {
     await createSource({
       source_type_key: "vercel_web_analytics_drain",
       display_name: "MoonArq Website Drain",
@@ -263,13 +274,10 @@ describe("website tracker validation", () => {
     const events = await listWebEvents(20);
     const stored = events.find((event) => event.occurred_at === "2026-05-01T12:00:00.000Z");
 
-    expect(pageViews).toBeUndefined();
-    expect(stored?.properties).toMatchObject({
-      moonarq_ingestion: {
-        suppressed_rollup: true,
-        reason: "vercel_drain_primary",
-      },
-    });
+    expect(pageViews?.metric_value).toBe(1);
+    expect(stored?.event_source).toBe("first_party_tracker");
+    expect(stored?.properties).not.toHaveProperty("moonarq_ingestion");
+    expect(resolvePrimaryWebsiteSource(getDemoStore().sources)?.source_type_key).toBe("website");
   });
 
   it("keeps the healthy tracker primary while the Vercel Drain needs attention", async () => {
@@ -296,7 +304,7 @@ describe("website tracker validation", () => {
     expect(rows.find((row) => row.metric_key === "page_views" && row.dimensions.rollup === "daily")?.metric_value).toBe(1);
   });
 
-  it("keeps tracker custom events available when Vercel Drain is primary", async () => {
+  it("keeps tracker custom events authoritative while Vercel Drain remains auxiliary", async () => {
     await createSource({
       source_type_key: "vercel_web_analytics_drain",
       display_name: "MoonArq Website Drain",
@@ -327,16 +335,23 @@ describe("website tracker validation", () => {
   });
 
   it("generates copyable tracking snippets", () => {
-    const snippet = generateTrackingSnippet({ endpoint: "https://app.example.com/api/track", publicTrackingKey: "mq_public" });
-    const helper = generateReactHelper({ endpoint: "https://app.example.com/api/track", publicTrackingKey: "mq_public" });
+    const snippet = generateTrackingSnippet({ endpoint: "https://app.example.com/api/track", publicTrackingKey: "mq_public", sourceId: "11111111-1111-4111-8111-111111111111" });
+    const helper = generateReactHelper({ endpoint: "https://app.example.com/api/track", publicTrackingKey: "mq_public", sourceId: "11111111-1111-4111-8111-111111111111" });
     expect(snippet.trim().length).toBeGreaterThan(0);
     expect(snippet).toContain("window.moonarqTrack");
     expect(snippet).toContain("moonarq_anonymous_id");
     expect(snippet).toContain("moonarq_session_id");
     expect(snippet).toContain("page_view");
+    expect(snippet).toContain("event_id");
+    expect(snippet).toContain('schema_version: "1.0"');
+    expect(snippet).toContain("attribution");
+    expect(snippet).toContain("consent");
+    expect(snippet).toContain("client_context");
+    expect(snippet).toContain("source_id");
     expect(snippet).toContain("https://app.example.com/api/track");
     expect(snippet).toContain("mq_public");
     expect(helper).toContain("usePageViewTracking");
     expect(helper).toContain("trackEvent");
+    expect(helper).toContain('schema_version: "1.0"');
   });
 });

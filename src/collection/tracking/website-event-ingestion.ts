@@ -1,11 +1,14 @@
 import { incrementMetrics } from "@/storage/repositories/metrics-repository";
 import { hasWebEventIdentity, storeWebEvent } from "@/storage/repositories/events-repository";
-import type { JsonRecord, WebEvent } from "@/storage/db/schema";
+import type { JsonRecord, WebEvent, WebEventSchemaVersion, WebEventSource } from "@/storage/db/schema";
 import type { WebsiteSourceKey } from "@/collection/tracking/website-sources";
 import { dateKeyInAppTimeZone } from "@/storage/runtime/app-time";
 import { isRuntimeDatabaseConfigured, query, withDatabaseTransaction, type DatabaseExecutor } from "@/storage/db/client";
 
 export interface WebsiteEventIngestionInput {
+  eventId: string;
+  schemaVersion: WebEventSchemaVersion;
+  eventSource: WebEventSource;
   sourceTypeKey: WebsiteSourceKey;
   sourceId: string | null;
   publicTrackingKey: string | null;
@@ -22,13 +25,17 @@ export interface WebsiteEventIngestionInput {
   country?: string | null;
   deviceType?: string | null;
   properties?: JsonRecord;
+  attributionContext?: JsonRecord;
+  consentStatus?: JsonRecord;
+  clientContext?: JsonRecord;
   occurredAt: string;
+  receivedAt: string;
 }
 
 async function ingestWebsiteEventWithExecutor(
   input: WebsiteEventIngestionInput,
   executor?: DatabaseExecutor,
-): Promise<WebEvent> {
+): Promise<{ event: WebEvent; inserted: boolean }> {
   const date = dateKeyInAppTimeZone(input.occurredAt);
   if (executor) {
     await query(
@@ -48,7 +55,10 @@ async function ingestWebsiteEventWithExecutor(
         executor,
       );
 
-  const event = await storeWebEvent({
+  const stored = await storeWebEvent({
+    event_id: input.eventId,
+    schema_version: input.schemaVersion,
+    event_source: input.eventSource,
     source_id: input.sourceId,
     public_tracking_key: input.publicTrackingKey,
     anonymous_id: input.anonymousId,
@@ -63,8 +73,14 @@ async function ingestWebsiteEventWithExecutor(
     country: input.country ?? null,
     device_type: input.deviceType ?? null,
     properties: input.properties ?? {},
+    attribution_context: input.attributionContext ?? {},
+    consent_status: input.consentStatus ?? {},
+    client_context: input.clientContext ?? {},
     occurred_at: input.occurredAt,
+    received_at: input.receivedAt,
   }, executor);
+  if (!stored.inserted) return stored;
+  const event = stored.event;
 
   const metrics = [
     {
@@ -120,13 +136,13 @@ async function ingestWebsiteEventWithExecutor(
   }
 
   await incrementMetrics(metrics, executor);
-  return event;
+  return stored;
 }
 
 export async function ingestWebsiteEvent(
   input: WebsiteEventIngestionInput,
   executor?: DatabaseExecutor,
-): Promise<WebEvent> {
+): Promise<{ event: WebEvent; inserted: boolean }> {
   if (executor) return ingestWebsiteEventWithExecutor(input, executor);
   if (!isRuntimeDatabaseConfigured()) return ingestWebsiteEventWithExecutor(input);
   return withDatabaseTransaction((client) => ingestWebsiteEventWithExecutor(input, client));

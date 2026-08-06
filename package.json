@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:preflight:0009": "tsx scripts/preflight-0009-migration.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "sync:all": "tsx scripts/sync-all.ts"
   },
