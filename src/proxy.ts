@@ -7,6 +7,12 @@ import {
   verifyDashboardSession,
 } from "@/storage/auth/dashboard-session";
 
+const PRIVATE_API_NO_STORE_HEADERS = {
+  "Cache-Control": "private, no-store, max-age=0",
+  Pragma: "no-cache",
+  Vary: "Cookie",
+};
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
@@ -28,7 +34,7 @@ export async function proxy(request: NextRequest) {
           error: "Dashboard access is not configured.",
           missing: setup.missing,
         },
-        { status: 503 },
+        { status: 503, headers: PRIVATE_API_NO_STORE_HEADERS },
       );
     }
     const loginUrl = new URL("/login", request.url);
@@ -43,7 +49,10 @@ export async function proxy(request: NextRequest) {
   if (authenticated) return NextResponse.next();
 
   if (privateApi) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return NextResponse.json(
+      { error: "Unauthorized." },
+      { status: 401, headers: PRIVATE_API_NO_STORE_HEADERS },
+    );
   }
 
   const loginUrl = new URL("/login", request.url);

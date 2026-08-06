@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   Globe2,
+  MailPlus,
   Rocket,
   ShoppingBag,
   Video,
@@ -169,6 +170,12 @@ export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", 
 
             <div className="flex flex-wrap gap-2">
               {module.sourceId && module.actions.canRunSync ? <SyncActionButton sourceId={module.sourceId} dataSpaceSlug={dataSpaceSlug} compact /> : null}
+              {module.sourceTypeKey === "supabase" && dataSpaceSlug === "moonarq" ? (
+                <LinkButton href={`${basePath}/supabase/email-marketing`} variant="primary" className="min-h-9 px-3 text-xs">
+                  <MailPlus className="h-3.5 w-3.5" />
+                  Email Marketing
+                </LinkButton>
+              ) : null}
               {module.sourceId && module.actions.canViewDetails ? (
                 <LinkButton href={`${basePath}/sources/${module.sourceId}`} variant="secondary" className="min-h-9 px-3 text-xs">
                   <ExternalLink className="h-3.5 w-3.5" />

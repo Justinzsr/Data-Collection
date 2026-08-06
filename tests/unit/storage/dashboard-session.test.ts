@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { proxy } from "@/proxy";
 import {
   DASHBOARD_SESSION_COOKIE,
   DEFAULT_DASHBOARD_PATH,
@@ -11,6 +13,16 @@ import {
   signDashboardSession,
   verifyDashboardSession,
 } from "@/storage/auth/dashboard-session";
+
+function expectPrivateNoStore(response: Response) {
+  expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+  expect(response.headers.get("pragma")).toBe("no-cache");
+  expect(response.headers.get("vary")).toBe("Cookie");
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("dashboard session gate", () => {
   it("signs and verifies dashboard sessions", async () => {
@@ -63,5 +75,36 @@ describe("dashboard session gate", () => {
     expect(isPrivateApiPath("/api/cron/daily-report")).toBe(false);
     expect(isPrivateApiPath("/api/webhooks/supabase/source")).toBe(false);
     expect(isPrivateApiPath("/api/webhooks/vercel/analytics-drain/source")).toBe(false);
+  });
+
+  it("returns a sanitized no-store response before an unauthenticated private API can read data", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEV_AUTH_BYPASS", "false");
+    vi.stubEnv("DASHBOARD_ADMIN_PASSWORD", "synthetic-dashboard-password");
+    vi.stubEnv("DASHBOARD_SESSION_SECRET", "synthetic-dashboard-session-secret");
+
+    const response = await proxy(
+      new NextRequest("https://app.example.com/api/metrics/email-signups?dataSpaceSlug=moonarq"),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({ error: "Unauthorized." });
+    expect(JSON.stringify(body)).not.toMatch(/@|shopify|customer|signup/iu);
+    expectPrivateNoStore(response);
+  });
+
+  it("keeps a missing-auth-setup private API response non-cacheable", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEV_AUTH_BYPASS", "false");
+    vi.stubEnv("DASHBOARD_ADMIN_PASSWORD", "");
+    vi.stubEnv("DASHBOARD_SESSION_SECRET", "");
+
+    const response = await proxy(
+      new NextRequest("https://app.example.com/api/metrics/email-signups?dataSpaceSlug=moonarq"),
+    );
+
+    expect(response.status).toBe(503);
+    expectPrivateNoStore(response);
   });
 });

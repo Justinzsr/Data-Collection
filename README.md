@@ -184,6 +184,12 @@ Admin fallback mode uses only the monitored MoonArq Supabase project URL plus en
 
 `auth.users` is not available through normal public APIs. Use the SQL setup instructions in the source detail UI to mirror signups into `public.profiles` when you want the event-driven path.
 
+### Email Marketing
+
+The Supabase module includes a read-only Email Marketing child view at `/w/moonarq/dashboard/supabase/email-marketing`. It reads `moonarq-web.public.email_signups` directly with the existing encrypted per-source service-role credential; it does not query the Data Hub runtime project or Google Sheets.
+
+The browser uses an authenticated internal API and refreshes every 60 seconds while the page is visible. The service-role key stays server-only, responses use private `no-store` caching, and only transient network, timeout, or 5xx failures retain the last successful dataset. A 401/403 clears protected data and locks the view until login; no Zapier workflow or email-signup row is modified. See [docs/email-marketing.md](docs/email-marketing.md) for the integration contract.
+
 ## MoonArq Website / Vercel
 
 The website module retains two complementary event streams:
