@@ -1,10 +1,15 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getConnector } from "@/collection/connectors/registry";
 import { enqueueSyncRun } from "@/collection/sync/engine";
 import {
+  extractShopifyBridgeIdentity,
   fetchShopifySnapshot,
   hashShopifySnapshot,
   normalizeShopifyStoreUrl,
+  SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY,
+  SHOPIFY_COMMERCE_BRIDGE_VERSION,
+  SHOPIFY_ITEM_INSTANCE_ATTRIBUTE_KEY,
   type ShopifyCustomerJourneySummary,
   type ShopifyCustomerVisit,
   type ShopifyOrder,
@@ -15,6 +20,7 @@ import { DATA_SPACE_IDS } from "@/storage/data-spaces";
 import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store";
 import { saveCredential } from "@/storage/repositories/credentials-repository";
 import { createSource } from "@/storage/repositories/sources-repository";
+import { SHOPIFY_COMMERCE_FACTS_V2_FLAG } from "@/storage/runtime/commerce-feature-flags";
 
 const CLIENT_ID = "shopify-client-id-for-tests";
 const CLIENT_SECRET = "shopify-client-secret-for-tests";
@@ -55,20 +61,25 @@ function order(input: Partial<ShopifyOrder> & Pick<ShopifyOrder, "id" | "created
     id,
     createdAt,
     test: false,
+    cancelledAt: null,
     currencyCode: "USD",
     subtotalPriceSet: money("90.00"),
     totalDiscountsSet: money("10.00"),
     currentTotalPriceSet: money("85.00"),
     netPaymentSet: money("80.00"),
     totalRefundedSet: money("5.00"),
+    checkoutEventIdHash: null,
+    checkoutBridgeState: "missing",
     customerJourneySummary: null,
     lineItems: {
       nodes: [
         {
-          id: `${input.id}-line-1`,
+          id: `gid://shopify/LineItem/${input.id.split("/").at(-1)}01`,
           name: "Moon Bracelet",
           quantity: 2,
           originalUnitPriceSet: money("50.00"),
+          itemInstanceIdHash: null,
+          itemBridgeState: "missing",
         },
       ],
       pageInfo: { hasNextPage: false },
@@ -77,11 +88,13 @@ function order(input: Partial<ShopifyOrder> & Pick<ShopifyOrder, "id" | "created
   };
 }
 
-function orderWithoutLineItems(value: ShopifyOrder): Omit<ShopifyOrder, "lineItems"> {
+function orderWithoutLineItems(value: ShopifyOrder) {
   return {
     id: value.id,
     createdAt: value.createdAt,
     test: value.test,
+    cancelledAt: value.cancelledAt,
+    customAttributes: [],
     currencyCode: value.currencyCode,
     subtotalPriceSet: value.subtotalPriceSet,
     totalDiscountsSet: value.totalDiscountsSet,
@@ -132,6 +145,18 @@ type MockOptions = {
   lineItemMissingCursor?: boolean;
   omitFirstOrder?: boolean;
   firstOrderJourney?: ShopifyCustomerJourneySummary | null;
+  orderCustomAttributes?: Array<{ key: string; value: string }>;
+  lineItemCustomAttributes?: Array<{ key: string; value: string }>;
+  missingFirstOrderNetPayment?: boolean;
+  missingFirstOrderDiscounts?: boolean;
+  missingFirstOrderLinePrice?: boolean;
+  firstOrderSubtotalAmount?: string;
+  firstOrderDiscountAmount?: string;
+  firstOrderCurrentTotalAmount?: string;
+  firstOrderNetPaymentAmount?: string;
+  firstOrderRefundedAmount?: string;
+  firstOrderLineAmount?: string;
+  firstOrderLineQuantity?: number;
 };
 
 function mockShopifyApi(options: MockOptions = {}) {
@@ -140,6 +165,22 @@ function mockShopifyApi(options: MockOptions = {}) {
     id: "gid://shopify/Order/1",
     createdAt: "2026-07-14T05:30:00.000Z",
     customerJourneySummary: options.firstOrderJourney ?? null,
+    subtotalPriceSet: money(options.firstOrderSubtotalAmount ?? "90.00"),
+    totalDiscountsSet: money(options.firstOrderDiscountAmount ?? "10.00"),
+    currentTotalPriceSet: money(options.firstOrderCurrentTotalAmount ?? "85.00"),
+    netPaymentSet: money(options.firstOrderNetPaymentAmount ?? "80.00"),
+    totalRefundedSet: money(options.firstOrderRefundedAmount ?? "5.00"),
+    lineItems: {
+      nodes: [{
+        id: "gid://shopify/LineItem/101",
+        name: "Moon Bracelet",
+        quantity: options.firstOrderLineQuantity ?? 2,
+        originalUnitPriceSet: money(options.firstOrderLineAmount ?? "50.00"),
+        itemInstanceIdHash: null,
+        itemBridgeState: "missing",
+      }],
+      pageInfo: { hasNextPage: false },
+    },
   });
   const testOrder = order({ id: "gid://shopify/Order/2", createdAt: "2026-07-14T07:00:00.000Z", test: true });
   const secondOrder = order({
@@ -157,11 +198,23 @@ function mockShopifyApi(options: MockOptions = {}) {
           name: "Orbit Charm",
           quantity: 1,
           originalUnitPriceSet: money("40.00"),
+          itemInstanceIdHash: null,
+          itemBridgeState: "missing",
         },
       ],
       pageInfo: { hasNextPage: false },
     },
   });
+  const lineApiNodes = (value: ShopifyOrder) => value.lineItems.nodes.map((item) => ({
+    id: item.id,
+    name: item.name,
+    quantity: item.quantity,
+    originalUnitPriceSet:
+      value.id === firstOrder.id && options.missingFirstOrderLinePrice
+        ? null
+        : item.originalUnitPriceSet,
+    customAttributes: options.lineItemCustomAttributes ?? [],
+  }));
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
     if (url.endsWith("/admin/oauth/access_token")) {
@@ -196,7 +249,13 @@ function mockShopifyApi(options: MockOptions = {}) {
     if (parsed.query?.includes("MoonArqShopifyOrderLineItems")) {
       const orderId = String(parsed.variables?.orderId ?? "");
       const after = parsed.variables?.after;
-      const sourceOrder = orderId === firstOrder.id ? firstOrder : orderId === secondOrder.id ? secondOrder : null;
+      const sourceOrder = orderId === firstOrder.id
+        ? firstOrder
+        : orderId === testOrder.id
+          ? testOrder
+          : orderId === secondOrder.id
+            ? secondOrder
+            : null;
       if (!sourceOrder) return jsonResponse({ data: { order: null } });
       if (orderId === firstOrder.id && options.lineItemPagination) {
         if (after === "line-page-2") {
@@ -210,6 +269,7 @@ function mockShopifyApi(options: MockOptions = {}) {
                     name: "Moon Charm",
                     quantity: 1,
                     originalUnitPriceSet: money("15.00"),
+                    customAttributes: options.lineItemCustomAttributes ?? [],
                   }],
                   pageInfo: { hasNextPage: false, endCursor: null },
                 },
@@ -222,7 +282,7 @@ function mockShopifyApi(options: MockOptions = {}) {
             order: {
               id: orderId,
               lineItems: {
-                nodes: sourceOrder.lineItems.nodes,
+                nodes: lineApiNodes(sourceOrder),
                 pageInfo: {
                   hasNextPage: true,
                   endCursor: options.lineItemMissingCursor ? null : "line-page-2",
@@ -238,7 +298,7 @@ function mockShopifyApi(options: MockOptions = {}) {
             order: {
               id: orderId,
               lineItems: {
-                nodes: sourceOrder.lineItems.nodes,
+                nodes: lineApiNodes(sourceOrder),
                 pageInfo: { hasNextPage: true, endCursor: null },
               },
             },
@@ -250,7 +310,7 @@ function mockShopifyApi(options: MockOptions = {}) {
           order: {
             id: orderId,
             lineItems: {
-              nodes: sourceOrder.lineItems.nodes,
+              nodes: lineApiNodes(sourceOrder),
               pageInfo: { hasNextPage: false, endCursor: null },
             },
           },
@@ -258,7 +318,12 @@ function mockShopifyApi(options: MockOptions = {}) {
       });
     }
     const after = parsed.variables?.after;
-    const firstOrderCore = orderWithoutLineItems(firstOrder);
+    const firstOrderCore = {
+      ...orderWithoutLineItems(firstOrder),
+      customAttributes: options.orderCustomAttributes ?? [],
+      netPaymentSet: options.missingFirstOrderNetPayment ? null : firstOrder.netPaymentSet,
+      totalDiscountsSet: options.missingFirstOrderDiscounts ? null : firstOrder.totalDiscountsSet,
+    };
     const testOrderCore = orderWithoutLineItems(testOrder);
     const secondOrderCore = orderWithoutLineItems(secondOrder);
     return jsonResponse({
@@ -285,6 +350,7 @@ describe("Shopify client-credentials connector", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -300,6 +366,175 @@ describe("Shopify client-credentials connector", () => {
     expect(normalizeShopifyStoreUrl("http://moonarq-store.myshopify.com")).toBeNull();
     expect(normalizeShopifyStoreUrl("https://169.254.169.254/latest/meta-data")).toBeNull();
     expect(normalizeShopifyStoreUrl("https://moonarq-store.myshopify.com.attacker.example")).toBeNull();
+  });
+
+  it("hashes only one strict allowlisted UUIDv4 and fails closed on duplicate target keys", () => {
+    const uppercaseUuid = "A0B1C2D3-E4F5-4A67-8B90-C1D2E3F4A5B6";
+    const expectedHash = createHash("sha256").update(uppercaseUuid.toLowerCase()).digest("hex");
+    expect(extractShopifyBridgeIdentity([
+      { key: "unrelated_attribute", value: "must-never-persist" },
+      { key: SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY, value: uppercaseUuid },
+    ], SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY)).toEqual({ hash: expectedHash, state: "matched" });
+    expect(extractShopifyBridgeIdentity([], SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY)).toEqual({
+      hash: null,
+      state: "missing",
+    });
+    expect(extractShopifyBridgeIdentity([
+      { key: SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY, value: uppercaseUuid },
+      { key: SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY, value: uppercaseUuid },
+    ], SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY)).toEqual({ hash: null, state: "ambiguous" });
+    expect(extractShopifyBridgeIdentity([
+      { key: SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY, value: ` ${uppercaseUuid}` },
+    ], SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY)).toEqual({ hash: null, state: "invalid" });
+    expect(extractShopifyBridgeIdentity(null, SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY)).toEqual({
+      hash: null,
+      state: "invalid",
+    });
+  });
+
+  it("discards arbitrary custom attributes and raw UUIDs while retaining hashed order and test-line bridges", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "true");
+    const checkoutUuid = "A0B1C2D3-E4F5-4A67-8B90-C1D2E3F4A5B6";
+    const itemUuid = "B1C2D3E4-F5A6-4B78-9C01-D2E3F4A5B6C7";
+    const checkoutHash = createHash("sha256").update(checkoutUuid.toLowerCase()).digest("hex");
+    const itemHash = createHash("sha256").update(itemUuid.toLowerCase()).digest("hex");
+    const { requests } = mockShopifyApi({
+      orderCustomAttributes: [
+        { key: "email", value: "private@example.invalid" },
+        { key: SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY, value: checkoutUuid },
+      ],
+      lineItemCustomAttributes: [
+        { key: "engraving", value: "private free-form text" },
+        { key: SHOPIFY_ITEM_INSTANCE_ATTRIBUTE_KEY, value: itemUuid },
+      ],
+    });
+    const sync = await getConnector("shopify").sync({
+      source: shopifySource(),
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    });
+
+    const snapshot = sync.rawPayloads[0].payload as unknown as ShopifySyncSnapshot;
+    expect(snapshot.commerceBridgeVersion).toBe(SHOPIFY_COMMERCE_BRIDGE_VERSION);
+    expect(snapshot.orders.find((item) => item.id.endsWith("/1"))).toMatchObject({
+      checkoutEventIdHash: checkoutHash,
+      checkoutBridgeState: "matched",
+    });
+    const syntheticTestOrder = snapshot.orders.find((item) => item.test);
+    expect(syntheticTestOrder?.lineItems.nodes).toHaveLength(1);
+    expect(syntheticTestOrder?.lineItems.nodes[0]).toMatchObject({
+      itemInstanceIdHash: itemHash,
+      itemBridgeState: "matched",
+    });
+    expect(sync.commerceOrderFacts?.find((item) => item.test)?.lines).toHaveLength(1);
+
+    const persistedShape = JSON.stringify(sync.rawPayloads);
+    for (const forbidden of [
+      checkoutUuid,
+      checkoutUuid.toLowerCase(),
+      itemUuid,
+      itemUuid.toLowerCase(),
+      "customAttributes",
+      "private@example.invalid",
+      "private free-form text",
+      "engraving",
+    ]) {
+      expect(persistedShape).not.toContain(forbidden);
+    }
+    expect(persistedShape).toContain(checkoutHash);
+    expect(persistedShape).toContain(itemHash);
+
+    const orderQuery = requests.find((request) => String(request.body?.query).includes("MoonArqShopifyOrders"));
+    const lineQuery = requests.find((request) => String(request.body?.query).includes("MoonArqShopifyOrderLineItems"));
+    expect(String(orderQuery?.body?.query)).toContain("customAttributes { key value }");
+    expect(String(lineQuery?.body?.query)).toContain("customAttributes { key value }");
+  });
+
+  it("fails closed when Shopify omits a required commerce money bag instead of inventing zero", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "true");
+    mockShopifyApi({ missingFirstOrderNetPayment: true });
+    await expect(getConnector("shopify").sync({
+      source: shopifySource(),
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    })).rejects.toThrow("net payment was missing");
+  });
+
+  it("reconstructs V2 gross sales from complete lines when an order discount bag is missing", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "true");
+    mockShopifyApi({ missingFirstOrderDiscounts: true });
+    const sync = await getConnector("shopify").sync({
+      source: shopifySource(),
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    });
+    expect(sync.commerceOrderFacts?.find((orderFact) => orderFact.shopifyOrderId.endsWith("/1"))).toMatchObject({
+      grossSales: "100",
+    });
+  });
+
+  it("keeps V2 authoritative money exact while preserving V1 numeric metrics", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "true");
+    mockShopifyApi({
+      firstOrderSubtotalAmount: "0.100000000000000001",
+      firstOrderDiscountAmount: "0.200000000000000002",
+      firstOrderCurrentTotalAmount: "000.3000",
+      firstOrderNetPaymentAmount: "0.300000000000000003",
+      firstOrderRefundedAmount: "0.0000",
+    });
+    const connector = getConnector("shopify");
+    const source = shopifySource();
+    const sync = await connector.sync({
+      source,
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    });
+    expect(sync.commerceOrderFacts?.find((fact) => fact.shopifyOrderId.endsWith("/1"))).toMatchObject({
+      grossSales: "0.300000000000000003",
+      currentTotal: "0.3",
+      netPayment: "0.300000000000000003",
+      totalRefunded: "0",
+    });
+
+    const normalized = await connector.normalize(sync.rawPayloads, source);
+    expect(normalized.metrics.find((item) => (
+      item.metricKey === "gross_sales" && item.date === "2026-07-13"
+    ))?.metricValue).toBe(0.3);
+  });
+
+  it("multiplies V2 line-item prices by quantity without binary floating point", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "true");
+    mockShopifyApi({
+      missingFirstOrderDiscounts: true,
+      firstOrderLineAmount: "0.100000000000000001",
+      firstOrderLineQuantity: 3,
+    });
+    const sync = await getConnector("shopify").sync({
+      source: shopifySource(),
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    });
+    expect(sync.commerceOrderFacts?.find((fact) => fact.shopifyOrderId.endsWith("/1"))?.grossSales)
+      .toBe("0.300000000000000003");
+  });
+
+  it("fails closed when gross-sales fallback is missing a line original-price bag", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "true");
+    mockShopifyApi({
+      missingFirstOrderDiscounts: true,
+      missingFirstOrderLinePrice: true,
+    });
+    await expect(getConnector("shopify").sync({
+      source: shopifySource(),
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    })).rejects.toThrow("line-item original price was missing");
   });
 
   it("tests the installed app without exposing the token or client secret", async () => {
@@ -671,7 +906,43 @@ describe("Shopify client-credentials connector", () => {
     expect(snapshot.orders.find((item) => item.id === "gid://shopify/Order/3")?.customerJourneySummary).toBeNull();
   });
 
-  it("keeps an unchanged same-day replay idempotent in raw storage and daily metrics", async () => {
+  it("keeps the commerce writer dormant by default and does not evaluate V2 required-money rules", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "false");
+    mockShopifyApi({ missingFirstOrderNetPayment: true });
+    const dormantSync = await getConnector("shopify").sync({
+      source: shopifySource(),
+      credentials: { shopify_client_id: CLIENT_ID, shopify_client_secret: CLIENT_SECRET },
+      isDemoMode: false,
+      trigger: "manual",
+    });
+    expect(dormantSync.commerceOrderFacts).toBeUndefined();
+    expect(dormantSync.replaceCommerceOrderWindow).toBeUndefined();
+
+    const source = await createSource({
+      data_space_id: DATA_SPACE_IDS.moonarq,
+      source_type_key: "shopify",
+      display_name: "MoonArq Shopify dormant writer",
+      input_url: "https://moonarq-store.myshopify.com",
+      normalized_url: "https://moonarq-store.myshopify.com",
+      external_account_id: "moonarq-store.myshopify.com",
+      account_name: "moonarq-store",
+      status: "needs_credentials",
+      sync_mode: "hourly",
+    });
+    await saveCredential(source.id, "shopify_client_id", CLIENT_ID);
+    await saveCredential(source.id, "shopify_client_secret", CLIENT_SECRET);
+
+    const run = await enqueueSyncRun({ sourceId: source.id, trigger: "manual" });
+
+    expect(run.status).toBe("success");
+    expect(getDemoStore().rawIngestions.some((item) => item.source_id === source.id)).toBe(true);
+    expect(getDemoStore().metricsDaily.some((item) => item.source_id === source.id)).toBe(true);
+    expect(getDemoStore().commerceOrders.filter((item) => item.source_id === source.id)).toHaveLength(0);
+    expect(getDemoStore().commerceOrderLines).toHaveLength(0);
+  });
+
+  it("writes V2 commerce facts only when enabled and keeps an unchanged replay idempotent", async () => {
+    vi.stubEnv(SHOPIFY_COMMERCE_FACTS_V2_FLAG, "true");
     mockShopifyApi();
     const source = await createSource({
       data_space_id: DATA_SPACE_IDS.moonarq,
@@ -689,12 +960,21 @@ describe("Shopify client-credentials connector", () => {
 
     const first = await enqueueSyncRun({ sourceId: source.id, trigger: "manual" });
     const sourceMetricsAfterFirst = getDemoStore().metricsDaily.filter((item) => item.source_id === source.id).length;
+    const commerceOrderCountAfterFirst = getDemoStore().commerceOrders.filter(
+      (item) => item.source_id === source.id,
+    ).length;
+    const commerceLineCountAfterFirst = getDemoStore().commerceOrderLines.length;
     const second = await enqueueSyncRun({ sourceId: source.id, trigger: "manual" });
 
     expect(first.status).toBe("success");
     expect(second.status).toBe("success");
     expect(getDemoStore().rawIngestions.filter((item) => item.source_id === source.id)).toHaveLength(1);
     expect(getDemoStore().metricsDaily.filter((item) => item.source_id === source.id)).toHaveLength(sourceMetricsAfterFirst);
+    expect(commerceOrderCountAfterFirst).toBe(3);
+    expect(commerceLineCountAfterFirst).toBe(3);
+    expect(getDemoStore().commerceOrders.filter((item) => item.source_id === source.id)).toHaveLength(3);
+    expect(getDemoStore().commerceOrderLines).toHaveLength(3);
+    expect(getDemoStore().commerceOrders.some((item) => item.test)).toBe(true);
     expect(second.records_inserted).toBe(0);
   });
 
@@ -765,6 +1045,7 @@ describe("Shopify client-credentials connector", () => {
     const snapshot: ShopifySyncSnapshot = {
       kind: "shopify_orders_snapshot",
       attributionVersion: "customer-journey-v1",
+      commerceBridgeVersion: SHOPIFY_COMMERCE_BRIDGE_VERSION,
       fetchedAt: NOW.toISOString(),
       apiVersion: "2026-07",
       lookbackDays: 60,

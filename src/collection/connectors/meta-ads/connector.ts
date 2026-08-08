@@ -476,10 +476,20 @@ export const metaAdsConnector: ConnectorDefinition = {
           fetchedAt,
           payload: snapshot as unknown as JsonRecord,
           payloadHash: hashMetaAdsSnapshot(snapshot),
-          cursor: { accountId: account.id, ...window, fetchedAt },
+          cursor: {
+            accountId: account.id,
+            accountTimeZone: account.timezone_name ?? null,
+            ...window,
+            fetchedAt,
+          },
         },
       ],
-      cursorAfter: { accountId: account.id, ...window, fetchedAt },
+      cursorAfter: {
+        accountId: account.id,
+        accountTimeZone: account.timezone_name ?? null,
+        ...window,
+        fetchedAt,
+      },
       recordsFetched: snapshot.ads.length + snapshot.insights.length,
       message: `Synced ${snapshot.insights.length} Meta Ads ad/day insight row(s) across an overlapping ${lookbackDays(ctx.credentials)}-day window.`,
     };

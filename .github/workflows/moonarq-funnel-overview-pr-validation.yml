@@ -4,6 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - ".env.example"
       - ".github/workflows/moonarq-funnel-overview-pr-validation.yml"
       - "scripts/ci/funnel-overview-evidence.mjs"
       - "package.json"
@@ -12,7 +13,18 @@ on:
       - "vitest.config.ts"
       - "src/storage/db/migrations/**"
       - "src/storage/repositories/website-funnel-repository.ts"
+      - "src/storage/repositories/commerce-*.ts"
+      - "src/storage/runtime/commerce-feature-flags.ts"
+      - "src/storage/db/schema.ts"
+      - "src/collection/connectors/shopify/**"
+      - "src/collection/connectors/types.ts"
+      - "src/collection/sync/engine.ts"
       - "src/aggregation/**/website-funnel*"
+      - "src/aggregation/services/website-commerce-funnel-v2*"
+      - "src/aggregation/services/outbound-analytics-exposure.ts"
+      - "src/aggregation/services/source-data-explorer-service.ts"
+      - "src/app/api/events/route.ts"
+      - "src/app/api/metrics/website-commerce-funnel-v2/**"
       - "src/aggregation/services/platform-modules-service.ts"
       - "src/app/w/**/dashboard/page.tsx"
       - "src/presentation/dashboard/comparison-display.ts"
@@ -20,13 +32,24 @@ on:
       - "src/presentation/dashboard/moonarq-overview-*"
       - "src/presentation/dashboard/storefront-*"
       - "src/presentation/dashboard/website-business-pulse.tsx"
+      - "src/presentation/dashboard/website-commerce-funnel-v2.tsx"
+      - "src/presentation/dashboard/use-website-commerce-funnel-v2-data.ts"
       - "src/collection/tracking/website-display-privacy.ts"
+      - "src/collection/tracking/website-event-contract.ts"
       - "tests/unit/storage/website-funnel*"
+      - "tests/unit/storage/commerce-*"
       - "tests/unit/aggregation/website-funnel*"
+      - "tests/unit/aggregation/website-commerce-funnel-v2*"
+      - "tests/unit/aggregation/source-data-explorer-exposure.test.ts"
+      - "tests/unit/collection/commerce-*"
+      - "tests/unit/collection/events-route-exposure.test.ts"
+      - "tests/unit/collection/shopify-client-credentials-sync.test.ts"
       - "tests/unit/presentation/**"
       - "e2e/*.ts"
       - "docs/metric-definitions.md"
       - "docs/website-funnel-overview-v1.md"
+      - "docs/website-commerce-funnel-v2.md"
+      - "docs/website-event-contract-v1.md"
 
 permissions:
   contents: read
@@ -146,6 +169,8 @@ jobs:
       DATABASE_SSL_MODE: disable
       NODE_ENV: test
       RUN_WEBSITE_FUNNEL_POSTGRES_TEST: "true"
+      RUN_COMMERCE_ORDERS_POSTGRES_TEST: "true"
+      RUN_COMMERCE_FUNNEL_V2_REPORT_POSTGRES_TEST: "true"
     steps:
       - name: Check out the exact PR head
         uses: actions/checkout@v4
@@ -187,8 +212,8 @@ jobs:
       - name: Prepare Supabase-compatible local database roles
         run: node scripts/ci/funnel-overview-evidence.mjs prepare-local-postgres
 
-      - name: Apply exactly migrations 0001 through 0010
-        run: pnpm db:migrate -- --to 0010_rebuild_authoritative_website_metrics.sql
+      - name: Apply exactly migrations 0001 through 0011
+        run: pnpm db:migrate -- --to 0011_shopify_commerce_bridge_facts.sql
 
       - name: Run the dedicated PostgreSQL regression suite
         shell: bash
@@ -200,6 +225,9 @@ jobs:
           set +e
           pnpm exec vitest run \
             tests/unit/storage/website-funnel-postgres-integration.test.ts \
+            tests/unit/storage/commerce-orders-postgres-integration.test.ts \
+            tests/unit/storage/commerce-funnel-v2-report-postgres-integration.test.ts \
+            --no-file-parallelism \
             --reporter=json \
             --outputFile="$raw_report"
           test_status=$?

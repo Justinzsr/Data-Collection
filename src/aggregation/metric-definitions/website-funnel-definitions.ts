@@ -57,10 +57,17 @@ const ITEM_FIELDS = Object.freeze([
   "price",
   "quantity",
 ] as const);
+const LINKED_ITEM_FIELDS = Object.freeze([...ITEM_FIELDS, "item_instance_id"] as const);
 const ITEM_LIST_FIELDS = Object.freeze(["item_list_name", "items"] as const);
 const COMMERCE_FIELDS = Object.freeze(["currency", "value", "items"] as const);
 const BUILD_START_FIELDS = Object.freeze(["item_category"] as const);
-const BUILD_OUTCOME_FIELDS = Object.freeze(["currency", "item_category", "stone_count", "value"] as const);
+const BUILD_OUTCOME_FIELDS = Object.freeze([
+  "currency",
+  "item_category",
+  "item_instance_id",
+  "stone_count",
+  "value",
+] as const);
 const EMAIL_SIGNUP_FIELDS = Object.freeze(["discount_code", "method"] as const);
 
 const MAX_ITEM_ID_LENGTH = 256;
@@ -69,12 +76,14 @@ const MAX_ITEM_CATEGORY_LENGTH = 160;
 const MAX_ITEM_LIST_NAME_LENGTH = 256;
 const MAX_EMAIL_SIGNUP_VALUE_LENGTH = 160;
 const MAX_ITEMS = 100;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface WebsiteFunnelItemProperties {
   item_id: string;
   item_name: string;
   item_category: string;
   item_list_name?: string;
+  item_instance_id?: string;
   price?: number;
   quantity?: number;
 }
@@ -97,6 +106,7 @@ export interface WebsiteFunnelBuildStartProperties {
 export interface WebsiteFunnelBuildOutcomeProperties {
   currency: string;
   item_category: string;
+  item_instance_id?: string;
   stone_count: number;
   value: number;
 }
@@ -248,6 +258,21 @@ function optionalString(
   return normalized;
 }
 
+function optionalUuidV4(
+  value: UnknownRecord,
+  key: string,
+  path: string,
+  issues: WebsiteFunnelPropertyIssue[],
+) {
+  const candidate = optionalString(value, key, path, 36, issues);
+  if (candidate === undefined || candidate === null) return candidate;
+  if (!UUID_V4_PATTERN.test(candidate)) {
+    issue(issues, "invalid_value", `${path}.${key}`, `${key} must be a UUIDv4 when provided.`);
+    return null;
+  }
+  return candidate.toLowerCase();
+}
+
 function requiredNonNegativeNumber(
   value: UnknownRecord,
   key: string,
@@ -298,16 +323,24 @@ function requiredCurrency(value: UnknownRecord, path: string, issues: WebsiteFun
   return currency;
 }
 
-function validateItem(value: unknown, path: string, issues: WebsiteFunnelPropertyIssue[]) {
+function validateItem(
+  value: unknown,
+  path: string,
+  issues: WebsiteFunnelPropertyIssue[],
+  allowItemInstanceId: boolean,
+) {
   if (!isRecord(value)) {
     issue(issues, "not_object", path, "Each item must be an object.");
     return null;
   }
-  validateExactFields(value, ITEM_FIELDS, path, issues);
+  validateExactFields(value, allowItemInstanceId ? LINKED_ITEM_FIELDS : ITEM_FIELDS, path, issues);
   const itemId = requiredString(value, "item_id", path, MAX_ITEM_ID_LENGTH, issues);
   const itemName = requiredString(value, "item_name", path, MAX_ITEM_NAME_LENGTH, issues);
   const itemCategory = requiredString(value, "item_category", path, MAX_ITEM_CATEGORY_LENGTH, issues);
   const itemListName = optionalString(value, "item_list_name", path, MAX_ITEM_LIST_NAME_LENGTH, issues);
+  const itemInstanceId = allowItemInstanceId
+    ? optionalUuidV4(value, "item_instance_id", path, issues)
+    : undefined;
   const price = optionalNonNegativeNumber(value, "price", path, issues);
   const quantity = optionalNonNegativeNumber(value, "quantity", path, issues);
   if (typeof quantity === "number" && (!Number.isInteger(quantity) || quantity < 1)) {
@@ -318,6 +351,7 @@ function validateItem(value: unknown, path: string, issues: WebsiteFunnelPropert
     || itemName === null
     || itemCategory === null
     || itemListName === null
+    || itemInstanceId === null
     || price === null
     || quantity === null
   ) {
@@ -328,12 +362,18 @@ function validateItem(value: unknown, path: string, issues: WebsiteFunnelPropert
     item_name: itemName,
     item_category: itemCategory,
     ...(itemListName === undefined ? {} : { item_list_name: itemListName }),
+    ...(itemInstanceId === undefined ? {} : { item_instance_id: itemInstanceId }),
     ...(price === undefined ? {} : { price }),
     ...(quantity === undefined ? {} : { quantity }),
   } satisfies WebsiteFunnelItemProperties;
 }
 
-function validateItems(value: UnknownRecord, path: string, issues: WebsiteFunnelPropertyIssue[]) {
+function validateItems(
+  value: UnknownRecord,
+  path: string,
+  issues: WebsiteFunnelPropertyIssue[],
+  allowItemInstanceId: boolean,
+) {
   if (!Object.hasOwn(value, "items")) {
     issue(issues, "missing_field", `${path}.items`, "items is required.");
     return null;
@@ -346,7 +386,12 @@ function validateItems(value: UnknownRecord, path: string, issues: WebsiteFunnel
     issue(issues, "invalid_value", `${path}.items`, `items must contain between 1 and ${MAX_ITEMS} entries.`);
     return null;
   }
-  const items = value.items.map((item, index) => validateItem(item, `${path}.items[${index}]`, issues));
+  const items = value.items.map((item, index) => validateItem(
+    item,
+    `${path}.items[${index}]`,
+    issues,
+    allowItemInstanceId,
+  ));
   return items.some((item) => item === null) ? null : items as WebsiteFunnelItemProperties[];
 }
 
@@ -372,12 +417,16 @@ function validateItemList(properties: unknown, issues: WebsiteFunnelPropertyIssu
   }
   validateExactFields(properties, ITEM_LIST_FIELDS, "properties", issues);
   const itemListName = requiredString(properties, "item_list_name", "properties", MAX_ITEM_LIST_NAME_LENGTH, issues);
-  const items = validateItems(properties, "properties", issues);
+  const items = validateItems(properties, "properties", issues, false);
   if (itemListName === null || items === null) return null;
   return { item_list_name: itemListName, items } satisfies WebsiteFunnelItemListProperties;
 }
 
-function validateCommerce(properties: unknown, issues: WebsiteFunnelPropertyIssue[]) {
+function validateCommerce(
+  properties: unknown,
+  issues: WebsiteFunnelPropertyIssue[],
+  allowItemInstanceId: boolean,
+) {
   if (!isRecord(properties)) {
     issue(issues, "not_object", "properties", "Commerce event properties must be an object.");
     return null;
@@ -385,7 +434,7 @@ function validateCommerce(properties: unknown, issues: WebsiteFunnelPropertyIssu
   validateExactFields(properties, COMMERCE_FIELDS, "properties", issues);
   const currency = requiredCurrency(properties, "properties", issues);
   const value = requiredNonNegativeNumber(properties, "value", "properties", issues);
-  const items = validateItems(properties, "properties", issues);
+  const items = validateItems(properties, "properties", issues, allowItemInstanceId);
   if (currency === null || value === null || items === null) return null;
   return { currency, value, items } satisfies WebsiteFunnelCommerceProperties;
 }
@@ -409,13 +458,26 @@ function validateBuildOutcome(properties: unknown, issues: WebsiteFunnelProperty
   validateExactFields(properties, BUILD_OUTCOME_FIELDS, "properties", issues);
   const currency = requiredCurrency(properties, "properties", issues);
   const itemCategory = requiredString(properties, "item_category", "properties", MAX_ITEM_CATEGORY_LENGTH, issues);
+  const itemInstanceId = optionalUuidV4(properties, "item_instance_id", "properties", issues);
   const stoneCount = requiredNonNegativeNumber(properties, "stone_count", "properties", issues);
   const value = requiredNonNegativeNumber(properties, "value", "properties", issues);
   if (typeof stoneCount === "number" && !Number.isInteger(stoneCount)) {
     issue(issues, "invalid_value", "properties.stone_count", "stone_count must be an integer.");
   }
-  if (currency === null || itemCategory === null || stoneCount === null || value === null) return null;
-  return { currency, item_category: itemCategory, stone_count: stoneCount, value } satisfies WebsiteFunnelBuildOutcomeProperties;
+  if (
+    currency === null
+    || itemCategory === null
+    || itemInstanceId === null
+    || stoneCount === null
+    || value === null
+  ) return null;
+  return {
+    currency,
+    item_category: itemCategory,
+    ...(itemInstanceId === undefined ? {} : { item_instance_id: itemInstanceId }),
+    stone_count: stoneCount,
+    value,
+  } satisfies WebsiteFunnelBuildOutcomeProperties;
 }
 
 function validateEmailSignup(properties: unknown, issues: WebsiteFunnelPropertyIssue[]) {
@@ -466,7 +528,11 @@ export function validateWebsiteFunnelEventProperties(
     : eventName === "view_item_list"
       ? validateItemList(contractProperties, issues)
       : eventName === "view_item" || eventName === "add_to_cart" || eventName === "begin_checkout"
-        ? validateCommerce(contractProperties, issues)
+        ? validateCommerce(
+            contractProperties,
+            issues,
+            eventName === "add_to_cart" || eventName === "begin_checkout",
+          )
         : eventName === "build_start"
           ? validateBuildStart(contractProperties, issues)
           : eventName === "build_complete" || eventName === "save_design"

@@ -752,6 +752,8 @@ export function createDemoWorkspace(): DemoWorkspace {
     contentItems: content.items,
     contentMetrics: content.metrics,
     webEvents: makeEvents(),
+    commerceOrders: [],
+    commerceOrderLines: [],
     metricDefinitions,
     connectorEvents: makeConnectorEvents(sources),
     platformChangeEvents: [],

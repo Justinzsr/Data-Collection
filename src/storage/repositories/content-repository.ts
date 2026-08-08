@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { NormalizedContentMetric } from "@/collection/connectors/types";
-import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
+import { isRuntimeDatabaseConfigured, queryRows, type DatabaseExecutor } from "@/storage/db/client";
 import type { ContentItem, ContentMetric } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
 import { listSources } from "@/storage/repositories/sources-repository";
@@ -65,7 +65,10 @@ function groupContentMetrics(contentMetrics: NormalizedContentMetric[]) {
   return Array.from(groups.values());
 }
 
-export async function upsertContentMetrics(contentMetrics: NormalizedContentMetric[]): Promise<ContentMetricsUpsertResult> {
+export async function upsertContentMetrics(
+  contentMetrics: NormalizedContentMetric[],
+  executor?: DatabaseExecutor,
+): Promise<ContentMetricsUpsertResult> {
   const now = new Date().toISOString();
   let itemsInserted = 0;
   let itemsUpdated = 0;
@@ -169,6 +172,7 @@ export async function upsertContentMetrics(contentMetrics: NormalizedContentMetr
         now,
         now,
       ],
+      executor,
     );
     const item = itemRows[0];
     if (!item) {
@@ -217,6 +221,7 @@ export async function upsertContentMetrics(contentMetrics: NormalizedContentMetr
           now,
           now,
         ],
+        executor,
       );
       metricsUpserted += 1;
     }

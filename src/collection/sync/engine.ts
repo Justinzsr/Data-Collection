@@ -15,17 +15,37 @@ import type { SyncRun, SyncTrigger } from "@/storage/db/schema";
 import { getDecryptedCredentialMap } from "@/storage/repositories/credentials-repository";
 import { recordConnectorEvent } from "@/storage/repositories/events-repository";
 import { upsertContentMetrics } from "@/storage/repositories/content-repository";
+import { replaceCommerceOrdersWindow } from "@/storage/repositories/commerce-orders-repository";
 import { replaceMetricsWindow, upsertMetrics } from "@/storage/repositories/metrics-repository";
 import { recordChangeEventsForRawPayloads } from "@/storage/repositories/platform-change-events-repository";
 import { storeRawPayloads } from "@/storage/repositories/raw-ingestions-repository";
 import { getSource, listDueSources, markSourceSyncState } from "@/storage/repositories/sources-repository";
 import { createOrGetSyncRun, updateSyncRun } from "@/storage/repositories/sync-runs-repository";
+import { isShopifyCommerceFactsV2Enabled } from "@/storage/runtime/commerce-feature-flags";
 
 export interface EnqueueSyncRunInput {
   sourceId: string;
   trigger: SyncTrigger;
   idempotencyKey?: string;
   webhookPayload?: import("@/storage/db/schema").JsonRecord | null;
+}
+
+export function assertCommerceFactsPersistenceGate(input: {
+  sourceTypeKey: string;
+  hasCommerceFacts: boolean;
+  hasCommerceWindow: boolean;
+  enabled?: boolean;
+}) {
+  const enabled = input.enabled ?? isShopifyCommerceFactsV2Enabled();
+  if (!enabled && (input.hasCommerceFacts || input.hasCommerceWindow)) {
+    throw new Error("Shopify commerce facts V2 are disabled for this release.");
+  }
+  if (
+    input.hasCommerceFacts !== input.hasCommerceWindow
+    || (input.hasCommerceFacts && input.sourceTypeKey !== "shopify")
+  ) {
+    throw new Error("Commerce facts require a Shopify-owned replacement window.");
+  }
 }
 
 function defaultIdempotencyKey(sourceId: string, trigger: SyncTrigger) {
@@ -141,6 +161,13 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       webhookPayload: input.webhookPayload ?? null,
     });
     assertLockLease();
+    const hasCommerceFacts = syncResult.commerceOrderFacts !== undefined;
+    const hasCommerceWindow = syncResult.replaceCommerceOrderWindow !== undefined;
+    assertCommerceFactsPersistenceGate({
+      sourceTypeKey: source.source_type_key,
+      hasCommerceFacts,
+      hasCommerceWindow,
+    });
     if (syncResult.skippedReason) {
       const finishedAt = new Date();
       return (await updateSyncRun(run.id, {
@@ -155,19 +182,45 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
     if (webEvents.length > 0 && webEvents.length !== syncResult.rawPayloads.length) {
       throw new Error("Connector web events must align one-to-one with raw payloads for idempotent ingestion.");
     }
-    let raw: Awaited<ReturnType<typeof storeRawPayloads>>;
-    let webEventsInserted = 0;
-    if (webEvents.length > 0) {
-      raw = { inserted: 0, duplicates: 0, rows: [], insertedIndexes: [] };
+    const validateMetricWindowOwnership = (
+      normalized: Awaited<ReturnType<typeof connector.normalize>>,
+    ) => {
+      if (!normalized.replaceMetricWindow) return;
+      const connectorMetricKeys = new Set(connector.getMetricDefinitions().map((definition) => definition.key));
+      if (normalized.replaceMetricWindow.metricKeys.some((metricKey) => !connectorMetricKeys.has(metricKey))) {
+        throw new Error("Connector requested replacement of a metric it does not own.");
+      }
+    };
+
+    const persistRawAndWebEvents = async (executor?: DatabaseExecutor) => {
+      if (webEvents.length === 0) {
+        return {
+          raw: await storeRawPayloads(source, syncResult.rawPayloads, executor),
+          webEventsInserted: 0,
+        };
+      }
+      const raw: Awaited<ReturnType<typeof storeRawPayloads>> = {
+        inserted: 0,
+        duplicates: 0,
+        rows: [],
+        insertedIndexes: [],
+      };
+      let webEventsInserted = 0;
       for (const [index, webEvent] of webEvents.entries()) {
-        const persistPair = async (executor?: DatabaseExecutor) => {
-          const stored = await storeRawPayloads(source, [syncResult.rawPayloads[index]], executor);
-          if (stored.inserted === 1) await ingestWebsiteEvent(webEvent, executor);
+        const persistPair = async (pairExecutor?: DatabaseExecutor) => {
+          const stored = await storeRawPayloads(
+            source,
+            [syncResult.rawPayloads[index]],
+            pairExecutor,
+          );
+          if (stored.inserted === 1) await ingestWebsiteEvent(webEvent, pairExecutor);
           return stored;
         };
-        const stored = isRuntimeDatabaseConfigured()
-          ? await withDatabaseTransaction((client) => persistPair(client))
-          : await persistPair();
+        const stored = executor
+          ? await persistPair(executor)
+          : isRuntimeDatabaseConfigured()
+            ? await withDatabaseTransaction((client) => persistPair(client))
+            : await persistPair();
         raw.inserted += stored.inserted;
         raw.duplicates += stored.duplicates;
         raw.rows.push(...stored.rows);
@@ -177,34 +230,78 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
         }
         assertLockLease();
       }
-    } else {
-      raw = await storeRawPayloads(source, syncResult.rawPayloads);
-    }
-    assertLockLease();
-    await recordChangeEventsForRawPayloads(source, syncResult.rawPayloads);
-    assertLockLease();
-    const normalized = await connector.normalize(syncResult.rawPayloads, source);
-    assertLockLease();
-    let metrics: { upserted: number };
-    if (normalized.replaceMetricWindow) {
-      const connectorMetricKeys = new Set(connector.getMetricDefinitions().map((definition) => definition.key));
-      if (normalized.replaceMetricWindow.metricKeys.some((metricKey) => !connectorMetricKeys.has(metricKey))) {
-        throw new Error("Connector requested replacement of a metric it does not own.");
-      }
-      metrics = await replaceMetricsWindow(normalized.metrics, {
-        ...normalized.replaceMetricWindow,
-        sourceId: source.id,
-        sourceTypeKey: source.source_type_key,
-      }, {
-        syncRunId: run.id,
-        lockKey: lock.lock_key,
+      return { raw, webEventsInserted };
+    };
+
+    const persistNormalized = async (
+      normalized: Awaited<ReturnType<typeof connector.normalize>>,
+      executor?: DatabaseExecutor,
+    ) => {
+      const metrics = normalized.replaceMetricWindow
+        ? await replaceMetricsWindow(
+          normalized.metrics,
+          {
+            ...normalized.replaceMetricWindow,
+            sourceId: source.id,
+            sourceTypeKey: source.source_type_key,
+          },
+          {
+            syncRunId: run.id,
+            lockKey: lock.lock_key,
+          },
+          executor,
+        )
+        : await upsertMetrics(normalized.metrics, executor);
+      assertLockLease();
+      const content = await upsertContentMetrics(normalized.contentMetrics ?? [], executor);
+      assertLockLease();
+      const commerce = hasCommerceFacts && syncResult.replaceCommerceOrderWindow
+        ? await replaceCommerceOrdersWindow(
+          syncResult.commerceOrderFacts ?? [],
+          {
+            sourceId: source.id,
+            ...syncResult.replaceCommerceOrderWindow,
+          },
+          {
+            syncRunId: run.id,
+            lockKey: lock.lock_key,
+          },
+          executor,
+        )
+        : { ordersInserted: 0, linesInserted: 0 };
+      return { metrics, content, commerce };
+    };
+
+    let persistedRaw: Awaited<ReturnType<typeof persistRawAndWebEvents>>;
+    let persistedNormalized: Awaited<ReturnType<typeof persistNormalized>>;
+    if (hasCommerceFacts && isRuntimeDatabaseConfigured()) {
+      const normalized = await connector.normalize(syncResult.rawPayloads, source);
+      assertLockLease();
+      validateMetricWindowOwnership(normalized);
+      const persisted = await withDatabaseTransaction(async (client) => {
+        const raw = await persistRawAndWebEvents(client);
+        assertLockLease();
+        await recordChangeEventsForRawPayloads(source, syncResult.rawPayloads, client);
+        assertLockLease();
+        const normalizedData = await persistNormalized(normalized, client);
+        assertLockLease();
+        return { raw, normalizedData };
       });
+      persistedRaw = persisted.raw;
+      persistedNormalized = persisted.normalizedData;
     } else {
-      metrics = await upsertMetrics(normalized.metrics);
+      persistedRaw = await persistRawAndWebEvents();
+      assertLockLease();
+      await recordChangeEventsForRawPayloads(source, syncResult.rawPayloads);
+      assertLockLease();
+      const normalized = await connector.normalize(syncResult.rawPayloads, source);
+      assertLockLease();
+      validateMetricWindowOwnership(normalized);
+      persistedNormalized = await persistNormalized(normalized);
     }
     assertLockLease();
-    const content = await upsertContentMetrics(normalized.contentMetrics ?? []);
-    assertLockLease();
+    const { raw, webEventsInserted } = persistedRaw;
+    const { metrics, content, commerce } = persistedNormalized;
     const finishedAt = new Date();
 
     await markSourceSyncState(source.id, input.trigger, { ok: true });
@@ -224,7 +321,11 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       duration_ms: finishedAt.getTime() - startedAt.getTime(),
       records_fetched: syncResult.recordsFetched,
       records_inserted: raw.inserted + webEventsInserted + content.itemsInserted + (syncResult.recordsInserted ?? 0),
-      records_updated: content.itemsUpdated + (syncResult.recordsUpdated ?? 0),
+      records_updated:
+        content.itemsUpdated
+        + commerce.ordersInserted
+        + commerce.linesInserted
+        + (syncResult.recordsUpdated ?? 0),
       metrics_upserted: metrics.upserted + content.metricsUpserted,
       cursor_after: syncResult.cursorAfter ?? null,
     })) as SyncRun;

@@ -1,3 +1,4 @@
+import { redactOutboundAnalyticsJson } from "@/aggregation/services/outbound-analytics-exposure";
 import { isRuntimeDatabaseConfigured, queryRows } from "@/storage/db/client";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { getDemoStore } from "@/storage/repositories/demo-store";
@@ -18,20 +19,12 @@ const tabColumns: Record<ExplorerTab, string[]> = {
   platform_change_events: ["changed_at_pt", "source", "platform_record_type", "external_record_id", "change_type", "changed_fields", "payload_preview"],
 };
 
-const sensitiveKeyPattern = /(secret|token|password|credential|authorization|service_role|encrypted_value|auth_tag|iv)/i;
-
-export function redactSensitiveJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactSensitiveJson);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, nested]) => [key, sensitiveKeyPattern.test(key) ? "[redacted]" : redactSensitiveJson(nested)]));
-}
-
 function jsonRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
 function preview(value: unknown) {
-  const text = JSON.stringify(redactSensitiveJson(value));
+  const text = JSON.stringify(redactOutboundAnalyticsJson(value));
   return text.length > 180 ? `${text.slice(0, 180)}...` : text;
 }
 
@@ -165,8 +158,16 @@ export async function getSourceDataExplorer(options: { tab?: string; range?: str
     pageSize,
     hasNextPage: rawRows.length > pageSize,
     rows: limitedRows.map((item: Record<string, unknown>) => {
-      const cells = Object.fromEntries(tabColumns[tab].map((column) => [column, typeof item[column] === "number" || typeof item[column] === "string" || item[column] === null ? item[column] as string | number | null : preview(item[column])]));
-      return { id: String(item.id ?? crypto.randomUUID()), cells, json: jsonRecord(redactSensitiveJson(item.json ?? item)) };
+      const redactedJson = redactOutboundAnalyticsJson(item.json ?? item);
+      const cells = Object.fromEntries(tabColumns[tab].map((column) => {
+        if ((column === "payload_preview" || column === "metadata_preview") && item.json !== undefined) {
+          return [column, preview(redactedJson)];
+        }
+        return [column, typeof item[column] === "number" || typeof item[column] === "string" || item[column] === null
+          ? item[column] as string | number | null
+          : preview(item[column])];
+      }));
+      return { id: String(item.id ?? crypto.randomUUID()), cells, json: jsonRecord(redactedJson) };
     }),
   };
 }

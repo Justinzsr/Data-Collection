@@ -30,9 +30,13 @@ const migrationFilenames = [
   "0008_meta_ads_attribution.sql",
   "0009_website_event_contract_v1.sql",
   "0010_rebuild_authoritative_website_metrics.sql",
+  "0011_shopify_commerce_bridge_facts.sql",
 ] as const;
 const postgresTestPath = path.resolve(
   "tests/unit/storage/website-funnel-postgres-integration.test.ts",
+);
+const commercePostgresTestPath = path.resolve(
+  "tests/unit/storage/commerce-orders-postgres-integration.test.ts",
 );
 const scaleTestTitle = "keeps the fixed privacy aggregate within its timeout";
 
@@ -198,6 +202,21 @@ function runAssembly(
 }
 
 describe("Vitest failure evidence", () => {
+  it("recognizes the dedicated commerce PostgreSQL suite without exposing diagnostics", () => {
+    const report = failedVitestReport({
+      fileName: commercePostgresTestPath,
+      title: "enforces commerce fact truth constraints in PostgreSQL",
+      failureMessages: ["AssertionError: synthetic commerce mismatch"],
+    });
+    expect(normalizeVitestFailureEnvelope("postgresql", report)).toEqual({
+      stage: "postgresql",
+      test_file: "commerce-orders-postgres-integration.test.ts",
+      test_title: "enforces commerce fact truth constraints in PostgreSQL",
+      failure_count: 1,
+      category: "assertion",
+    });
+  });
+
   it.each([
     {
       label: "ordinary test timeout",

@@ -147,7 +147,10 @@ async function upsertMetricRows(metrics: NormalizedMetric[], executor: DatabaseE
   return { upserted: metrics.length };
 }
 
-export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upserted: number }> {
+export async function upsertMetrics(
+  metrics: NormalizedMetric[],
+  executor?: DatabaseExecutor,
+): Promise<{ upserted: number }> {
   const now = new Date().toISOString();
 
   if (!isRuntimeDatabaseConfigured()) {
@@ -177,13 +180,14 @@ export async function upsertMetrics(metrics: NormalizedMetric[]): Promise<{ upse
     return { upserted };
   }
 
-  return upsertMetricRows(metrics, getDatabasePool());
+  return upsertMetricRows(metrics, executor ?? getDatabasePool());
 }
 
 export async function replaceMetricsWindow(
   metrics: NormalizedMetric[],
   window: MetricReplacementWindow,
   lease: { syncRunId: string; lockKey: string },
+  executor?: DatabaseExecutor,
 ): Promise<{ upserted: number }> {
   validateMetricReplacement(metrics, window);
 
@@ -200,8 +204,12 @@ export async function replaceMetricsWindow(
     return upsertMetrics(metrics);
   }
 
-  return withDatabaseTransaction(async (client) => {
-    await queryRows("select pg_advisory_xact_lock(hashtextextended($1, 0))", [window.sourceId], client);
+  const replace = async (transactionExecutor: DatabaseExecutor) => {
+    await queryRows(
+      "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [window.sourceId],
+      transactionExecutor,
+    );
     const assertLeaseOwner = async () => {
       const rows = await queryRows<{ owned: boolean }>(
         `
@@ -215,7 +223,7 @@ export async function replaceMetricsWindow(
           ) as owned
         `,
         [window.sourceId, lease.syncRunId, lease.lockKey],
-        client,
+        transactionExecutor,
       );
       if (!rows[0]?.owned) throw new Error("Source lock lease was lost before the metric snapshot could be replaced.");
     };
@@ -229,12 +237,13 @@ export async function replaceMetricsWindow(
           and date between $4 and $5
       `,
       [window.sourceId, window.sourceTypeKey, window.metricKeys, window.startDate, window.endDate],
-      client,
+      transactionExecutor,
     );
-    const result = await upsertMetricRows(metrics, client);
+    const result = await upsertMetricRows(metrics, transactionExecutor);
     await assertLeaseOwner();
     return result;
-  });
+  };
+  return executor ? replace(executor) : withDatabaseTransaction(replace);
 }
 
 export async function incrementMetric(
