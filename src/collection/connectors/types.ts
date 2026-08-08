@@ -1,5 +1,6 @@
 import type {
   CredentialField,
+  CommerceBridgeState,
   JsonRecord,
   MetricDefinition,
   Source,
@@ -102,9 +103,36 @@ export interface NormalizedMetricBundle {
   };
 }
 
+export interface CommerceOrderLineFactInput {
+  shopifyLineItemId: string;
+  quantity: number;
+  itemInstanceIdHash: string | null;
+  itemBridgeState: CommerceBridgeState;
+}
+
+export interface CommerceOrderFactInput {
+  shopifyOrderId: string;
+  occurredAt: string;
+  test: boolean;
+  cancelledAt: string | null;
+  currencyCode: string;
+  grossSales: string;
+  currentTotal: string;
+  netPayment: string;
+  totalRefunded: string;
+  checkoutEventIdHash: string | null;
+  checkoutBridgeState: CommerceBridgeState;
+  lines: CommerceOrderLineFactInput[];
+}
+
 export interface SyncResult {
   rawPayloads: RawPayload[];
   webEvents?: WebsiteEventIngestionInput[];
+  commerceOrderFacts?: CommerceOrderFactInput[];
+  replaceCommerceOrderWindow?: {
+    startAt: string;
+    endAt: string;
+  };
   skippedReason?: string;
   cursorAfter?: JsonRecord | null;
   recordsFetched: number;

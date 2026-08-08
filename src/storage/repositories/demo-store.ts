@@ -15,6 +15,8 @@ export function getDemoStore(): DemoWorkspace {
   globalThis.__MOONARQ_DEMO_STORE__.dailyReportRuns ??= [];
   globalThis.__MOONARQ_DEMO_STORE__.dailyReportSections ??= [];
   globalThis.__MOONARQ_DEMO_STORE__.dailyReportMetrics ??= [];
+  globalThis.__MOONARQ_DEMO_STORE__.commerceOrders ??= [];
+  globalThis.__MOONARQ_DEMO_STORE__.commerceOrderLines ??= [];
   return globalThis.__MOONARQ_DEMO_STORE__;
 }
 

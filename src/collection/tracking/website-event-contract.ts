@@ -72,6 +72,7 @@ const clientContextSchema = z.object({
   currency: z.string().trim().length(3).regex(/^[A-Za-z]{3}$/u).transform((value) => value.toUpperCase()).optional(),
   viewport_category: z.enum(["small", "medium", "large", "wide", "unknown"]).optional(),
   device_category: z.enum(["mobile", "tablet", "desktop", "bot", "unknown"]).optional(),
+  traffic_type: z.enum(["production", "synthetic", "local", "test"]).optional(),
   page_type: contextValueSchema.optional(),
 });
 

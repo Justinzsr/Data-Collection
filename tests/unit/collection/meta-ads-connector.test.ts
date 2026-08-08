@@ -524,6 +524,16 @@ describe("Meta Ads normalization", () => {
       insights: [],
       windowEndDate: "2026-07-15",
     });
+    expect(result.rawPayloads[0]?.cursor).toMatchObject({
+      accountId: ACCOUNT_ID,
+      accountTimeZone: "America/Los_Angeles",
+      endDate: "2026-07-15",
+    });
+    expect(result.cursorAfter).toMatchObject({
+      accountId: ACCOUNT_ID,
+      accountTimeZone: "America/Los_Angeles",
+      endDate: "2026-07-15",
+    });
     delete process.env.DEMO_NOW;
   });
 });

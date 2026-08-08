@@ -20,10 +20,14 @@ const EXPECTED_PNPM_VERSION = "10.33.2";
 const CHROMIUM_LAUNCH_TIMEOUT_MS = 30_000;
 const REQUIRED_VIEWPORT_WIDTHS = [1440, 1024, 768, 390, 360, 320];
 const REQUIRED_PLAYWRIGHT_PROJECTS = ["chromium", "mobile"];
-const POSTGRES_INTEGRATION_TEST_SUFFIX =
-  "/tests/unit/storage/website-funnel-postgres-integration.test.ts";
-const POSTGRES_INTEGRATION_TEST_BASENAME =
-  "website-funnel-postgres-integration.test.ts";
+const POSTGRES_INTEGRATION_TESTS = [
+  "website-funnel-postgres-integration.test.ts",
+  "commerce-orders-postgres-integration.test.ts",
+  "commerce-funnel-v2-report-postgres-integration.test.ts",
+];
+const POSTGRES_INTEGRATION_TEST_SUFFIXES = POSTGRES_INTEGRATION_TESTS.map(
+  (basename) => `/tests/unit/storage/${basename}`,
+);
 const POSTGRES_FAILURE_TITLES = new Set([
   "keeps PostgreSQL payment-span separators exhaustive with the frozen Unicode 17 contract",
   "executes the fixed query and preserves strict first-party semantics",
@@ -34,6 +38,10 @@ const POSTGRES_FAILURE_TITLES = new Set([
   "projects top-level attribution and rejects recursive overflow before funnel classification",
   "matches ECMAScript trimming for commerce, signup, and ready-made classification",
   "keeps the fixed privacy aggregate within its timeout",
+  "replaces only the bounded commerce window and preserves older facts",
+  "enforces commerce fact truth constraints in PostgreSQL",
+  "denies commerce facts to browser and service roles while owner writes",
+  "executes the production SQL and returns only strict aggregate truth",
 ]);
 const VITEST_DEFAULT_TEST_TIMEOUT_MS = 5_000;
 const MAX_VITEST_ASSERTIONS = 100_000;
@@ -50,6 +58,7 @@ const EXPECTED_MIGRATIONS = [
   "0008_meta_ads_attribution.sql",
   "0009_website_event_contract_v1.sql",
   "0010_rebuild_authoritative_website_metrics.sql",
+  "0011_shopify_commerce_bridge_facts.sql",
 ];
 const ARTIFACT_REPORT_FILENAMES = [
   "quality-summary.json",
@@ -282,12 +291,10 @@ function vitestCounts(report) {
 
 function validatedVitestFailureFile(kind, fileResult) {
   if (kind !== "postgresql" || typeof fileResult?.name !== "string") return null;
-  const expectedPath = path.join(
-    repoRoot,
-    "tests/unit/storage/website-funnel-postgres-integration.test.ts",
-  );
   const resolvedPath = path.resolve(repoRoot, fileResult.name);
-  return resolvedPath === expectedPath ? POSTGRES_INTEGRATION_TEST_BASENAME : null;
+  return POSTGRES_INTEGRATION_TESTS.find((basename) => (
+    resolvedPath === path.join(repoRoot, "tests/unit/storage", basename)
+  )) ?? null;
 }
 
 function validatedVitestAssertion(assertion) {
@@ -462,7 +469,7 @@ function assertOnlyExpectedQualitySkips(report, expectedSkipped) {
     for (const assertion of assertions) {
       if (!["pending", "skipped", "todo", "disabled"].includes(assertion?.status)) continue;
       observedSkipped += 1;
-      if (!normalizedName.endsWith(POSTGRES_INTEGRATION_TEST_SUFFIX)) {
+      if (!POSTGRES_INTEGRATION_TEST_SUFFIXES.some((suffix) => normalizedName.endsWith(suffix))) {
         fail("Quality tests contain a skip outside the dedicated PostgreSQL integration suite.");
       }
     }
@@ -781,7 +788,7 @@ function assertExactMigrationList(actual, label) {
     || actual.length !== EXPECTED_MIGRATIONS.length
     || !EXPECTED_MIGRATIONS.every((filename, index) => actual[index] === filename)
   ) {
-    fail(`${label} is not exactly migrations 0001 through 0010.`);
+    fail(`${label} is not exactly migrations 0001 through 0011.`);
   }
 }
 
@@ -836,7 +843,7 @@ async function verifyPostgres(outputPath) {
         filenames: appliedMigrations,
       },
     });
-    console.log("Disposable PostgreSQL 17 has exactly migrations 0001 through 0010.");
+    console.log("Disposable PostgreSQL 17 has exactly migrations 0001 through 0011.");
   } catch (error) {
     if (error instanceof EvidenceError) throw error;
     fail("Disposable PostgreSQL verification failed without exposing connection details.");

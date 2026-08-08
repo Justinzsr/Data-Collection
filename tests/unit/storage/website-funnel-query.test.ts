@@ -676,6 +676,29 @@ describe("Website funnel aggregate SQL", () => {
     expect(projection).toContain("reconciliation");
   });
 
+  it("accepts item UUIDv4 only for cart, checkout, and build outcomes while keeping it internal", () => {
+    const sql = compactSql(WEBSITE_FUNNEL_AGGREGATE_SQL);
+    const projection = websiteFunnelAggregateProjection().toLowerCase();
+
+    expect(sql).toContain("'item_instance_id'");
+    expect(sql).toContain(
+      "lower(item_entry.item ->> 'item_instance_id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'",
+    );
+    expect(sql).toContain(
+      "when event.event_name in ('add_to_cart', 'begin_checkout') then case when item_entry.item ? 'item_instance_id'",
+    );
+    expect(sql).toContain(
+      "else not (item_entry.item ? 'item_instance_id') end",
+    );
+    expect(sql).toContain(
+      "when event.event_name in ('add_to_cart', 'begin_checkout') then array[ 'item_id', 'item_name', 'item_category', 'item_list_name', 'item_instance_id', 'price', 'quantity' ]::text[] else array[ 'item_id', 'item_name', 'item_category', 'item_list_name', 'price', 'quantity' ]::text[] end",
+    );
+    expect(sql).toContain(
+      "lower(event.properties ->> 'item_instance_id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'",
+    );
+    expect(projection).not.toContain("item_instance_id");
+  });
+
   it("builds stable positional parameters and normalizes safe filters", () => {
     const values = websiteFunnelQueryValues(input({
       filters: {

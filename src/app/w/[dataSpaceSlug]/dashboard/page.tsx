@@ -11,6 +11,7 @@ import {
   type PlatformModule,
 } from "@/aggregation/services/platform-modules-service";
 import { getWebsiteFunnelOverview } from "@/aggregation/services/website-funnel-service";
+import { WEBSITE_COMMERCE_FUNNEL_V2_UI_FLAG } from "@/aggregation/services/website-commerce-funnel-v2-service";
 import { getDataSpaceBySlug, isAutoLabDataSpace } from "@/storage/repositories/data-spaces-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
@@ -35,6 +36,7 @@ import { StorefrontConversionTrend } from "@/presentation/dashboard/storefront-c
 import { StorefrontFunnel } from "@/presentation/dashboard/storefront-funnel";
 import { StorefrontJourneys } from "@/presentation/dashboard/storefront-journeys";
 import { WebsiteBusinessPulse } from "@/presentation/dashboard/website-business-pulse";
+import { WebsiteCommerceFunnelV2 } from "@/presentation/dashboard/website-commerce-funnel-v2";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
 
 export const dynamic = "force-dynamic";
@@ -532,6 +534,8 @@ export default async function DataSpaceDashboardPage({
   const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
   if (!dataSpace) notFound();
   const isMoonArq = dataSpace.slug === "moonarq";
+  const websiteCommerceFunnelV2Enabled =
+    process.env[WEBSITE_COMMERCE_FUNNEL_V2_UI_FLAG]?.trim() === "true";
   const overviewQuery = parseMoonArqOverviewQuery(query ?? {});
   const basePath = dashboardPath(dataSpace.slug);
   if (isMoonArq && requiresSanitizedOverviewRedirect(query ?? {}, overviewQuery)) {
@@ -629,6 +633,13 @@ export default async function DataSpaceDashboardPage({
           <StorefrontJourneys overview={websiteOverview} />
           <StorefrontBreakdowns overview={websiteOverview} query={overviewQuery} basePath={basePath} />
           <CommerceOutcomes shopify={shopifyModule} />
+          {websiteCommerceFunnelV2Enabled ? (
+            <WebsiteCommerceFunnelV2
+              dataSpaceSlug={dataSpace.slug}
+              range={overviewQuery.range}
+              segment={overviewQuery.segment}
+            />
+          ) : null}
         </>
       ) : null}
 

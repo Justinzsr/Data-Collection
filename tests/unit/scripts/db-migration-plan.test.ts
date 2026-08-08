@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { selectPendingMigrations } from "../../../scripts/db-migration-plan";
 
 const migrations = [
+  "0011_shopify_commerce_bridge_facts.sql",
   "0010_rebuild_authoritative_website_metrics.sql",
   "0008_meta_ads_attribution.sql",
   "0009_website_event_contract_v1.sql",
@@ -37,6 +38,20 @@ describe("database migration planning", () => {
         target: "0009_website_event_contract_v1.sql",
       }),
     ).not.toContain("0010_rebuild_authoritative_website_metrics.sql");
+  });
+
+  it("plans the commerce bridge migration after the v1 rebuild", () => {
+    expect(
+      selectPendingMigrations({
+        filenames: migrations,
+        appliedFilenames: new Set([
+          "0008_meta_ads_attribution.sql",
+          "0009_website_event_contract_v1.sql",
+          "0010_rebuild_authoritative_website_metrics.sql",
+        ]),
+        target: "0011_shopify_commerce_bridge_facts.sql",
+      }),
+    ).toEqual(["0011_shopify_commerce_bridge_facts.sql"]);
   });
 
   it("rejects an unknown target", () => {

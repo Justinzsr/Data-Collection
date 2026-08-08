@@ -1,4 +1,5 @@
 import type {
+  CommerceOrderFactInput,
   ConnectionTestResult,
   ConnectorDefinition,
   NormalizedMetric,
@@ -27,6 +28,7 @@ import {
 import { metricDefinitions } from "@/aggregation/metric-definitions/definitions";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { pinSourceMetadataValue } from "@/storage/repositories/sources-repository";
+import { isShopifyCommerceFactsV2Enabled } from "@/storage/runtime/commerce-feature-flags";
 
 type DailySummary = {
   orders: number;
@@ -55,15 +57,73 @@ function roundMetric(value: number) {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 
-function moneyValue(bag: ShopifyMoneyBag | null, expectedCurrency: string, label: string) {
+function moneyAmount(bag: ShopifyMoneyBag | null, expectedCurrency: string, label: string) {
   if (!bag) return null;
   const currency = bag.shopMoney?.currencyCode;
-  const amount = Number(bag.shopMoney?.amount);
   if (currency !== expectedCurrency) {
     throw new Error(`${label} used ${currency || "an unknown currency"}; expected the shop currency ${expectedCurrency}. Mixed currencies are not summed.`);
   }
+  const amount = bag.shopMoney?.amount;
+  if (typeof amount !== "string") throw new Error(`${label} returned an invalid money amount.`);
+  return amount;
+}
+
+function moneyValue(bag: ShopifyMoneyBag | null, expectedCurrency: string, label: string) {
+  const rawAmount = moneyAmount(bag, expectedCurrency, label);
+  if (rawAmount === null) return null;
+  const amount = Number(rawAmount);
   if (!Number.isFinite(amount)) throw new Error(`${label} returned an invalid money amount.`);
   return amount;
+}
+
+function normalizeMoneyDecimal(amount: string, label: string) {
+  if (!/^\d+(?:\.\d+)?$/u.test(amount)) {
+    throw new Error(`${label} returned an invalid money amount.`);
+  }
+  const [integer, fraction = ""] = amount.split(".");
+  const normalizedInteger = integer.replace(/^0+(?=\d)/u, "");
+  const normalizedFraction = fraction.replace(/0+$/u, "");
+  return normalizedFraction ? `${normalizedInteger}.${normalizedFraction}` : normalizedInteger;
+}
+
+function requiredMoneyDecimal(bag: ShopifyMoneyBag | null, expectedCurrency: string, label: string) {
+  const amount = moneyAmount(bag, expectedCurrency, label);
+  if (amount === null) throw new Error(`${label} was missing; commerce facts were not replaced.`);
+  return normalizeMoneyDecimal(amount, label);
+}
+
+function decimalParts(amount: string) {
+  const [integer, fraction = ""] = amount.split(".");
+  return {
+    units: BigInt(`${integer}${fraction}`),
+    scale: fraction.length,
+  };
+}
+
+function decimalFromParts(units: bigint, scale: number) {
+  if (scale === 0) return units.toString();
+  const digits = units.toString().padStart(scale + 1, "0");
+  return normalizeMoneyDecimal(
+    `${digits.slice(0, -scale)}.${digits.slice(-scale)}`,
+    "Shopify calculated money",
+  );
+}
+
+function addMoneyDecimals(left: string, right: string) {
+  const leftParts = decimalParts(left);
+  const rightParts = decimalParts(right);
+  const scale = Math.max(leftParts.scale, rightParts.scale);
+  const leftUnits = leftParts.units * (BigInt(10) ** BigInt(scale - leftParts.scale));
+  const rightUnits = rightParts.units * (BigInt(10) ** BigInt(scale - rightParts.scale));
+  return decimalFromParts(leftUnits + rightUnits, scale);
+}
+
+function multiplyMoneyDecimal(amount: string, quantity: number) {
+  if (!Number.isSafeInteger(quantity) || quantity < 1) {
+    throw new Error("Shopify line-item quantity was invalid.");
+  }
+  const parts = decimalParts(amount);
+  return decimalFromParts(parts.units * BigInt(quantity), parts.scale);
 }
 
 function grossSales(order: ShopifyOrder, expectedCurrency: string) {
@@ -75,6 +135,33 @@ function grossSales(order: ShopifyOrder, expectedCurrency: string) {
     if (unitPrice === null) throw new Error(`Line item ${item.id} did not include an original price.`);
     return sum + unitPrice * item.quantity;
   }, 0);
+}
+
+function commerceFactGrossSales(order: ShopifyOrder, expectedCurrency: string) {
+  const subtotalAmount = moneyAmount(order.subtotalPriceSet, expectedCurrency, "Shopify order subtotal");
+  const discountAmount = moneyAmount(order.totalDiscountsSet, expectedCurrency, "Shopify order discounts");
+  if (subtotalAmount !== null && discountAmount !== null) {
+    return addMoneyDecimals(
+      normalizeMoneyDecimal(subtotalAmount, "Shopify order subtotal"),
+      normalizeMoneyDecimal(discountAmount, "Shopify order discounts"),
+    );
+  }
+  if (order.lineItems.nodes.length === 0) {
+    throw new Error("Shopify order gross sales could not be reconstructed from an empty line-item set.");
+  }
+  return order.lineItems.nodes.reduce((sum, item) => (
+    addMoneyDecimals(
+      sum,
+      multiplyMoneyDecimal(
+        requiredMoneyDecimal(
+          item.originalUnitPriceSet,
+          expectedCurrency,
+          "Shopify line-item original price",
+        ),
+        item.quantity,
+      ),
+    )
+  ), "0");
 }
 
 function hasUtmAttribution(visit: ShopifyCustomerVisit) {
@@ -279,6 +366,34 @@ function normalizeSnapshot(snapshot: ShopifySyncSnapshot, source: Source) {
   return [...dailyMetrics, ...productMetrics, ...attributionMetrics];
 }
 
+function commerceOrderFacts(snapshot: ShopifySyncSnapshot): CommerceOrderFactInput[] {
+  const currency = snapshot.shop.currencyCode;
+  return snapshot.orders.map((order) => {
+    if (order.currencyCode !== currency) {
+      throw new Error(`A Shopify order used a different currency than the connected shop. Mixed currencies are not stored.`);
+    }
+    return {
+      shopifyOrderId: order.id,
+      occurredAt: order.createdAt,
+      test: order.test,
+      cancelledAt: order.cancelledAt,
+      currencyCode: currency,
+      grossSales: commerceFactGrossSales(order, currency),
+      currentTotal: requiredMoneyDecimal(order.currentTotalPriceSet, currency, "Shopify order current total"),
+      netPayment: requiredMoneyDecimal(order.netPaymentSet, currency, "Shopify order net payment"),
+      totalRefunded: requiredMoneyDecimal(order.totalRefundedSet, currency, "Shopify order refunds"),
+      checkoutEventIdHash: order.checkoutEventIdHash,
+      checkoutBridgeState: order.checkoutBridgeState,
+      lines: order.lineItems.nodes.map((line) => ({
+        shopifyLineItemId: line.id,
+        quantity: line.quantity,
+        itemInstanceIdHash: line.itemInstanceIdHash,
+        itemBridgeState: line.itemBridgeState,
+      })),
+    };
+  });
+}
+
 function connectionError(error: unknown): ConnectionTestResult {
   if (error instanceof ShopifyApiError && error.code === "shop_not_permitted") {
     return {
@@ -423,6 +538,15 @@ export const shopifyConnector: ConnectorDefinition = {
   async sync(ctx) {
     const snapshot = await fetchShopifySnapshot(ctx.source, ctx.credentials);
     await pinShopifyIdentity(ctx.source, snapshot.shop, getShopifyStoreForSource(ctx.source).shopDomain);
+    const commerceFacts = isShopifyCommerceFactsV2Enabled()
+      ? {
+          commerceOrderFacts: commerceOrderFacts(snapshot),
+          replaceCommerceOrderWindow: {
+            startAt: snapshot.queryStartAt,
+            endAt: snapshot.fetchedAt,
+          },
+        }
+      : {};
     return {
       rawPayloads: [
         {
@@ -443,6 +567,7 @@ export const shopifyConnector: ConnectorDefinition = {
         queryStartAt: snapshot.queryStartAt,
         mode: "overlapping_60_day_snapshot",
       },
+      ...commerceFacts,
       recordsFetched: snapshot.orders.length,
       message: `Synced ${snapshot.orders.length} Shopify order record(s) from the latest ${SHOPIFY_ORDER_LOOKBACK_DAYS}-day window without customer contact fields.`,
     };

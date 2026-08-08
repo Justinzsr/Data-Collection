@@ -19,6 +19,7 @@ const item = {
   price: 48,
   quantity: 1,
 };
+const ITEM_INSTANCE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 describe("website funnel definitions", () => {
   it("freezes the nine-name taxonomy and four strict funnel stages", () => {
@@ -55,12 +56,23 @@ describe("website funnel definitions", () => {
       items: [item],
     })).toMatchObject({ classification: "known", valid: true });
 
-    for (const eventName of ["view_item", "add_to_cart", "begin_checkout"] as const) {
+    expect(validateWebsiteFunnelEventProperties("view_item", {
+      currency: "USD",
+      value: 48,
+      items: [item],
+    })).toMatchObject({ classification: "known", eventName: "view_item", valid: true });
+
+    for (const eventName of ["add_to_cart", "begin_checkout"] as const) {
       expect(validateWebsiteFunnelEventProperties(eventName, {
         currency: "USD",
         value: 48,
-        items: [item],
-      })).toMatchObject({ classification: "known", eventName, valid: true });
+        items: [{ ...item, item_instance_id: ITEM_INSTANCE_ID.toUpperCase() }],
+      })).toMatchObject({
+        classification: "known",
+        eventName,
+        valid: true,
+        properties: { items: [{ item_instance_id: ITEM_INSTANCE_ID }] },
+      });
     }
 
     expect(validateWebsiteFunnelEventProperties("build_start", {
@@ -71,9 +83,15 @@ describe("website funnel definitions", () => {
       expect(validateWebsiteFunnelEventProperties(eventName, {
         currency: "USD",
         item_category: "build-your-own",
+        item_instance_id: ITEM_INSTANCE_ID.toUpperCase(),
         stone_count: 7,
         value: 72,
-      })).toMatchObject({ classification: "known", eventName, valid: true });
+      })).toMatchObject({
+        classification: "known",
+        eventName,
+        valid: true,
+        properties: { item_instance_id: ITEM_INSTANCE_ID },
+      });
     }
 
     expect(validateWebsiteFunnelEventProperties("email_signup", {
@@ -125,6 +143,62 @@ describe("website funnel definitions", () => {
       ["invalid_value", "properties.items[0].quantity"],
       ["unexpected_field", "properties.guessed_product"],
     ]));
+  });
+
+  it("fails closed on malformed item-instance linkage without rejecting legacy events", () => {
+    expect(validateWebsiteFunnelEventProperties("add_to_cart", {
+      currency: "USD",
+      value: 48,
+      items: [item],
+    })).toMatchObject({ classification: "known", valid: true });
+
+    const malformedItem = validateWebsiteFunnelEventProperties("add_to_cart", {
+      currency: "USD",
+      value: 48,
+      items: [{ ...item, item_instance_id: "customer@example.com" }],
+    });
+    const malformedBuild = validateWebsiteFunnelEventProperties("build_complete", {
+      currency: "USD",
+      item_category: "build-your-own",
+      item_instance_id: "not-a-uuid",
+      stone_count: 7,
+      value: 72,
+    });
+
+    expect(malformedItem).toMatchObject({ classification: "known", valid: false });
+    expect(malformedBuild).toMatchObject({ classification: "known", valid: false });
+    expect(JSON.stringify([malformedItem, malformedBuild])).not.toContain("customer@example.com");
+  });
+
+  it("allows item-instance linkage only on cart and checkout item arrays", () => {
+    for (const [eventName, properties] of [
+      ["view_item_list", {
+        item_list_name: "Core collection",
+        items: [{ ...item, item_instance_id: ITEM_INSTANCE_ID }],
+      }],
+      ["view_item", {
+        currency: "USD",
+        value: 48,
+        items: [{ ...item, item_instance_id: ITEM_INSTANCE_ID }],
+      }],
+    ] as const) {
+      const result = validateWebsiteFunnelEventProperties(eventName, properties);
+      expect(result).toMatchObject({ classification: "known", eventName, valid: false });
+      expect(result.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: "unexpected_field",
+          path: "properties.items[0].item_instance_id",
+        }),
+      ]));
+    }
+
+    for (const eventName of ["add_to_cart", "begin_checkout"] as const) {
+      expect(validateWebsiteFunnelEventProperties(eventName, {
+        currency: "USD",
+        value: 48,
+        items: [{ ...item, item_instance_id: ITEM_INSTANCE_ID }],
+      })).toMatchObject({ classification: "known", eventName, valid: true });
+    }
   });
 
   it("rejects partial item, list, commerce, build, and email shapes", () => {

@@ -253,6 +253,9 @@ export const WEBSITE_FUNNEL_AGGREGATE_RESPONSE_DENYLIST = [
   "session_id",
   "anonymous_id",
   "user_id",
+  "item_instance_id",
+  "item_instance_id_hash",
+  "checkout_event_id_hash",
   "public_tracking_key",
   "url",
   "referrer",
@@ -1596,14 +1599,28 @@ event_property_primitives as materialized (
                   when jsonb_typeof(item_entry.item) = 'object' then
                     item_entry.item
                       ?& array['item_id', 'item_name', 'item_category']::text[]
-                    and item_entry.item - array[
-                  'item_id',
-                  'item_name',
-                  'item_category',
-                  'item_list_name',
-                  'price',
-                  'quantity'
-                ]::text[] = '{}'::jsonb
+                    and item_entry.item - (
+                      case
+                        when event.event_name in ('add_to_cart', 'begin_checkout')
+                          then array[
+                            'item_id',
+                            'item_name',
+                            'item_category',
+                            'item_list_name',
+                            'item_instance_id',
+                            'price',
+                            'quantity'
+                          ]::text[]
+                        else array[
+                          'item_id',
+                          'item_name',
+                          'item_category',
+                          'item_list_name',
+                          'price',
+                          'quantity'
+                        ]::text[]
+                      end
+                    ) = '{}'::jsonb
                 and display.display_safety
                   -> ('item_id:' || item_entry.item_index::text) = 'true'::jsonb
                 and display.display_safety
@@ -1616,6 +1633,19 @@ event_property_primitives as materialized (
                     -> ('item_list_name:' || item_entry.item_index::text)
                       = 'true'::jsonb
                 )
+                and (
+                  case
+                    when event.event_name in ('add_to_cart', 'begin_checkout') then
+                      case
+                        when item_entry.item ? 'item_instance_id' then
+                          jsonb_typeof(item_entry.item -> 'item_instance_id') = 'string'
+                          and lower(item_entry.item ->> 'item_instance_id')
+                            ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                        else true
+                      end
+                    else not (item_entry.item ? 'item_instance_id')
+                  end
+                ) is true
                 and (
                   case
                     when item_entry.item ? 'price' then
@@ -1703,7 +1733,7 @@ classified_known_events as materialized (
           event.properties
             ?& array['currency', 'item_category', 'stone_count', 'value']::text[]
           and event.properties
-            - array['currency', 'item_category', 'stone_count', 'value', 'attribution']::text[]
+            - array['currency', 'item_category', 'item_instance_id', 'stone_count', 'value', 'attribution']::text[]
               = '{}'::jsonb
           and jsonb_typeof(event.properties -> 'currency') = 'string'
           and btrim(
@@ -1711,6 +1741,14 @@ classified_known_events as materialized (
             ${ECMASCRIPT_TRIM_CHARACTERS_SQL}
           ) ~ '^[A-Z]{3}$'
           and event.display_safety -> 'property_item_category' = 'true'::jsonb
+          and (
+            not (event.properties ? 'item_instance_id')
+            or (
+              jsonb_typeof(event.properties -> 'item_instance_id') = 'string'
+              and lower(event.properties ->> 'item_instance_id')
+                ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+            )
+          )
           and (
             case
               when jsonb_typeof(event.properties -> 'stone_count') = 'number' then

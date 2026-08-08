@@ -1,13 +1,16 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import type { JsonRecord, Source } from "@/storage/db/schema";
+import type { CommerceBridgeState, JsonRecord, Source } from "@/storage/db/schema";
 
 export const SHOPIFY_ADMIN_API_VERSION = "2026-07";
 export const SHOPIFY_REQUIRED_SCOPES = ["read_orders"] as const;
 export const SHOPIFY_ORDER_LOOKBACK_DAYS = 60;
 export const SHOPIFY_SHOP_ID_METADATA_KEY = "shopify_shop_id";
 export const SHOPIFY_ATTRIBUTION_VERSION = "customer-journey-v1" as const;
+export const SHOPIFY_COMMERCE_BRIDGE_VERSION = "shopify-commerce-bridge-v1" as const;
+export const SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY = "_mq_checkout_event_id" as const;
+export const SHOPIFY_ITEM_INSTANCE_ATTRIBUTE_KEY = "_mq_item_instance_id" as const;
 
 const SHOPIFY_ORDER_PAGE_SIZE = 25;
 const SHOPIFY_MAX_ORDER_PAGES = 100;
@@ -15,6 +18,12 @@ const SHOPIFY_LINE_ITEM_PAGE_SIZE = 100;
 const SHOPIFY_MAX_LINE_ITEM_PAGES = 100;
 const SHOPIFY_GRAPHQL_MAX_RETRIES = 5;
 const SHOPIFY_STORE_PATTERN = /^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.myshopify\.com$/i;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export type ShopifyBridgeIdentity = {
+  hash: string | null;
+  state: CommerceBridgeState;
+};
 
 export type ShopifyMoney = {
   amount: string;
@@ -30,6 +39,8 @@ export type ShopifyLineItem = {
   name: string;
   quantity: number;
   originalUnitPriceSet: ShopifyMoneyBag;
+  itemInstanceIdHash: string | null;
+  itemBridgeState: CommerceBridgeState;
 };
 
 export type ShopifyUtmParameters = {
@@ -60,12 +71,15 @@ export type ShopifyOrder = {
   id: string;
   createdAt: string;
   test: boolean;
+  cancelledAt: string | null;
   currencyCode: string;
   subtotalPriceSet: ShopifyMoneyBag | null;
   totalDiscountsSet: ShopifyMoneyBag | null;
   currentTotalPriceSet: ShopifyMoneyBag;
   netPaymentSet: ShopifyMoneyBag;
   totalRefundedSet: ShopifyMoneyBag;
+  checkoutEventIdHash: string | null;
+  checkoutBridgeState: CommerceBridgeState;
   customerJourneySummary: ShopifyCustomerJourneySummary | null;
   lineItems: {
     nodes: ShopifyLineItem[];
@@ -84,6 +98,7 @@ export type ShopifyShop = {
 export type ShopifySyncSnapshot = {
   kind: "shopify_orders_snapshot";
   attributionVersion: typeof SHOPIFY_ATTRIBUTION_VERSION;
+  commerceBridgeVersion: typeof SHOPIFY_COMMERCE_BRIDGE_VERSION;
   fetchedAt: string;
   apiVersion: string;
   lookbackDays: number;
@@ -131,6 +146,25 @@ export class ShopifyApiError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function extractShopifyBridgeIdentity(
+  attributes: unknown,
+  targetKey: typeof SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY | typeof SHOPIFY_ITEM_INSTANCE_ATTRIBUTE_KEY,
+): ShopifyBridgeIdentity {
+  if (!Array.isArray(attributes)) return { hash: null, state: "invalid" };
+  const matches = attributes.filter((attribute) => isRecord(attribute) && attribute.key === targetKey);
+  if (matches.length === 0) return { hash: null, state: "missing" };
+  if (matches.length !== 1) return { hash: null, state: "ambiguous" };
+  const value = matches[0].value;
+  if (typeof value !== "string" || !UUID_V4_PATTERN.test(value)) {
+    return { hash: null, state: "invalid" };
+  }
+  return { hash: sha256(value.toLowerCase()), state: "matched" };
 }
 
 function sanitizeShopifyMessage(value: unknown, secrets: string[] = []) {
@@ -347,6 +381,8 @@ const ORDERS_QUERY = `#graphql
         id
         createdAt
         test
+        cancelledAt
+        customAttributes { key value }
         currencyCode
         subtotalPriceSet { shopMoney { amount currencyCode } }
         totalDiscountsSet { shopMoney { amount currencyCode } }
@@ -441,6 +477,7 @@ const ORDER_LINE_ITEMS_QUERY = `#graphql
           id
           name
           quantity
+          customAttributes { key value }
           originalUnitPriceSet { shopMoney { amount currencyCode } }
         }
         pageInfo { hasNextPage endCursor }
@@ -448,6 +485,20 @@ const ORDER_LINE_ITEMS_QUERY = `#graphql
     }
   }
 `;
+
+type ShopifyOrderApiNode = Omit<
+  ShopifyOrder,
+  "checkoutEventIdHash" | "checkoutBridgeState" | "lineItems"
+> & {
+  customAttributes?: unknown;
+};
+
+type ShopifyLineItemApiNode = Omit<
+  ShopifyLineItem,
+  "itemInstanceIdHash" | "itemBridgeState"
+> & {
+  customAttributes?: unknown;
+};
 
 export async function fetchShopifyShop(
   shopDomain: string,
@@ -487,7 +538,7 @@ async function fetchShopifyOrders(
   for (let page = 1; page <= SHOPIFY_MAX_ORDER_PAGES; page += 1) {
     const data: {
       orders?: {
-        nodes?: Array<Omit<ShopifyOrder, "lineItems">>;
+        nodes?: ShopifyOrderApiNode[];
         pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
       };
     } = await shopifyGraphql(
@@ -512,11 +563,24 @@ async function fetchShopifyOrders(
         });
       }
       seenOrderIds.add(order.id);
-      const lineItems = order.test
-        ? { nodes: [], pageInfo: { hasNextPage: false } }
-        : await fetchShopifyOrderLineItems(shopDomain, accessToken, order.id, fetchImpl);
+      const checkoutBridge = extractShopifyBridgeIdentity(
+        order.customAttributes,
+        SHOPIFY_CHECKOUT_EVENT_ATTRIBUTE_KEY,
+      );
+      const lineItems = await fetchShopifyOrderLineItems(shopDomain, accessToken, order.id, fetchImpl);
       orders.push({
-        ...order,
+        id: order.id,
+        createdAt: order.createdAt,
+        test: order.test,
+        cancelledAt: order.cancelledAt,
+        currencyCode: order.currencyCode,
+        subtotalPriceSet: order.subtotalPriceSet,
+        totalDiscountsSet: order.totalDiscountsSet,
+        currentTotalPriceSet: order.currentTotalPriceSet,
+        netPaymentSet: order.netPaymentSet,
+        totalRefundedSet: order.totalRefundedSet,
+        checkoutEventIdHash: checkoutBridge.hash,
+        checkoutBridgeState: checkoutBridge.state,
         customerJourneySummary: sanitizeShopifyJourney(order.customerJourneySummary),
         lineItems,
       });
@@ -556,7 +620,7 @@ async function fetchShopifyOrderLineItems(
       order?: {
         id?: string;
         lineItems?: {
-          nodes?: ShopifyLineItem[];
+          nodes?: ShopifyLineItemApiNode[];
           pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
         };
       } | null;
@@ -585,7 +649,18 @@ async function fetchShopifyOrderLineItems(
         });
       }
       seenLineItemIds.add(item.id);
-      nodes.push(item);
+      const itemBridge = extractShopifyBridgeIdentity(
+        item.customAttributes,
+        SHOPIFY_ITEM_INSTANCE_ATTRIBUTE_KEY,
+      );
+      nodes.push({
+        id: item.id,
+        name: item.name,
+        quantity: item.quantity,
+        originalUnitPriceSet: item.originalUnitPriceSet,
+        itemInstanceIdHash: itemBridge.hash,
+        itemBridgeState: itemBridge.state,
+      });
     }
     if (!connection.pageInfo.hasNextPage) {
       complete = true;
@@ -673,6 +748,7 @@ export function hashShopifySnapshot(snapshot: ShopifySyncSnapshot) {
   const canonical = {
     apiVersion: snapshot.apiVersion,
     attributionVersion: snapshot.attributionVersion,
+    commerceBridgeVersion: snapshot.commerceBridgeVersion,
     kind: snapshot.kind,
     lookbackDays: snapshot.lookbackDays,
     orders: snapshot.orders,
@@ -708,6 +784,7 @@ export async function fetchShopifySnapshot(
   return {
     kind: "shopify_orders_snapshot",
     attributionVersion: SHOPIFY_ATTRIBUTION_VERSION,
+    commerceBridgeVersion: SHOPIFY_COMMERCE_BRIDGE_VERSION,
     fetchedAt: now.toISOString(),
     apiVersion: SHOPIFY_ADMIN_API_VERSION,
     lookbackDays: SHOPIFY_ORDER_LOOKBACK_DAYS,
@@ -722,6 +799,7 @@ export function isShopifySnapshot(value: unknown): value is ShopifySyncSnapshot 
   return isRecord(value)
     && value.kind === "shopify_orders_snapshot"
     && value.attributionVersion === SHOPIFY_ATTRIBUTION_VERSION
+    && value.commerceBridgeVersion === SHOPIFY_COMMERCE_BRIDGE_VERSION
     && typeof value.fetchedAt === "string"
     && typeof value.windowStartDate === "string"
     && typeof value.queryStartAt === "string"

@@ -49,6 +49,7 @@ Initial lifecycle state is decided by the server during source creation. A Websi
     "currency": "CAD",
     "viewport_category": "large",
     "device_category": "desktop",
+    "traffic_type": "production",
     "page_type": "collection"
   }
 }
@@ -75,12 +76,21 @@ Initial lifecycle state is decided by the server during source creation. A Websi
 | `properties` | Optional | Event-specific JSON object. Keep it minimal and free of personal data. |
 | `attribution` | Optional | Top-level UTM, click ID, landing-page, first-referrer, and touchpoint context. |
 | `consent` | Required | Analytics and marketing status: `granted`, `denied`, or `unknown`; optional `do_not_track` boolean. |
-| `client_context` | Required | Optional values within the object: language, ISO-style three-letter currency, viewport category, device category, and page type. |
+| `client_context` | Required | Optional values within the object: language, ISO-style three-letter currency, viewport category, device category, traffic type, and page type. |
 
 Attribution `touchpoint` is `first`, `session`, or `current`. Viewport categories are `small`, `medium`, `large`, `wide`, or `unknown`; device categories are `mobile`, `tablet`, `desktop`, `bot`, or `unknown`.
+Traffic types are `production`, `synthetic`, `local`, or `test`. The field remains optional for backward compatibility, but the stricter V2 business funnel requires `production` on every event in a session and treats absent or mixed markers as excluded traffic.
 `attribution.landing_page` is a site-relative pathname without a query string or fragment. `attribution.first_referrer`, when present, must be an HTTP(S) URL and is subject to the same nested-URL privacy rules.
 
-The generated tracker checks analytics consent and Do Not Track before reading or creating browser identifiers or attribution state. It does not transmit events when analytics consent is `denied`. Consent collection and legal requirements remain the responsibility of the website operator.
+The generated tracker checks analytics consent and Do Not Track before reading or creating browser identifiers or attribution state. MoonArq's reviewed producer transmits only after analytics consent is explicitly `granted`; `unknown`, `denied`, and Do Not Track all fail closed without tracker storage access. Consent collection and legal requirements remain the responsibility of the website operator.
+
+## Backward-compatible commerce instance field
+
+The reviewed MoonArq commerce shapes may include an optional `item_instance_id` UUIDv4 on an item inside `add_to_cart` or `begin_checkout`, and on `build_complete` or `save_design`. It identifies one Build Your Own bracelet snapshot; it does not replace the catalog `item_id`, identify a customer, or become a display dimension. Legacy events without it remain valid.
+
+When a producer creates `item_instance_id`, it must use `crypto.randomUUID()` or an RFC 4122 UUIDv4 built from `crypto.getRandomValues()`. If neither secure crypto API is available, it must omit the value and keep the path unlinked; predictable fallbacks such as `Math.random()`, timestamps, or counters are forbidden.
+
+The aggregate-only V1 funnel ignores this value. V2 may hash it internally for an exact Shopify line-item match, but must never return the raw UUID or hash from a reporting response. Invalid or duplicate linkage values fail closed. The complete cross-source contract and consent boundary are defined in [Website Commerce Funnel V2](website-commerce-funnel-v2.md).
 
 ## Legacy compatibility
 

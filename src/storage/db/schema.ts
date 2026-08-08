@@ -229,6 +229,39 @@ export interface WebEvent {
   created_at: string;
 }
 
+export type CommerceBridgeState = "missing" | "matched" | "invalid" | "ambiguous";
+
+export interface CommerceOrder {
+  id: string;
+  source_id: string;
+  shopify_order_id_hash: string;
+  occurred_at: string;
+  test: boolean;
+  cancelled_at: string | null;
+  currency_code: string;
+  gross_sales: string;
+  current_total: string;
+  net_payment: string;
+  total_refunded: string;
+  checkout_event_id_hash: string | null;
+  checkout_bridge_state: CommerceBridgeState;
+  definition_version: "shopify-commerce-bridge-v1";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommerceOrderLine {
+  id: string;
+  order_id: string;
+  shopify_line_item_id_hash: string;
+  quantity: number;
+  item_instance_id_hash: string | null;
+  item_bridge_state: CommerceBridgeState;
+  definition_version: "shopify-commerce-bridge-v1";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricDefinition {
   key: string;
   display_name: string;
@@ -318,6 +351,8 @@ export interface DemoWorkspace {
   contentItems: ContentItem[];
   contentMetrics: ContentMetric[];
   webEvents: WebEvent[];
+  commerceOrders: CommerceOrder[];
+  commerceOrderLines: CommerceOrderLine[];
   metricDefinitions: MetricDefinition[];
   connectorEvents: ConnectorEvent[];
   platformChangeEvents: PlatformChangeEvent[];
