@@ -12,6 +12,9 @@ export type SourceTypeKey =
   | "instagram"
   | "meta_ads"
   | "xiaohongshu"
+  | "facebook_page"
+  | "etsy"
+  | "google_analytics"
   | "custom_api"
   | "custom_csv";
 

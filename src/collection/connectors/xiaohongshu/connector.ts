@@ -4,6 +4,8 @@ const setupInstructions = [
   "小红书 / Xiaohongshu is a planned placeholder only. No production connector is available in MoonArq yet.",
   "MoonArq does not collect, test, or sync Xiaohongshu data, and it does not request account credentials for this placeholder.",
   "A future implementation must use an official, authorized API or webhook path. Dashboard scraping and password or cookie collection are not allowed.",
+  "Official paths: 小红书开放平台 (open.xiaohongshu.com) for shop orders if MoonArq sells on Xiaohongshu, and the 聚光 (Juguang) Marketing API for ad delivery and spend once the advertiser account is approved for API access.",
+  "Organic note metrics have no public API; the planned path is importing the CSV export from the 专业号 data center.",
 ];
 
 function normalizedXiaohongshuUrl(inputUrl: string) {

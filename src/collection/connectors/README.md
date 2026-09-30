@@ -11,3 +11,6 @@ MVP real connectors:
 
 Scaffolded connectors:
 - `vercel-project`, `custom-api`, `custom-csv`.
+
+Planned connectors (visible in Add Source, never collect data or accept credentials):
+- `xiaohongshu`, `facebook_page`, `etsy`, `google_analytics`. What each needs is in `docs/connector-roadmap.md`.

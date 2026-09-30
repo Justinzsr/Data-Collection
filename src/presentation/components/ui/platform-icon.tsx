@@ -2,6 +2,7 @@ import {
   BookOpen,
   Braces,
   Camera,
+  ChartColumn,
   DatabaseZap,
   FileSpreadsheet,
   Globe2,
@@ -9,6 +10,8 @@ import {
   Orbit,
   Rocket,
   ShoppingBag,
+  Store,
+  ThumbsUp,
   Video,
   type LucideIcon,
 } from "lucide-react";
@@ -32,6 +35,9 @@ const PLATFORM_STYLES: Record<string, PlatformStyle> = {
   instagram: { icon: Camera, fill: "var(--icon-sunset)" },
   meta_ads: { icon: Megaphone, fill: "var(--icon-azure)" },
   xiaohongshu: { icon: BookOpen, fill: "var(--icon-red)" },
+  facebook_page: { icon: ThumbsUp, fill: "var(--icon-azure)" },
+  etsy: { icon: Store, fill: "var(--icon-orange)" },
+  google_analytics: { icon: ChartColumn, fill: "var(--icon-warning)" },
   custom_api: { icon: Braces, fill: "var(--icon-gray)" },
   custom_csv: { icon: FileSpreadsheet, fill: "var(--icon-green)" },
 };

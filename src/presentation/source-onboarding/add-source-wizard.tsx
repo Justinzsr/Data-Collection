@@ -86,6 +86,9 @@ const PLATFORM_PRIORITY = [
   "supabase",
   "xiaohongshu",
   "shopify",
+  "facebook_page",
+  "etsy",
+  "google_analytics",
   "vercel_project",
   "custom_api",
   "custom_csv",
@@ -565,11 +568,11 @@ export function AddSourceWizard({
                       <p className="mt-3 text-sm leading-6 text-label-secondary">
                         {selectedType.key === "xiaohongshu"
                           ? "小红书 is a roadmap placeholder. It does not collect data, request credentials, test connections, or run syncs yet. A future connector must use an official authorized integration."
-                          : "This connector is visible on the roadmap but cannot be saved or connected yet."}
+                          : `${selectedType.display_name} is on the roadmap. It does not collect data or ask for credentials yet; the steps below list what it will need.`}
                       </p>
                       {selectedType.setup_instructions.length > 0 ? (
                         <details className="mt-4 rounded-2xl bg-fill px-4 py-3">
-                          <summary className="cursor-pointer text-sm font-semibold text-warning">Why it is not connectable</summary>
+                          <summary className="cursor-pointer text-sm font-semibold text-warning">{selectedType.key === "xiaohongshu" ? "Why it is not connectable" : "What it will need"}</summary>
                           <div className="mt-3 grid gap-2 text-sm leading-6 text-label-secondary">
                             {selectedType.setup_instructions.map((instruction) => <p key={instruction}>{instruction}</p>)}
                           </div>
