@@ -10,6 +10,7 @@ interface PlannedConnectorOptions {
   icon: string;
   urlPatterns: RegExp[];
   authType: string;
+  docsUrl?: string | null;
   supportedMetrics: string[];
   detect: (inputUrl: string) => { confidence: number; normalizedUrl: string; reasons: string[]; accountName?: string | null } | null;
   setup: string[];
@@ -29,7 +30,7 @@ export function createPlannedConnector(options: PlannedConnectorOptions): Connec
     requiredFields: [],
     optionalFields: [],
     authType: options.authType,
-    docsUrl: null,
+    docsUrl: options.docsUrl ?? null,
     capabilities: {
       supportsWebhook: false,
       supportsPolling: false,
@@ -78,7 +79,7 @@ export function createPlannedConnector(options: PlannedConnectorOptions): Connec
   };
 }
 
-function validUrl(inputUrl: string) {
+export function validUrl(inputUrl: string) {
   try {
     return new URL(inputUrl);
   } catch {

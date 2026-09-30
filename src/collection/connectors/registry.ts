@@ -17,6 +17,9 @@ import { instagramConnector } from "@/collection/connectors/instagram/connector"
 import { metaAdsConnector } from "@/collection/connectors/meta-ads/connector";
 import { tiktokConnector } from "@/collection/connectors/tiktok/connector";
 import { xiaohongshuConnector } from "@/collection/connectors/xiaohongshu/connector";
+import { facebookPageConnector } from "@/collection/connectors/facebook-page/connector";
+import { etsyConnector } from "@/collection/connectors/etsy/connector";
+import { googleAnalyticsConnector } from "@/collection/connectors/google-analytics/connector";
 
 export const connectorRegistry: ConnectorDefinition[] = [
   vercelWebAnalyticsDrainConnector,
@@ -29,6 +32,9 @@ export const connectorRegistry: ConnectorDefinition[] = [
   customCsvConnector,
   customApiConnector,
   xiaohongshuConnector,
+  facebookPageConnector,
+  etsyConnector,
+  googleAnalyticsConnector,
   websiteConnector,
 ];
 

@@ -55,6 +55,36 @@ describe("connector detection", () => {
     }
   });
 
+  it("detects Facebook Pages, Etsy shops, and GA4 properties as planned, credential-free connectors", () => {
+    const cases = [
+      { input: "https://www.facebook.com/moonarqstudio/about", key: "facebook_page", normalizedUrl: "https://www.facebook.com/moonarqstudio", accountName: "moonarqstudio" },
+      { input: "https://m.facebook.com/profile.php?id=61550000000000", key: "facebook_page", normalizedUrl: "https://www.facebook.com/profile.php?id=61550000000000", accountName: "61550000000000" },
+      { input: "https://www.etsy.com/uk/shop/MoonArqStudio?ref=shop_sugg", key: "etsy", normalizedUrl: "https://www.etsy.com/shop/MoonArqStudio", accountName: "MoonArqStudio" },
+      { input: "https://analytics.google.com/analytics/web/#/p123456789/reports/intelligenthome", key: "google_analytics", normalizedUrl: "https://analytics.google.com/analytics/web/#/p123456789/", accountName: "GA4 property 123456789" },
+    ] as const;
+    for (const { input, key, normalizedUrl, accountName } of cases) {
+      const [result] = detectSource(input);
+      expect(result, input).toMatchObject({
+        sourceTypeKey: key,
+        availability: "planned",
+        setupKind: "planned",
+        normalizedUrl,
+        accountName,
+        demoAvailable: false,
+      });
+      expect(result.requiredSetup.join(" ")).toContain("does not collect");
+      expect(result.requiredSetup.join(" ")).toContain("official");
+    }
+  });
+
+  it("keeps Meta Ads Manager and Facebook feature URLs off the Facebook Page connector", () => {
+    expect(detectSource("https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=123")[0].sourceTypeKey).toBe("meta_ads");
+    expect(detectSource("https://www.facebook.com/adsmanager/manage/campaigns")[0].sourceTypeKey).toBe("meta_ads");
+    for (const input of ["https://www.facebook.com/groups/123", "https://www.facebook.com/marketplace/item/1", "https://www.facebook.com/"]) {
+      expect(detectSource(input).some((result) => result.sourceTypeKey === "facebook_page"), input).toBe(false);
+    }
+  });
+
   it("lists source types with capabilities", () => {
     const keys = listSourceTypes().map((sourceType) => sourceType.key);
     expect(keys).toContain("supabase");
