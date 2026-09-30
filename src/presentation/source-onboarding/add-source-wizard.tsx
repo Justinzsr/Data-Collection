@@ -538,7 +538,7 @@ export function AddSourceWizard({
                             type="button"
                             aria-pressed={selected}
                             onClick={() => choosePlatform(sourceType)}
-                            className={`group min-h-40 rounded-[22px] p-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30 active:scale-[0.99] ${
+                            className={`group min-h-40 rounded-[22px] p-4 text-left transition duration-200 focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30 active:scale-[0.99] ${
                               selected
                                 ? "bg-tint/10 shadow-[inset_0_0_0_2px_var(--tint)]"
                                 : "bg-fill hover:bg-fill-hover"
@@ -621,7 +621,7 @@ export function AddSourceWizard({
                               type="button"
                               aria-pressed={checked}
                               onClick={() => chooseWebsiteMode(option.key)}
-                              className={`rounded-[22px] p-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30 ${
+                              className={`rounded-[22px] p-4 text-left transition duration-200 focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30 ${
                                 checked ? "bg-tint/10 shadow-[inset_0_0_0_2px_var(--tint)]" : "bg-fill hover:bg-fill-hover"
                               }`}
                             >

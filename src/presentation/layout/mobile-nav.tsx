@@ -41,7 +41,7 @@ function MobileNavLink({
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-[15px] transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+        "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-[15px] transition focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30",
         active ? "bg-fill-strong font-semibold text-label" : "font-medium text-label-secondary hover:bg-fill-hover hover:text-label",
       )}
     >
@@ -168,7 +168,7 @@ export function MobileNav({
             type="button"
             ref={closeButtonRef}
             aria-label="Close navigation"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-fill-strong text-label-secondary transition hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-fill-strong text-label-secondary transition hover:text-label focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
             onClick={closeNavigation}
           >
             <X className="h-[18px] w-[18px]" />
@@ -184,7 +184,7 @@ export function MobileNav({
                 onClick={() => setWorkspaceOpen((current) => !current)}
                 aria-expanded={workspaceOpen}
                 aria-controls="mobile-workspace-options"
-                className="flex min-h-10 w-full items-center justify-between rounded-xl px-2.5 text-left text-[13px] font-semibold text-label-secondary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+                className="flex min-h-10 w-full items-center justify-between rounded-xl px-2.5 text-left text-[13px] font-semibold text-label-secondary focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
               >
                 Switch workspace
                 <ChevronDown className={cn("h-4 w-4 transition-transform", workspaceOpen ? "rotate-0" : "-rotate-90")} />
@@ -200,7 +200,7 @@ export function MobileNav({
                         onClick={closeNavigation}
                         aria-current={active ? "page" : undefined}
                         className={cn(
-                          "flex min-h-11 items-center gap-3 rounded-xl px-2 text-[14px] transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+                          "flex min-h-11 items-center gap-3 rounded-xl px-2 text-[14px] transition focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30",
                           active ? "bg-glass-selected font-semibold text-label shadow-sm" : "text-label-secondary hover:bg-fill-hover",
                         )}
                       >
@@ -226,7 +226,7 @@ export function MobileNav({
                     onClick={() => toggleGroup(group.id)}
                     aria-expanded={groupOpen}
                     aria-controls={`mobile-nav-items-${group.id}`}
-                    className="flex min-h-9 w-full items-center justify-between rounded-xl px-3 text-[12px] font-semibold text-muted focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+                    className="flex min-h-9 w-full items-center justify-between rounded-xl px-3 text-[12px] font-semibold text-muted focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
                   >
                     {group.label}
                     <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", groupOpen ? "rotate-0" : "-rotate-90")} />
@@ -267,7 +267,7 @@ export function MobileNav({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="mobile-dashboard-navigation"
-        className="grid h-9 w-9 place-items-center rounded-full text-label-secondary transition hover:bg-fill-hover hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+        className="grid h-10 w-10 place-items-center rounded-full text-label-secondary transition hover:bg-fill-hover hover:text-label focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
         onClick={() => setOpen(true)}
       >
         <Menu className="h-5 w-5" />

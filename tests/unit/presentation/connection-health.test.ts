@@ -46,11 +46,12 @@ describe("authorizationState", () => {
       tone: "slate",
       label: "Demo only",
       attention: false,
+      renewal: false,
     });
   });
 
   it("flags OAuth platforms that were never authorized", () => {
-    expect(authorizationState(source({ metadata: {} }), now)).toMatchObject({ label: "Not authorized", attention: true });
+    expect(authorizationState(source({ metadata: {} }), now)).toMatchObject({ label: "Not authorized", attention: true, renewal: false });
   });
 
   it("shows a healthy long-lived Instagram token with its expiry date", () => {
@@ -63,10 +64,10 @@ describe("authorizationState", () => {
     expect(authorizationState(source({
       source_type_key: "meta_ads",
       metadata: { oauth_connected: true, token_expires_at: inDays(5) },
-    }), now)).toMatchObject({ tone: "amber", label: "Renew within 5 days", attention: true });
+    }), now)).toMatchObject({ tone: "amber", label: "Renew within 5 days", attention: true, renewal: true });
     expect(authorizationState(source({
       metadata: { oauth_connected: true, token_expires_at: inDays(-2) },
-    }), now)).toMatchObject({ tone: "rose", label: "Authorization expired", attention: true });
+    }), now)).toMatchObject({ tone: "rose", label: "Authorization expired", attention: true, renewal: true });
   });
 
   it("uses the TikTok refresh-token expiry, not the short access-token expiry", () => {
@@ -77,6 +78,6 @@ describe("authorizationState", () => {
     expect(authorizationState(source({
       source_type_key: "tiktok",
       metadata: { oauth_connected: true },
-    }), now)).toEqual({ tone: "green", label: "Auto-refreshing", attention: false });
+    }), now)).toEqual({ tone: "green", label: "Auto-refreshing", attention: false, renewal: false });
   });
 });

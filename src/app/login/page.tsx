@@ -42,7 +42,7 @@ export default async function LoginPage({ searchParams }: { searchParams?: Promi
             {params?.error === "invalid" ? (
               <Callout tone="danger">Invalid dashboard password.</Callout>
             ) : null}
-            <button type="submit" className="min-h-12 rounded-full bg-tint px-4 text-[15px] font-semibold text-on-tint shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_8px_22px_-10px_var(--tint)] transition hover:bg-tint-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30 active:scale-[0.98]">
+            <button type="submit" className="min-h-12 rounded-full bg-tint px-4 text-[15px] font-semibold text-on-tint shadow-(--tint-shadow) transition hover:bg-tint-hover focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30 active:scale-[0.98]">
               Enter command center
             </button>
           </form>

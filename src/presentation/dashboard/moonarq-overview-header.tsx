@@ -100,7 +100,7 @@ export function MoonArqOverviewHeader({
               <Link
                 key={range}
                 href={buildMoonArqOverviewHref(basePath, query, { range })}
-                className="segmented-item min-h-11 sm:min-h-9"
+                className="segmented-item min-h-11 sm:min-h-10"
                 aria-current={query.range === range ? "page" : undefined}
               >
                 {rangeLabels[range]}
@@ -112,7 +112,7 @@ export function MoonArqOverviewHeader({
               <Link
                 key={compare}
                 href={buildMoonArqOverviewHref(basePath, query, { compare })}
-                className="segmented-item min-h-11 sm:min-h-9"
+                className="segmented-item min-h-11 sm:min-h-10"
                 aria-current={query.compare === compare ? "page" : undefined}
               >
                 {compare === "previous" ? "Previous period" : "Comparison off"}

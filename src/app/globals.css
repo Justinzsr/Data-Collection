@@ -96,6 +96,31 @@
 
   --focus-ring: rgba(0, 122, 255, 0.5);
 
+  /* App-icon tiles (same in light and dark, like Apple's Settings icons). */
+  --icon-glyph: #ffffff;
+  --icon-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 2px 6px -2px rgba(15, 23, 42, 0.35);
+  --icon-blue: linear-gradient(180deg, #48a6ff 0%, #0a6cf0 100%);
+  --icon-graphite: linear-gradient(180deg, #4a4a50 0%, #141417 100%);
+  --icon-black: linear-gradient(180deg, #3a3a40 0%, #0c0c0e 100%);
+  --icon-mint: linear-gradient(180deg, #4fdc9d 0%, #1c9a60 100%);
+  --icon-lime: linear-gradient(180deg, #a6cf55 0%, #5b8c2f 100%);
+  --icon-sunset: linear-gradient(40deg, #f9b233 0%, #ee2a7b 48%, #6a2fd6 100%);
+  --icon-azure: linear-gradient(180deg, #4d9dff 0%, #1662d8 100%);
+  --icon-red: linear-gradient(180deg, #ff5a6a 0%, #e0243a 100%);
+  --icon-gray: linear-gradient(180deg, #9e9ea6 0%, #5f5f66 100%);
+  --icon-green: linear-gradient(180deg, #47d16c 0%, #1f8a3d 100%);
+  --icon-positive: linear-gradient(180deg, #4cd964 0%, #248a3d 100%);
+  --icon-warning: linear-gradient(180deg, #ffb340 0%, #e07b00 100%);
+  --icon-negative: linear-gradient(180deg, #ff6a61 0%, #d70015 100%);
+  --icon-indigo: linear-gradient(180deg, #7d7aff 0%, #3634a3 100%);
+  --icon-pink: linear-gradient(180deg, #ff6482 0%, #d30f45 100%);
+  --icon-teal: linear-gradient(180deg, #5de6ff 0%, #0071a4 100%);
+  --icon-orange: linear-gradient(180deg, #ff9f45 0%, #e0412c 100%);
+  --icon-glyph-split-a: #fe2c55;
+  --icon-glyph-split-b: #25f4ee;
+  --tint-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 6px 18px -8px var(--tint);
+
   --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue",
     var(--font-geist-sans), system-ui, "Segoe UI", sans-serif;
   --font-code: ui-monospace, "SF Mono", SFMono-Regular, Menlo, var(--font-geist-mono), monospace;
@@ -373,7 +398,7 @@
 
   /* Text fields and selects: Apple-style filled controls with a tint focus ring. */
   .field {
-    min-height: 2.75rem;
+    height: 2.75rem;
     border-radius: 12px;
     border: 1px solid transparent;
     background-color: var(--fill);
@@ -404,6 +429,13 @@
   .field:disabled {
     cursor: not-allowed;
     opacity: 0.55;
+  }
+
+  /* App-icon tile; the gradient comes from an --icon-* token via --icon-fill. */
+  .app-icon {
+    background-image: var(--icon-fill, var(--icon-gray));
+    color: var(--icon-glyph);
+    box-shadow: var(--icon-shadow);
   }
 
   /* Inset grouped surface inside a glass card. */
@@ -500,6 +532,23 @@ html [data-sonner-toaster] [data-sonner-toast][data-styled="true"] {
 
 html [data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-description] {
   color: var(--label-secondary);
+}
+
+/* Keep status visible on glass toasts without sonner's rich colors. */
+html [data-sonner-toaster] [data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--positive-fill);
+}
+
+html [data-sonner-toaster] [data-sonner-toast][data-type="error"] [data-icon] {
+  color: var(--negative-fill);
+}
+
+html [data-sonner-toaster] [data-sonner-toast][data-type="warning"] [data-icon] {
+  color: var(--warning-fill);
+}
+
+html [data-sonner-toaster] [data-sonner-toast][data-type="info"] [data-icon] {
+  color: var(--tint);
 }
 
 @media (prefers-reduced-motion: reduce) {

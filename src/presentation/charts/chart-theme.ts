@@ -33,5 +33,4 @@ export const chartTooltipStyle = {
   fontSize: "12px",
 } as const;
 export const chartTooltipLabelStyle = { color: "var(--muted)", marginBottom: "4px" } as const;
-export const chartTooltipItemStyle = { color: "var(--label)" } as const;
 export const chartActiveDot = { r: 4.5, strokeWidth: 2, stroke: "var(--glass-selected)" } as const;

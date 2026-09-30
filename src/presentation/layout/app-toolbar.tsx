@@ -24,8 +24,8 @@ export function AppToolbar({
   const pageLabel = getPageLabel(pathname, slug);
 
   return (
-    <header className="sticky top-0 z-40 px-3 pt-3 sm:px-5 lg:px-6">
-      <div className="glass-chrome flex h-12 min-w-0 items-center justify-between gap-2 rounded-full pl-1.5 pr-1.5 sm:pl-4">
+    <header className="pointer-events-none sticky top-0 z-40 px-3 pt-3 sm:px-5 lg:px-6">
+      <div className="glass-chrome pointer-events-auto flex h-[3.25rem] min-w-0 items-center justify-between gap-2 rounded-full pl-1.5 pr-1.5 sm:pl-4">
         <div className="flex min-w-0 items-center gap-2.5">
           <Link href={dashboardPath(slug)} className="shrink-0 rounded-[9px] lg:hidden" aria-label={`${workspaceName} overview`}>
             <WorkspaceIcon slug={slug} size="sm" />
@@ -45,7 +45,7 @@ export function AppToolbar({
           <button
             type="button"
             onClick={openCommandPalette}
-            className="glass-control inline-flex h-9 items-center gap-2 rounded-full px-2.5 text-[13px] text-muted transition hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30 sm:pl-3 sm:pr-2"
+            className="glass-control inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-full px-2.5 text-[13px] text-muted transition hover:text-label focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30 sm:pl-3 sm:pr-2"
             aria-label="Search pages, sources, and actions"
           >
             <Search className="h-4 w-4" aria-hidden="true" />

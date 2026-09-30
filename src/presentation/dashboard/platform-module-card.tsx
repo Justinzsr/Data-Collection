@@ -34,7 +34,18 @@ function formatTime(value: string | null) {
   return formatAppDateTime(value, "not scheduled");
 }
 
-export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", dataSpaceSlug }: { module: PlatformModule; basePath?: string; dataSpaceSlug?: string }) {
+export function PlatformModuleCard({
+  module,
+  basePath = "/w/moonarq/dashboard",
+  dataSpaceSlug,
+  surface = "glass",
+}: {
+  module: PlatformModule;
+  basePath?: string;
+  dataSpaceSlug?: string;
+  /** "inset" when the card already sits inside another glass panel. */
+  surface?: "glass" | "inset";
+}) {
   const detailCount = module.secondaryMetrics.length + module.insights.length;
   const delta = module.primaryMetric.deltaPercent;
   const deltaClass = delta === null || delta === 0
@@ -45,7 +56,7 @@ export function PlatformModuleCard({ module, basePath = "/w/moonarq/dashboard", 
 
   return (
     <article
-      className="overview-module-card glass min-w-0 overflow-hidden rounded-3xl transition duration-200"
+      className={`overview-module-card ${surface === "inset" ? "inset-surface" : "glass"} min-w-0 overflow-hidden rounded-3xl transition duration-200`}
       data-platform-type={module.sourceTypeKey}
     >
       <details className="group" data-testid={`overview-module-${module.sourceTypeKey}`}>

@@ -31,7 +31,7 @@ export function MobileTabBar({ dataSpaceSlug = "moonarq" }: { dataSpaceSlug?: st
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex h-12 w-[clamp(3.25rem,16.5vw,4.5rem)] flex-col items-center justify-center gap-0.5 rounded-full text-[10.5px] font-semibold transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+                "flex h-12 w-[clamp(3.25rem,16.5vw,4.5rem)] flex-col items-center justify-center gap-0.5 rounded-full text-[10.5px] font-semibold transition focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30",
                 active ? "bg-fill-strong text-tint-text" : "text-label-secondary",
               )}
             >
@@ -45,7 +45,7 @@ export function MobileTabBar({ dataSpaceSlug = "moonarq" }: { dataSpaceSlug?: st
         type="button"
         onClick={openCommandPalette}
         aria-label="Search"
-        className="glass-chrome pointer-events-auto grid h-[3.75rem] w-[3.75rem] shrink-0 place-items-center rounded-full text-label-secondary transition hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+        className="glass-chrome pointer-events-auto grid h-[3.75rem] w-[3.75rem] shrink-0 place-items-center rounded-full text-label-secondary transition hover:text-label focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
       >
         <Search className="h-5 w-5" aria-hidden="true" />
       </button>

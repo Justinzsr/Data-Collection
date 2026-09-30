@@ -44,7 +44,7 @@ export function ThemeToggle({ showLabels = false, className }: { showLabels?: bo
             data-theme-option={option.value}
             tabIndex={selected ? 0 : -1}
             onClick={() => setThemePreference(option.value)}
-            className={cn("segmented-item h-8", showLabels ? "flex-1 px-3" : "w-9 px-0")}
+            className={cn("segmented-item h-9", showLabels ? "flex-1 px-3" : "w-9 px-0")}
           >
             <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
             {showLabels ? option.label : null}

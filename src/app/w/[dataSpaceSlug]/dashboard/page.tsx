@@ -723,7 +723,7 @@ export default async function DataSpaceDashboardPage({
             </div>
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 [&_a]:!min-h-11 [&_button]:!min-h-11">
               {futureModules.map((module) => (
-                <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
+                <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} surface="inset" />
               ))}
             </div>
           </div>

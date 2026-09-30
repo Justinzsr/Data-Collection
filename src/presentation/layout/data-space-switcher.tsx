@@ -60,7 +60,7 @@ export function DataSpaceSwitcher({
       <button
         type="button"
         onClick={onRequestExpand}
-        className="grid h-11 w-11 place-items-center rounded-2xl transition hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+        className="grid h-11 w-11 place-items-center rounded-2xl transition hover:bg-fill-hover focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
         aria-label={`Expand sidebar to switch from ${current.display_name}`}
         title={current.display_name}
       >
@@ -70,14 +70,19 @@ export function DataSpaceSwitcher({
   }
 
   return (
-    <div ref={rootRef} className="relative min-w-0 flex-1">
+    <div
+      ref={rootRef}
+      className="relative min-w-0 flex-1"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        aria-haspopup="menu"
         aria-controls={menuId}
-        className="flex w-full min-w-0 items-center gap-3 rounded-2xl p-1.5 text-left transition hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+        className="flex w-full min-w-0 items-center gap-3 rounded-2xl p-1.5 text-left transition hover:bg-fill-hover focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
       >
         <WorkspaceIcon slug={current.slug} />
         <span className="min-w-0 flex-1">
@@ -87,24 +92,22 @@ export function DataSpaceSwitcher({
         <ChevronsUpDown className="h-4 w-4 shrink-0 text-label-quaternary" aria-hidden="true" />
       </button>
       {open ? (
-        <div
+        <nav
           id={menuId}
-          role="menu"
           aria-label="Switch workspace"
           className="glass-chrome absolute left-0 top-[calc(100%+0.5rem)] z-50 w-full min-w-60 rounded-2xl p-1.5"
         >
-          <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold text-muted">Workspaces</p>
+          <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold text-muted" aria-hidden="true">Workspaces</p>
           {spaces.map((space) => {
             const active = space.slug === current.slug;
             return (
               <Link
                 key={space.id}
-                role="menuitem"
                 href={workspaceTarget(pathname, current.slug, space.slug)}
                 onClick={() => setOpen(false)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-2 py-2 transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+                  "flex items-center gap-3 rounded-xl px-2 py-2 transition focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30",
                   active ? "bg-fill-strong" : "hover:bg-fill-hover",
                 )}
               >
@@ -117,7 +120,7 @@ export function DataSpaceSwitcher({
               </Link>
             );
           })}
-        </div>
+        </nav>
       ) : null}
     </div>
   );

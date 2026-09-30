@@ -72,7 +72,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ dataS
           <Badge tone={auth.configured ? "green" : "amber"} dot>{auth.configured ? "session gate ready" : "production setup required"}</Badge>
         </SettingsRow>
         <form action="/api/auth/logout" method="post" className="px-2 py-1.5">
-          <button className="flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-[14px] font-medium text-negative transition hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30">
+          <button className="flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-[14px] font-medium text-negative transition hover:bg-fill-hover focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30">
             <LogOut className="h-4 w-4" aria-hidden="true" />
             Logout
           </button>

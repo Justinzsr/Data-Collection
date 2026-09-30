@@ -70,7 +70,7 @@ export default async function SourcesPage({ params }: { params: Promise<{ dataSp
   );
   const healthy = sources.filter((source) => ["healthy", "demo"].includes(source.status)).length;
   const attention = sources.filter((source) => ["warning", "needs_credentials", "error"].includes(source.status)).length;
-  const renewals = withCredentials.filter(({ authorization }) => authorization?.attention).length;
+  const renewals = withCredentials.filter(({ authorization }) => authorization?.renewal).length;
 
   return (
     <div className="mx-auto grid max-w-7xl gap-5">

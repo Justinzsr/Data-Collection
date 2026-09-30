@@ -11,7 +11,7 @@ description: Use when changing MoonArq dashboard UI, visual hierarchy, charts, s
 - Light and dark appearance from semantic tokens (`text-label`, `text-label-secondary`, `text-muted`, `bg-fill`, `border-separator`, `bg-tint`, status `*-fill` colors). Never hardcode palette colors.
 - Premium, clean, readable, not childish, not generic admin template.
 - No unreadable neon overload; text keeps WCAG AA contrast on the worst-case glass composite.
-- KPI grid: 4 columns desktop, 3 laptop, 2 tablet, 1 mobile.
+- KPI grid: 4 columns desktop, 3 laptop, 2 tablet, 1 mobile (compact summary tiles may run 2 per row on phones).
 - Tables must become mobile cards or safe scroll.
 - Charts must use responsive containers.
 - Use subtle motion only.

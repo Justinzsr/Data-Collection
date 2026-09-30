@@ -40,7 +40,7 @@ function SidebarLink({
       aria-label={collapsed ? item.label : undefined}
       title={collapsed ? item.label : undefined}
       className={cn(
-        "group relative flex h-9 items-center rounded-[11px] text-[13.5px] transition duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+        "group relative flex h-9 items-center rounded-[11px] text-[13.5px] transition duration-150 focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30",
         collapsed ? "mx-auto w-11 justify-center" : "gap-3 px-3",
         active
           ? "bg-fill-strong font-semibold text-label shadow-[inset_0_1px_0_var(--glass-rim)]"
@@ -97,7 +97,7 @@ export function DesktopSidebar({
             <Link
               href="/w/moonarq/dashboard"
               className={cn(
-                "flex min-w-0 items-center rounded-2xl transition hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+                "flex min-w-0 items-center rounded-2xl transition hover:bg-fill-hover focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30",
                 collapsed ? "h-11 w-11 justify-center" : "flex-1 gap-3 p-1.5",
               )}
               aria-label={collapsed ? "MoonArq Data Command Center" : undefined}
@@ -115,7 +115,7 @@ export function DesktopSidebar({
           <button
             type="button"
             onClick={() => setCollapsed((current) => !current)}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted transition hover:bg-fill-hover hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted transition hover:bg-fill-hover hover:text-label focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -143,7 +143,7 @@ export function DesktopSidebar({
                         id={`sidebar-group-${group.id}`}
                         type="button"
                         onClick={() => toggleGroup(group.id)}
-                        className="group/header mb-1 flex h-7 w-full items-center justify-between rounded-lg px-3 text-[11.5px] font-semibold text-muted transition hover:text-label-secondary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+                        className="group/header mb-1 flex h-7 w-full items-center justify-between rounded-lg px-3 text-[11.5px] font-semibold text-muted transition hover:text-label-secondary focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
                         aria-expanded={open}
                         aria-controls={`sidebar-group-items-${group.id}`}
                       >

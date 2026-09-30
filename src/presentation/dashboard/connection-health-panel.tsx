@@ -13,7 +13,10 @@ const RENEWAL_WARNING_DAYS = 14;
 export type AuthorizationState = {
   tone: BadgeTone;
   label: string;
+  /** Someone should look at this connection (never authorized, expiring, or expired). */
   attention: boolean;
+  /** An existing authorization is expiring soon or has expired and must be renewed. */
+  renewal: boolean;
 };
 
 function metadataText(source: Source, key: string) {
@@ -32,10 +35,10 @@ export function authorizationState(source: Source, now = currentTime()): Authori
   const oauthPlatform = isTikTok || source.source_type_key === "instagram" || source.source_type_key === "meta_ads";
   if (!oauthPlatform) return null;
   if (source.status === "demo" || source.metadata.demo === true) {
-    return { tone: "slate", label: "Demo only", attention: false };
+    return { tone: "slate", label: "Demo only", attention: false, renewal: false };
   }
   if (source.metadata.oauth_connected !== true) {
-    return { tone: "amber", label: "Not authorized", attention: true };
+    return { tone: "amber", label: "Not authorized", attention: true, renewal: false };
   }
   const deadline = isTikTok
     ? metadataText(source, "refresh_expires_at")
@@ -43,18 +46,19 @@ export function authorizationState(source: Source, now = currentTime()): Authori
   const days = daysUntil(deadline, now);
   if (days === null) {
     return isTikTok
-      ? { tone: "green", label: "Auto-refreshing", attention: false }
-      : { tone: "slate", label: "Expiry unknown", attention: false };
+      ? { tone: "green", label: "Auto-refreshing", attention: false, renewal: false }
+      : { tone: "slate", label: "Expiry unknown", attention: false, renewal: false };
   }
-  if (days < 0) return { tone: "rose", label: "Authorization expired", attention: true };
+  if (days < 0) return { tone: "rose", label: "Authorization expired", attention: true, renewal: true };
   if (days <= RENEWAL_WARNING_DAYS) {
     return {
       tone: "amber",
       label: days === 0 ? "Renew today" : `Renew within ${days} day${days === 1 ? "" : "s"}`,
       attention: true,
+      renewal: true,
     };
   }
-  return { tone: "green", label: `Valid until ${formatAppDate(deadline)}`, attention: false };
+  return { tone: "green", label: `Valid until ${formatAppDate(deadline)}`, attention: false, renewal: false };
 }
 
 function statusLabel(status: Source["status"]) {
@@ -124,7 +128,7 @@ export function ConnectionHealthPanel({
             <li key={source.id}>
               <Link
                 href={`${basePath}/sources/${source.id}`}
-                className="group flex min-h-14 items-center gap-3 rounded-2xl px-2.5 py-2 transition hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+                className="group flex min-h-14 items-center gap-3 rounded-2xl px-2.5 py-2 transition hover:bg-fill-hover focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30"
               >
                 <PlatformIcon sourceTypeKey={source.source_type_key} />
                 <span className="min-w-0 flex-1">

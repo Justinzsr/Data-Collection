@@ -1,10 +1,14 @@
 "use client";
 
+import { useEffect } from "react";
 import { Toaster } from "sonner";
-import { useResolvedTheme } from "@/presentation/theme/theme-store";
+import { syncStoredTheme, useResolvedTheme } from "@/presentation/theme/theme-store";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const theme = useResolvedTheme();
+  useEffect(() => {
+    syncStoredTheme();
+  }, []);
   return (
     <>
       {children}

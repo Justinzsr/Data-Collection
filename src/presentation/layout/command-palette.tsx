@@ -89,8 +89,10 @@ export function CommandPalette({
   }, []);
 
   useEffect(() => {
+    const apple = /Mac|iPhone|iPad|iPod/u.test(window.navigator.platform || window.navigator.userAgent);
     function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      const modifier = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (modifier && !event.altKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setQuery("");
         setActiveIndex(0);
@@ -219,6 +221,10 @@ export function CommandPalette({
 
   const boundedIndex = filtered.length === 0 ? -1 : Math.min(activeIndex, filtered.length - 1);
   const activeItem = boundedIndex >= 0 ? filtered[boundedIndex] : null;
+  const sections = GROUP_ORDER.map((group) => ({
+    group,
+    entries: filtered.flatMap((item, index) => (item.group === group ? [{ item, index }] : [])),
+  })).filter((section) => section.entries.length > 0);
 
   useEffect(() => {
     if (!open || !activeItem) return;
@@ -249,6 +255,8 @@ export function CommandPalette({
     } else if (event.key === "Escape") {
       event.preventDefault();
       close();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
     }
   }
 
@@ -266,7 +274,7 @@ export function CommandPalette({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Search MoonArq"
+        aria-label={`Search ${dataSpace?.display_name ?? "Data Hub"}`}
         className="glass-chrome relative flex max-h-[min(34rem,80vh)] w-full max-w-[40rem] flex-col overflow-hidden rounded-[28px]"
       >
         <div className="flex items-center gap-3 border-b border-separator px-4">
@@ -283,57 +291,63 @@ export function CommandPalette({
             aria-label="Search pages, sources, and actions"
             role="combobox"
             aria-expanded="true"
-            aria-controls={listId}
+            aria-controls={filtered.length > 0 ? listId : undefined}
             aria-activedescendant={activeItem ? `${listId}-${activeItem.id}` : undefined}
             autoComplete="off"
             spellCheck={false}
-            className="h-14 min-w-0 flex-1 bg-transparent text-[16px] text-label outline-none placeholder:text-label-quaternary"
+            className="h-14 min-w-0 flex-1 bg-transparent text-[16px] text-label outline-hidden placeholder:text-label-quaternary"
           />
           <kbd className="hidden rounded-md bg-fill-strong px-1.5 py-0.5 font-sans text-[11px] font-medium text-label-secondary sm:inline">esc</kbd>
         </div>
-        <div ref={listRef} id={listId} role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
-          {filtered.length === 0 ? (
-            <p className="px-3 py-10 text-center text-sm text-muted">No matches for “{query.trim()}”.</p>
-          ) : (
-            filtered.map((item, index) => {
-              const header = index === 0 || filtered[index - 1].group !== item.group ? item.group : null;
-              const active = index === boundedIndex;
-              return (
-                <div key={item.id}>
-                  {header ? <p className="px-3 pb-1 pt-3 text-[11.5px] font-semibold text-muted first:pt-1">{header}</p> : null}
-                  <div
-                    id={`${listId}-${item.id}`}
-                    data-command-id={item.id}
-                    role="option"
-                    aria-selected={active}
-                    onMouseMove={() => {
-                      if (!active) setActiveIndex(index);
-                    }}
-                    onClick={() => runItem(item)}
-                    className={cn(
-                      "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-3 py-1.5 text-[14px] transition-colors",
-                      active ? "bg-tint text-on-tint" : "text-label",
-                    )}
-                  >
-                    <span className={cn("grid h-7 w-7 shrink-0 place-items-center", active && !item.id.startsWith("source:") && !item.id.startsWith("workspace:") ? "[&_svg]:text-on-tint" : undefined)}>
-                      {item.icon}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-medium">{item.label}</span>
-                    {item.hint ? (
-                      <span className={cn("shrink-0 text-xs capitalize", active ? "text-on-tint/85" : "text-muted")}>{item.hint}</span>
-                    ) : null}
-                    {active ? <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
-                  </div>
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+          {filtered.length > 0 ? (
+            <div id={listId} role="listbox" aria-label="Results">
+              {sections.map(({ group, entries }) => (
+                <div key={group} role="group" aria-labelledby={`${listId}-group-${group}`}>
+                  <p id={`${listId}-group-${group}`} aria-hidden="true" className="px-3 pb-1 pt-3 text-[11.5px] font-semibold text-muted">
+                    {group}
+                  </p>
+                  {entries.map(({ item, index }) => {
+                    const active = index === boundedIndex;
+                    return (
+                      <div
+                        key={item.id}
+                        id={`${listId}-${item.id}`}
+                        data-command-id={item.id}
+                        role="option"
+                        aria-selected={active}
+                        onMouseMove={() => {
+                          if (!active) setActiveIndex(index);
+                        }}
+                        onClick={() => runItem(item)}
+                        className={cn(
+                          "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-3 py-1.5 text-[14px] transition-colors",
+                          active ? "bg-tint text-on-tint" : "text-label",
+                        )}
+                      >
+                        <span className={cn("grid h-7 w-7 shrink-0 place-items-center", active && !item.id.startsWith("source:") && !item.id.startsWith("workspace:") ? "[&_svg]:text-on-tint" : undefined)}>
+                          {item.icon}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate font-medium">{item.label}</span>
+                        {item.hint ? (
+                          <span className={cn("shrink-0 text-xs capitalize", active ? "text-on-tint/85" : "text-muted")}>{item.hint}</span>
+                        ) : null}
+                        {active ? <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })
+              ))}
+            </div>
+          ) : (
+            <p className="px-3 py-10 text-center text-sm text-muted" role="status">No matches for “{query.trim()}”.</p>
           )}
-          {sources === null ? <p className="px-3 py-2 text-xs text-muted">Loading sources…</p> : null}
+          {sources === null ? <p className="px-3 py-2 text-xs text-muted" role="status">Loading sources…</p> : null}
         </div>
         <div className="hidden items-center gap-4 border-t border-separator px-4 py-2.5 text-xs text-muted sm:flex">
           <span><kbd className="font-sans font-semibold text-label-secondary">↑↓</kbd> move</span>
           <span><kbd className="font-sans font-semibold text-label-secondary">↵</kbd> open</span>
-          <span><kbd className="font-sans font-semibold text-label-secondary">⌘K</kbd> toggle</span>
+          <span><kbd className="font-sans font-semibold text-label-secondary">⌘K</kbd> or <kbd className="font-sans font-semibold text-label-secondary">Ctrl K</kbd> toggle</span>
         </div>
       </div>
     </div>

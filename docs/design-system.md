@@ -65,7 +65,9 @@ Rules:
 - `Button` / `LinkButton` — variants `primary`, `secondary` (glass), `tinted`, `ghost`, `danger`.
 - `Badge` — capsule with `tone` and optional status `dot`.
 - `GlassPanel`, `SectionHeader` (large title), `SectionTitle`, `StatTile`, `Callout`.
-- `PlatformIcon` / `IconTile` — app-icon style squircles for platforms and concepts.
+- `PlatformIcon` / `IconTile` — app-icon style squircles for platforms and concepts. Their
+  gradients are the `--icon-*` tokens (identical in light and dark, like Apple's Settings
+  icons) applied through the `.app-icon` class; they are for icons only, never UI state.
 - `formatRelativeTime` / `daysUntil` — server-rendered relative times.
 
 ## Navigation

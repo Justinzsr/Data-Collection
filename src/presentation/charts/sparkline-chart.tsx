@@ -28,10 +28,10 @@ export function buildSparklinePath(data: { value: number }[]) {
 
 const legacyTones = {
   cyan: "var(--chart-1)",
-  teal: "var(--chart-2)",
+  teal: "var(--chart-3)",
   indigo: "var(--chart-7)",
   amber: "var(--chart-4)",
-  rose: "var(--chart-3)",
+  rose: "var(--chart-8)",
 } as const;
 
 export function SparklineChart({
