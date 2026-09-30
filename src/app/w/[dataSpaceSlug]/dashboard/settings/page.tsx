@@ -1,10 +1,47 @@
+import { LogOut, Palette, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Badge } from "@/presentation/components/ui/badge";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
+import { IconTile } from "@/presentation/components/ui/platform-icon";
+import { ThemeToggle } from "@/presentation/theme/theme-toggle";
 import { getDashboardAuthSetup } from "@/storage/auth/dashboard-session";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 
 export const dynamic = "force-dynamic";
+
+function SettingsRow({ label, value, children }: { label: string; value?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <div className="flex min-h-12 items-center justify-between gap-4 px-4 py-2.5">
+      <span className="text-[14px] text-label">{label}</span>
+      {children ?? <span className="min-w-0 break-words text-right text-[14px] text-label-secondary">{value}</span>}
+    </div>
+  );
+}
+
+function SettingsGroup({
+  title,
+  icon,
+  tone,
+  footer,
+  children,
+}: {
+  title: string;
+  icon: typeof Palette;
+  tone: "tint" | "positive" | "indigo" | "neutral";
+  footer?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="grid gap-2">
+      <div className="flex items-center gap-2.5 px-1">
+        <IconTile icon={icon} tone={tone} size="sm" />
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-label">{title}</h2>
+      </div>
+      <GlassPanel className="divide-y divide-separator overflow-hidden rounded-[22px]">{children}</GlassPanel>
+      {footer ? <p className="px-4 text-xs leading-5 text-muted">{footer}</p> : null}
+    </section>
+  );
+}
 
 export default async function SettingsPage({ params }: { params: Promise<{ dataSpaceSlug: string }> }) {
   const { dataSpaceSlug } = await params;
@@ -13,35 +50,40 @@ export default async function SettingsPage({ params }: { params: Promise<{ dataS
   const auth = getDashboardAuthSetup();
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-6">
+    <div className="mx-auto grid max-w-3xl gap-6">
       <SectionHeader
         eyebrow="Settings"
         title={`${dataSpace.display_name} settings`}
-        description="Profile, auth status, default sync cadence, retention, and production safety controls."
+        description="Appearance, auth status, default sync cadence, retention, and production safety controls."
       />
-      <div className="grid gap-5 md:grid-cols-2">
-        <GlassPanel className="p-5">
-          <h2 className="text-base font-semibold text-white">Auth status</h2>
-          <p className="mt-3 text-sm text-slate-400">DEV_AUTH_BYPASS: {String(process.env.DEV_AUTH_BYPASS ?? "false")}</p>
-          <p className="mt-2 text-sm text-slate-400">Dashboard password configured: {auth.configured ? "yes" : "no"}</p>
-          <p className="mt-2 text-sm text-slate-400">Missing: {auth.missing.length ? auth.missing.join(", ") : "none"}</p>
-          <div className="mt-4">
-            <Badge tone={auth.configured ? "green" : "amber"}>{auth.configured ? "session gate ready" : "production setup required"}</Badge>
-          </div>
-          <form action="/api/auth/logout" method="post" className="mt-4">
-            <button className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08]">
-              Logout
-            </button>
-          </form>
-        </GlassPanel>
-        <GlassPanel className="p-5">
-          <h2 className="text-base font-semibold text-white">Defaults</h2>
-          <p className="mt-3 text-sm text-slate-400">Workspace: {dataSpace.display_name}</p>
-          <p className="mt-2 text-sm text-slate-400">Default sync frequency: 60 minutes</p>
-          <p className="mt-2 text-sm text-slate-400">Theme: dark command center</p>
-          <p className="mt-2 text-sm text-slate-400">Data retention: placeholder for production policy</p>
-        </GlassPanel>
-      </div>
+
+      <SettingsGroup title="Appearance" icon={Palette} tone="indigo" footer="Automatic follows your device's light or dark setting. The choice is saved in this browser.">
+        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-[14px] text-label">Theme</span>
+          <ThemeToggle showLabels className="w-full sm:w-auto" />
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="Auth status" icon={ShieldCheck} tone="positive">
+        <SettingsRow label="DEV_AUTH_BYPASS" value={String(process.env.DEV_AUTH_BYPASS ?? "false")} />
+        <SettingsRow label="Dashboard password configured" value={auth.configured ? "yes" : "no"} />
+        <SettingsRow label="Missing" value={auth.missing.length ? auth.missing.join(", ") : "none"} />
+        <SettingsRow label="Session gate">
+          <Badge tone={auth.configured ? "green" : "amber"} dot>{auth.configured ? "session gate ready" : "production setup required"}</Badge>
+        </SettingsRow>
+        <form action="/api/auth/logout" method="post" className="px-2 py-1.5">
+          <button className="flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-[14px] font-medium text-negative transition hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30">
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            Logout
+          </button>
+        </form>
+      </SettingsGroup>
+
+      <SettingsGroup title="Defaults" icon={SlidersHorizontal} tone="neutral">
+        <SettingsRow label="Workspace" value={dataSpace.display_name} />
+        <SettingsRow label="Default sync frequency" value="60 minutes" />
+        <SettingsRow label="Data retention" value="Placeholder for production policy" />
+      </SettingsGroup>
     </div>
   );
 }

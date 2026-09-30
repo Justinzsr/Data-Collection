@@ -133,8 +133,8 @@ describe("resolveComparisonDisplay", () => {
   );
 
   it("maps comparison tones to semantic text classes", () => {
-    expect(comparisonToneClass("positive")).toBe("text-emerald-200");
-    expect(comparisonToneClass("negative")).toBe("text-rose-200");
+    expect(comparisonToneClass("positive")).toBe("text-positive");
+    expect(comparisonToneClass("negative")).toBe("text-negative");
     expect(comparisonToneClass("neutral")).toBe("text-[var(--muted)]");
   });
 });

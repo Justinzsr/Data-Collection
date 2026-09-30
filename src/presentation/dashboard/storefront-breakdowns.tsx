@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import type {
   WebsiteAcquisitionRow,
   WebsiteCollectionPerformanceRow,
@@ -6,7 +7,7 @@ import type {
 } from "@/aggregation/services/website-funnel-types";
 import { Badge } from "@/presentation/components/ui/badge";
 import { Button, LinkButton } from "@/presentation/components/ui/button";
-import { GlassPanel } from "@/presentation/components/ui/panel";
+import { GlassPanel, SectionTitle } from "@/presentation/components/ui/panel";
 import {
   buildMoonArqOverviewHref,
   DEFAULT_MOONARQ_OVERVIEW_QUERY,
@@ -46,37 +47,37 @@ export function productIdentityDescription(row: WebsiteProductPerformanceRow) {
 
 function CollectionDesktopRow({ row }: { row: WebsiteCollectionPerformanceRow }) {
   return (
-    <tr className="border-t border-white/[0.07]">
-      <th scope="row" className="px-3 py-3 font-medium text-slate-200">
+    <tr className="border-t border-separator transition-colors hover:bg-fill">
+      <th scope="row" className="px-3 py-3 font-medium text-label">
         {row.collectionName || "Unknown / unmapped"}
         {row.state === "unknown" ? <Badge tone="amber" className="ml-2">Unknown</Badge> : null}
       </th>
-      <td className="px-3 py-3 text-slate-300">{count(row.collectionViewSessions)}</td>
-      <td className="px-3 py-3 text-slate-300">{count(row.productViewSessions)}</td>
-      <td className="px-3 py-3 text-slate-300">{percent(row.progressionRate)}</td>
+      <td className="px-3 py-3 text-label-secondary">{count(row.collectionViewSessions)}</td>
+      <td className="px-3 py-3 text-label-secondary">{count(row.productViewSessions)}</td>
+      <td className="px-3 py-3 text-label-secondary">{percent(row.progressionRate)}</td>
     </tr>
   );
 }
 
 function ProductDesktopRow({ row }: { row: WebsiteProductPerformanceRow }) {
   return (
-    <tr className="border-t border-white/[0.07]">
+    <tr className="border-t border-separator transition-colors hover:bg-fill">
       <th scope="row" className="px-3 py-3">
-        <p className="font-medium text-slate-200">{row.itemName || "Unknown / unmapped"}</p>
+        <p className="font-medium text-label">{row.itemName || "Unknown / unmapped"}</p>
         <p className="mt-1 break-words text-xs font-normal text-[var(--muted)]">{productIdentityDescription(row)}</p>
       </th>
-      <td className="px-3 py-3 text-slate-300">{row.itemCategory || "Unknown"}</td>
-      <td className="px-3 py-3 text-slate-300">{count(row.productViewSessions)}</td>
-      <td className="px-3 py-3 text-slate-300">{count(row.addToCartSessions)}</td>
-      <td className="px-3 py-3 text-slate-300">{percent(row.viewToCartRate)}</td>
+      <td className="px-3 py-3 text-label-secondary">{row.itemCategory || "Unknown"}</td>
+      <td className="px-3 py-3 text-label-secondary">{count(row.productViewSessions)}</td>
+      <td className="px-3 py-3 text-label-secondary">{count(row.addToCartSessions)}</td>
+      <td className="px-3 py-3 text-label-secondary">{percent(row.viewToCartRate)}</td>
     </tr>
   );
 }
 
 function AcquisitionDesktopRow({ row }: { row: WebsiteAcquisitionRow }) {
   return (
-    <tr className="border-t border-white/[0.07]">
-      <th scope="row" className="px-3 py-3 font-medium text-slate-200">
+    <tr className="border-t border-separator transition-colors hover:bg-fill">
+      <th scope="row" className="px-3 py-3 font-medium text-label">
         <span className="block whitespace-normal break-words [overflow-wrap:anywhere]">
           {row.utmSource || "Unknown"} / {row.utmMedium || "Unknown"}
         </span>
@@ -85,19 +86,19 @@ function AcquisitionDesktopRow({ row }: { row: WebsiteAcquisitionRow }) {
         </span>
       </th>
       <td className="max-w-64 px-3 py-3">
-        <p className="whitespace-normal break-words text-slate-300 [overflow-wrap:anywhere]">
+        <p className="whitespace-normal break-words text-label-secondary [overflow-wrap:anywhere]">
           {row.landingPath || "Unknown"}
         </p>
         <p className="mt-1 whitespace-normal break-words text-xs text-[var(--muted)] [overflow-wrap:anywhere]">
           {row.referrerHost || "Unknown referrer"}
         </p>
       </td>
-      <td className="px-3 py-3 text-slate-300">{count(row.sessions)}</td>
-      <td className="px-3 py-3 text-slate-300">{count(row.productIntentSessions)}</td>
-      <td className="px-3 py-3 text-slate-300">
+      <td className="px-3 py-3 text-label-secondary">{count(row.sessions)}</td>
+      <td className="px-3 py-3 text-label-secondary">{count(row.productIntentSessions)}</td>
+      <td className="px-3 py-3 text-label-secondary">
         {row.checkoutSessions === null ? "—" : count(row.checkoutSessions)}
       </td>
-      <td className="px-3 py-3 text-slate-300">{percent(row.visitToCheckoutRate)}</td>
+      <td className="px-3 py-3 text-label-secondary">{percent(row.visitToCheckoutRate)}</td>
     </tr>
   );
 }
@@ -163,9 +164,9 @@ function StorefrontFilters({
         <PreservedFilterState query={query} />
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">Recomputed filters</p>
-            <h2 className="mt-1 text-lg font-semibold text-[#f5f2eb]">Storefront segment and acquisition</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-400">
+            <p className="eyebrow">Recomputed filters</p>
+            <h2 className="mt-1 text-[17px] font-semibold tracking-[-0.018em] text-label">Storefront segment and acquisition</h2>
+            <p className="mt-1 text-sm leading-6 text-label-secondary">
               Filters rerun the first-party funnel; they do not filter only the tables below.
             </p>
           </div>
@@ -176,24 +177,24 @@ function StorefrontFilters({
         </div>
 
         <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted">
             Journey segment
             <select
               name="segment"
               defaultValue={query.segment}
-              className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
+              className="field h-11 min-w-0"
             >
               <option value="all">All storefront</option>
               <option value="ready-made">Ready-made</option>
               <option value="builder">Build Your Own</option>
             </select>
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted">
             Device category
             <select
               name="device"
               defaultValue={query.device}
-              className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
+              className="field h-11 min-w-0"
             >
               <option value="all">All devices</option>
               {optionValues(query.device === "all" ? "" : query.device, overview.filterOptions.devices).map((value) => (
@@ -201,12 +202,12 @@ function StorefrontFilters({
               ))}
             </select>
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted">
             UTM source
             <select
               name="utm_source"
               defaultValue={safeUtmSource}
-              className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
+              className="field h-11 min-w-0"
             >
               <option value="">All UTM sources</option>
               {optionValues(safeUtmSource, overview.filterOptions.utmSources, {
@@ -217,12 +218,12 @@ function StorefrontFilters({
               ))}
             </select>
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted">
             UTM medium
             <select
               name="utm_medium"
               defaultValue={safeUtmMedium}
-              className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
+              className="field h-11 min-w-0"
             >
               <option value="">All UTM media</option>
               {optionValues(safeUtmMedium, overview.filterOptions.utmMediums, {
@@ -233,12 +234,12 @@ function StorefrontFilters({
               ))}
             </select>
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted">
             UTM campaign
             <select
               name="utm_campaign"
               defaultValue={safeUtmCampaign}
-              className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
+              className="field h-11 min-w-0"
             >
               <option value="">All campaigns</option>
               {optionValues(safeUtmCampaign, overview.filterOptions.utmCampaigns, {
@@ -249,12 +250,12 @@ function StorefrontFilters({
               ))}
             </select>
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted">
             Landing path
             <select
               name="landing_path"
               defaultValue={safeLandingPath}
-              className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
+              className="field h-11 min-w-0"
             >
               <option value="">All landing paths</option>
               {optionValues(safeLandingPath, overview.filterOptions.landingPaths, {
@@ -265,12 +266,12 @@ function StorefrontFilters({
               ))}
             </select>
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted">
             Referrer host
             <select
               name="referrer_host"
               defaultValue={safeReferrerHost}
-              className="h-11 min-w-0 rounded-lg border border-white/10 bg-slate-950/90 px-3 text-sm text-slate-100"
+              className="field h-11 min-w-0"
             >
               <option value="">All referrers</option>
               {optionValues(safeReferrerHost, overview.filterOptions.referrerHosts, {
@@ -317,7 +318,7 @@ function TablePagination({
   if (!hasPreviousPage && !hasNextPage) return null;
   return (
     <nav
-      className="flex items-center justify-between gap-3 border-t border-white/[0.08] pt-3"
+      className="flex items-center justify-between gap-3 border-t border-separator pt-3"
       aria-label={`${label} pagination`}
     >
       {hasPreviousPage ? (
@@ -331,7 +332,7 @@ function TablePagination({
           Previous
         </LinkButton>
       ) : <span />}
-      <p className="text-center text-sm text-slate-400">
+      <p className="text-center text-sm text-label-secondary">
         Page {page} · {count(totalRows)} rows
       </p>
       {hasNextPage ? (
@@ -360,28 +361,23 @@ function CollectionAndProductPerformance({
 }) {
   return (
     <section className="grid min-w-0 gap-3" aria-labelledby="storefront-performance-title">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">Discovery and intent</p>
-        <h2 id="storefront-performance-title" className="mt-1 text-xl font-semibold text-[#f5f2eb]">
-          Collection and product performance
-        </h2>
-      </div>
+      <SectionTitle eyebrow="Discovery and intent" title="Collection and product performance" id="storefront-performance-title" />
 
       <div className="grid min-w-0 gap-3 xl:grid-cols-2">
         <GlassPanel className="overflow-hidden">
-          <div className="border-b border-white/[0.08] p-4">
-            <h3 className="font-semibold text-slate-100">Collection discovery</h3>
+          <div className="border-b border-separator p-4">
+            <h3 className="font-semibold text-label">Collection discovery</h3>
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">Only provable collection-to-product session progression.</p>
           </div>
           <div
-            className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-cyan-300 lg:block"
+            className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-tint lg:block"
             role="region"
             aria-label="Scrollable collection performance table"
             tabIndex={0}
           >
             <table className="w-full min-w-[34rem] text-left text-sm">
               <caption className="sr-only">Collection view and product progression sessions</caption>
-              <thead className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
+              <thead className="text-xs text-[var(--muted)] [&_th]:font-medium">
                 <tr>
                   <th scope="col" className="px-3 py-2.5">Collection</th>
                   <th scope="col" className="px-3 py-2.5">Views</th>
@@ -394,15 +390,15 @@ function CollectionAndProductPerformance({
           </div>
           <div className="grid gap-2 p-3 lg:hidden">
             {overview.collections.rows.map((row) => (
-              <article key={row.key} className="rounded-lg border border-white/[0.08] bg-black/15 p-3">
+              <article key={row.key} className="inset-surface p-3">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="font-medium text-slate-200">{row.collectionName || "Unknown / unmapped"}</p>
+                  <p className="font-medium text-label">{row.collectionName || "Unknown / unmapped"}</p>
                   {row.state === "unknown" ? <Badge tone="amber">Unknown</Badge> : null}
                 </div>
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div><dt className="text-[var(--muted)]">Views</dt><dd className="mt-1 text-slate-200">{count(row.collectionViewSessions)}</dd></div>
-                  <div><dt className="text-[var(--muted)]">Product</dt><dd className="mt-1 text-slate-200">{count(row.productViewSessions)}</dd></div>
-                  <div><dt className="text-[var(--muted)]">Rate</dt><dd className="mt-1 text-slate-200">{percent(row.progressionRate)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Views</dt><dd className="mt-1 text-label">{count(row.collectionViewSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Product</dt><dd className="mt-1 text-label">{count(row.productViewSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Rate</dt><dd className="mt-1 text-label">{percent(row.progressionRate)}</dd></div>
                 </dl>
               </article>
             ))}
@@ -422,19 +418,19 @@ function CollectionAndProductPerformance({
         </GlassPanel>
 
         <GlassPanel className="overflow-hidden" data-testid="product-performance">
-          <div className="border-b border-white/[0.08] p-4">
-            <h3 className="font-semibold text-slate-100">Product intent</h3>
+          <div className="border-b border-separator p-4">
+            <h3 className="font-semibold text-label">Product intent</h3>
             <p className="mt-1 text-xs leading-5 text-[var(--muted)]">View-to-cart rates require a stable shared item identity.</p>
           </div>
           <div
-            className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-cyan-300 lg:block"
+            className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-tint lg:block"
             role="region"
             aria-label="Scrollable product performance table"
             tabIndex={0}
           >
             <table className="w-full min-w-[42rem] text-left text-sm">
               <caption className="sr-only">Product view and add-to-cart session performance</caption>
-              <thead className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
+              <thead className="text-xs text-[var(--muted)] [&_th]:font-medium">
                 <tr>
                   <th scope="col" className="px-3 py-2.5">Product</th>
                   <th scope="col" className="px-3 py-2.5">Category</th>
@@ -448,13 +444,13 @@ function CollectionAndProductPerformance({
           </div>
           <div className="grid gap-2 p-3 lg:hidden">
             {overview.products.rows.map((row) => (
-              <article key={row.key} className="rounded-lg border border-white/[0.08] bg-black/15 p-3">
-                <p className="font-medium text-slate-200">{row.itemName || "Unknown / unmapped"}</p>
+              <article key={row.key} className="inset-surface p-3">
+                <p className="font-medium text-label">{row.itemName || "Unknown / unmapped"}</p>
                 <p className="mt-1 break-words text-xs text-[var(--muted)]">{productIdentityDescription(row)}</p>
                 <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div><dt className="text-[var(--muted)]">Views</dt><dd className="mt-1 text-slate-200">{count(row.productViewSessions)}</dd></div>
-                  <div><dt className="text-[var(--muted)]">Cart</dt><dd className="mt-1 text-slate-200">{count(row.addToCartSessions)}</dd></div>
-                  <div><dt className="text-[var(--muted)]">Rate</dt><dd className="mt-1 text-slate-200">{percent(row.viewToCartRate)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Views</dt><dd className="mt-1 text-label">{count(row.productViewSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Cart</dt><dd className="mt-1 text-label">{count(row.addToCartSessions)}</dd></div>
+                  <div><dt className="text-[var(--muted)]">Rate</dt><dd className="mt-1 text-label">{percent(row.viewToCartRate)}</dd></div>
                 </dl>
               </article>
             ))}
@@ -488,12 +484,9 @@ function AcquisitionAndDevices({
 }) {
   return (
     <section className="grid min-w-0 gap-3" aria-labelledby="storefront-acquisition-title">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">Acquisition context</p>
-        <h2 id="storefront-acquisition-title" className="mt-1 text-xl font-semibold text-[#f5f2eb]">
-          Acquisition and device
-        </h2>
-        <p className="mt-1 text-sm leading-6 text-slate-400">
+      <div className="grid gap-1">
+        <SectionTitle eyebrow="Acquisition context" title="Acquisition and device" id="storefront-acquisition-title" />
+        <p className="px-1 text-sm leading-6 text-label-secondary">
           Normalized first-party UTM, landing-path, referrer-host, and device fields. Unknown remains visible.
         </p>
       </div>
@@ -501,14 +494,14 @@ function AcquisitionAndDevices({
       <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,0.5fr)]">
         <GlassPanel className="overflow-hidden" data-testid="acquisition-performance">
           <div
-            className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-cyan-300 lg:block"
+            className="hidden overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-tint lg:block"
             role="region"
             aria-label="Scrollable acquisition performance table"
             tabIndex={0}
           >
             <table className="w-full min-w-[52rem] text-left text-sm">
               <caption className="sr-only">Acquisition session and checkout performance</caption>
-              <thead className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
+              <thead className="text-xs text-[var(--muted)] [&_th]:font-medium">
                 <tr>
                   <th scope="col" className="px-3 py-2.5">UTM</th>
                   <th scope="col" className="px-3 py-2.5">Landing / referrer</th>
@@ -525,28 +518,28 @@ function AcquisitionAndDevices({
             {overview.acquisition.rows.map((row) => (
               <article
                 key={row.key}
-                className="rounded-lg border border-white/[0.08] bg-black/15 p-3"
+                className="inset-surface p-3"
                 data-acquisition-mobile-row
               >
                 <dl className="grid grid-cols-[minmax(6.5rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
                   <dt className="text-[var(--muted)]">UTM source</dt>
-                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.utmSource || "Unknown"}</dd>
+                  <dd className="whitespace-normal break-words text-label [overflow-wrap:anywhere]">{row.utmSource || "Unknown"}</dd>
                   <dt className="text-[var(--muted)]">UTM medium</dt>
-                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.utmMedium || "Unknown"}</dd>
+                  <dd className="whitespace-normal break-words text-label [overflow-wrap:anywhere]">{row.utmMedium || "Unknown"}</dd>
                   <dt className="text-[var(--muted)]">Campaign</dt>
-                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.utmCampaign || "Unknown campaign"}</dd>
+                  <dd className="whitespace-normal break-words text-label [overflow-wrap:anywhere]">{row.utmCampaign || "Unknown campaign"}</dd>
                   <dt className="text-[var(--muted)]">Landing page</dt>
-                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.landingPath || "Unknown landing path"}</dd>
+                  <dd className="whitespace-normal break-words text-label [overflow-wrap:anywhere]">{row.landingPath || "Unknown landing path"}</dd>
                   <dt className="text-[var(--muted)]">Referrer</dt>
-                  <dd className="whitespace-normal break-words text-slate-200 [overflow-wrap:anywhere]">{row.referrerHost || "Unknown referrer"}</dd>
+                  <dd className="whitespace-normal break-words text-label [overflow-wrap:anywhere]">{row.referrerHost || "Unknown referrer"}</dd>
                   <dt className="text-[var(--muted)]">Sessions</dt>
-                  <dd className="text-slate-200">{count(row.sessions)}</dd>
+                  <dd className="text-label">{count(row.sessions)}</dd>
                   <dt className="text-[var(--muted)]">Product intent</dt>
-                  <dd className="text-slate-200">{count(row.productIntentSessions)}</dd>
+                  <dd className="text-label">{count(row.productIntentSessions)}</dd>
                   <dt className="text-[var(--muted)]">Checkout started</dt>
-                  <dd className="text-slate-200">{row.checkoutSessions === null ? "—" : count(row.checkoutSessions)}</dd>
+                  <dd className="text-label">{row.checkoutSessions === null ? "—" : count(row.checkoutSessions)}</dd>
                   <dt className="text-[var(--muted)]">Visit-to-checkout rate</dt>
-                  <dd className="text-slate-200">{percent(row.visitToCheckoutRate)}</dd>
+                  <dd className="text-label">{percent(row.visitToCheckoutRate)}</dd>
                 </dl>
               </article>
             ))}
@@ -566,13 +559,13 @@ function AcquisitionAndDevices({
         </GlassPanel>
 
         <GlassPanel className="p-4">
-          <h3 className="font-semibold text-slate-100">Device category</h3>
+          <h3 className="font-semibold text-label">Device category</h3>
           <div className="mt-3 grid gap-2">
             {overview.devices.map((row) => (
-              <div key={row.device} className="rounded-lg border border-white/[0.08] bg-black/15 p-3">
+              <div key={row.device} className="inset-surface p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="capitalize text-sm font-medium text-slate-200">{row.device}</p>
-                  <p className="text-lg font-semibold text-white">{count(row.sessions)}</p>
+                  <p className="capitalize text-sm font-medium text-label">{row.device}</p>
+                  <p className="text-[17px] font-semibold tracking-[-0.018em] text-label">{count(row.sessions)}</p>
                 </div>
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   {count(row.productIntentSessions)} intent · {row.checkoutSessions === null ? "checkout not measured" : `${count(row.checkoutSessions)} checkout`} · {percent(row.visitToCheckoutRate)}
@@ -594,12 +587,13 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
     || overview.dataState === "pre_coverage";
 
   return (
-    <details className="group glass rounded-2xl" data-testid="storefront-quality">
-      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-4 py-3">
-        <div>
-          <p className="text-sm font-medium text-slate-200">Data quality and reconciliation</p>
+    <details className="group glass rounded-3xl" data-testid="storefront-quality">
+      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-3xl px-4 py-3 transition hover:bg-fill-hover sm:px-5">
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold tracking-[-0.01em] text-label">Data quality and reconciliation</p>
           <p className="mt-0.5 text-xs text-[var(--muted)]">Sequence ambiguity, unmapped events, and like-for-like daily rollup checks</p>
         </div>
+        <span className="flex shrink-0 items-center gap-2">
         <Badge
           tone={
             overview.reconciliation.state === "disagrees"
@@ -610,10 +604,12 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
         >
           {overview.reconciliation.state}
         </Badge>
+        <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
+        </span>
       </summary>
       {unavailable ? (
-        <div className="border-t border-white/[0.08] p-4" role="status">
-          <p className="text-sm font-medium text-slate-200">Quality diagnostics unavailable</p>
+        <div className="border-t border-separator p-4" role="status">
+          <p className="text-sm font-medium text-label">Quality diagnostics unavailable</p>
           <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
             {overview.dataState === "pre_coverage"
               ? "This range predates Website tracking coverage, so zeros would be misleading."
@@ -621,17 +617,17 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
           </p>
         </div>
       ) : (
-      <div className="grid gap-4 border-t border-white/[0.08] p-4 lg:grid-cols-3">
+      <div className="grid gap-4 border-t border-separator p-4 lg:grid-cols-3">
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Sequence policy</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-300">
+          <h3 className="text-xs font-semibold text-[var(--muted)]">Sequence policy</h3>
+          <p className="mt-2 text-sm leading-6 text-label-secondary">
             {count(equalTime)} co-timed session progressions were excluded from strict ordering; {count(unsequenced)} out-of-order or skipped-stage signals remain outside the monotonic funnel.
           </p>
           <p className="mt-2 text-xs text-[var(--muted)]">{count(quality.duplicateDeliveriesRemoved)} duplicate deliveries removed.</p>
         </div>
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Unknown and invalid</h3>
-          <ul className="mt-2 grid gap-1.5 text-sm text-slate-300">
+          <h3 className="text-xs font-semibold text-[var(--muted)]">Unknown and invalid</h3>
+          <ul className="mt-2 grid gap-1.5 text-sm text-label-secondary">
             {quality.unknownEvents.map((item) => (
               <li key={item.eventName}>{item.eventName || "Unknown event"} · {count(item.events)}</li>
             ))}
@@ -649,13 +645,13 @@ function QualityDisclosure({ overview }: { overview: WebsiteFunnelOverview }) {
           ) : null}
         </div>
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">Raw vs daily aggregate</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-300">{overview.reconciliation.note}</p>
+          <h3 className="text-xs font-semibold text-[var(--muted)]">Raw vs daily aggregate</h3>
+          <p className="mt-2 text-sm leading-6 text-label-secondary">{overview.reconciliation.note}</p>
           <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
-            <div><dt className="text-[var(--muted)]">Completed-day raw page views</dt><dd className="mt-1 text-slate-200">{count(overview.reconciliation.rawPageViews)}</dd></div>
-            <div><dt className="text-[var(--muted)]">Daily page views</dt><dd className="mt-1 text-slate-200">{overview.reconciliation.dailyPageViews === null ? "—" : count(overview.reconciliation.dailyPageViews)}</dd></div>
-            <div><dt className="text-[var(--muted)]">Completed-day raw custom events</dt><dd className="mt-1 text-slate-200">{count(overview.reconciliation.rawCustomEvents)}</dd></div>
-            <div><dt className="text-[var(--muted)]">Daily custom events</dt><dd className="mt-1 text-slate-200">{overview.reconciliation.dailyCustomEvents === null ? "—" : count(overview.reconciliation.dailyCustomEvents)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Completed-day raw page views</dt><dd className="mt-1 text-label">{count(overview.reconciliation.rawPageViews)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Daily page views</dt><dd className="mt-1 text-label">{overview.reconciliation.dailyPageViews === null ? "—" : count(overview.reconciliation.dailyPageViews)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Completed-day raw custom events</dt><dd className="mt-1 text-label">{count(overview.reconciliation.rawCustomEvents)}</dd></div>
+            <div><dt className="text-[var(--muted)]">Daily custom events</dt><dd className="mt-1 text-label">{overview.reconciliation.dailyCustomEvents === null ? "—" : count(overview.reconciliation.dailyCustomEvents)}</dd></div>
           </dl>
           <p className="mt-2 text-xs leading-5 text-[var(--muted)]">Period-distinct visitors and sessions are not compared with summed daily distinct counts.</p>
         </div>

@@ -106,7 +106,7 @@ describe("StorefrontConversionTrend comparison rendering", () => {
     expect(chartLine(markup, "previous")?.getAttribute("data-connect-nulls")).toBe("false");
     expect(markup).toContain("2026-06-28");
     expect(markup).toContain("2026-06-30");
-    expect(markup).toContain("<td class=\"px-3 py-2.5 text-slate-300\">—</td>");
+    expect(markup).toContain("<td class=\"px-3 py-2.5 text-label-secondary\">—</td>");
     expect(markup).toContain("equal-length previous-period comparison");
   });
 

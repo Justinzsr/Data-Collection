@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { ChevronDown, MoonStar, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react";
+import { ChevronRight, PanelLeftClose, PanelLeftOpen, ShieldCheck } from "lucide-react";
 import type { DataSpace } from "@/storage/db/schema";
 import { cn } from "@/presentation/components/ui/utils";
 import { DataSpaceSwitcher } from "@/presentation/layout/data-space-switcher";
@@ -14,6 +14,7 @@ import {
   type DashboardNavGroup,
   type DashboardNavItem,
 } from "@/presentation/layout/nav-items";
+import { WorkspaceIcon } from "@/presentation/layout/workspace-icon";
 
 const defaultOpenGroups: Record<DashboardNavGroup["id"], boolean> = {
   command: true,
@@ -39,21 +40,18 @@ function SidebarLink({
       aria-label={collapsed ? item.label : undefined}
       title={collapsed ? item.label : undefined}
       className={cn(
-        "group relative flex min-h-10 items-center rounded-lg text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-cyan-300/40",
-        collapsed ? "justify-center px-2" : "gap-3 px-3",
+        "group relative flex h-9 items-center rounded-[11px] text-[13.5px] transition duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+        collapsed ? "mx-auto w-11 justify-center" : "gap-3 px-3",
         active
-          ? "bg-cyan-300/12 text-cyan-50 shadow-[inset_0_0_0_1px_rgba(103,232,249,0.12)]"
-          : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-100",
+          ? "bg-fill-strong font-semibold text-label shadow-[inset_0_1px_0_var(--glass-rim)]"
+          : "font-medium text-label-secondary hover:bg-fill-hover hover:text-label",
       )}
     >
-      <span
+      <Icon
+        className={cn("h-[17px] w-[17px] shrink-0 transition", active ? "text-tint" : "text-muted group-hover:text-label-secondary")}
+        strokeWidth={active ? 2.3 : 2}
         aria-hidden="true"
-        className={cn(
-          "absolute inset-y-2 left-0 w-0.5 rounded-full bg-cyan-300 transition-opacity",
-          active ? "opacity-100" : "opacity-0",
-        )}
       />
-      <Icon className={cn("h-4 w-4 shrink-0 transition", active ? "text-cyan-200" : "text-slate-500 group-hover:text-slate-300")} />
       {collapsed ? null : <span className="truncate">{item.label}</span>}
     </Link>
   );
@@ -81,99 +79,107 @@ export function DesktopSidebar({
   return (
     <aside
       className={cn(
-        "sticky top-0 z-30 hidden h-dvh shrink-0 flex-col border-r border-white/10 bg-[#080c13]/95 transition-[width] duration-200 motion-reduce:transition-none lg:flex",
-        collapsed ? "w-[4.5rem]" : "w-[16.5rem]",
+        "sticky top-0 z-30 hidden h-dvh shrink-0 py-3 pl-3 transition-[width] duration-300 ease-out motion-reduce:transition-none lg:block",
+        collapsed ? "w-[5.25rem]" : "w-[17.25rem]",
       )}
       aria-label="Dashboard sidebar"
     >
-      <div className={cn("relative z-40 flex shrink-0 gap-2 border-b border-white/[0.08] p-3", collapsed ? "flex-col items-center" : "items-center")}>
-        {dataSpace ? (
-          <DataSpaceSwitcher
-            current={dataSpace}
-            spaces={dataSpaces}
-            collapsed={collapsed}
-            onRequestExpand={() => setCollapsed(false)}
-          />
-        ) : (
-          <Link
-            href="/w/moonarq/dashboard"
-            className={cn(
-              "flex min-w-0 items-center rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-300/40",
-              collapsed ? "h-10 w-10 justify-center border border-cyan-200/20 bg-cyan-300/10" : "flex-1 gap-3 px-2 py-2",
-            )}
-            aria-label={collapsed ? "MoonArq Data Command Center" : undefined}
-            title={collapsed ? "MoonArq Data Command Center" : undefined}
+      <div className="glass-chrome flex h-full flex-col rounded-[26px]">
+        <div className={cn("relative z-40 flex shrink-0 gap-1.5 p-2.5", collapsed ? "flex-col items-center" : "items-center")}>
+          {dataSpace ? (
+            <DataSpaceSwitcher
+              current={dataSpace}
+              spaces={dataSpaces}
+              collapsed={collapsed}
+              onRequestExpand={() => setCollapsed(false)}
+            />
+          ) : (
+            <Link
+              href="/w/moonarq/dashboard"
+              className={cn(
+                "flex min-w-0 items-center rounded-2xl transition hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+                collapsed ? "h-11 w-11 justify-center" : "flex-1 gap-3 p-1.5",
+              )}
+              aria-label={collapsed ? "MoonArq Data Command Center" : undefined}
+              title={collapsed ? "MoonArq Data Command Center" : undefined}
+            >
+              <WorkspaceIcon slug="moonarq" size={collapsed ? "sm" : "md"} />
+              {collapsed ? null : (
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-semibold tracking-[-0.015em] text-label">MoonArq</span>
+                  <span className="block truncate text-xs text-muted">Data Command Center</span>
+                </span>
+              )}
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => setCollapsed((current) => !current)}
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted transition hover:bg-fill-hover hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <MoonStar className="h-5 w-5 shrink-0 text-cyan-100" />
-            {collapsed ? null : (
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-white">MoonArq</span>
-                <span className="block truncate text-xs text-slate-500">Data Command Center</span>
-              </span>
-            )}
-          </Link>
-        )}
-        <button
-          type="button"
-          onClick={() => setCollapsed((current) => !current)}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 text-slate-400 transition hover:bg-white/[0.06] hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-300/40"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-        </button>
-      </div>
+            {collapsed ? <PanelLeftOpen className="h-[17px] w-[17px]" /> : <PanelLeftClose className="h-[17px] w-[17px]" />}
+          </button>
+        </div>
 
-      <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-3" aria-label="Primary navigation">
-        {collapsed ? (
-          <div className="grid gap-1">
-            {primaryItems.map((item) => (
-              <SidebarLink key={item.href} item={item} active={activeHref === item.href} collapsed />
-            ))}
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {groups.map((group) => {
-              const open = openGroups[group.id];
-              const containsActiveItem = group.items.some((item) => item.href === activeHref);
-              return (
-                <section key={group.id} aria-labelledby={`sidebar-group-${group.id}`}>
-                  <button
-                    id={`sidebar-group-${group.id}`}
-                    type="button"
-                    onClick={() => toggleGroup(group.id)}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.16em] transition focus:outline-none focus:ring-2 focus:ring-cyan-300/35",
-                      containsActiveItem ? "text-cyan-200/85" : "text-slate-600 hover:text-slate-400",
+        <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-2.5 pb-3" aria-label="Primary navigation">
+          {collapsed ? (
+            <div className="grid gap-1 pt-1">
+              {primaryItems.map((item) => (
+                <SidebarLink key={item.href} item={item} active={activeHref === item.href} collapsed />
+              ))}
+            </div>
+          ) : (
+            <div className="grid gap-4 pt-1">
+              {groups.map((group) => {
+                const open = openGroups[group.id];
+                return (
+                  <section key={group.id} aria-labelledby={`sidebar-group-${group.id}`}>
+                    {group.id === "command" ? (
+                      <h2 id={`sidebar-group-${group.id}`} className="sr-only">{group.label}</h2>
+                    ) : (
+                      <button
+                        id={`sidebar-group-${group.id}`}
+                        type="button"
+                        onClick={() => toggleGroup(group.id)}
+                        className="group/header mb-1 flex h-7 w-full items-center justify-between rounded-lg px-3 text-[11.5px] font-semibold text-muted transition hover:text-label-secondary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+                        aria-expanded={open}
+                        aria-controls={`sidebar-group-items-${group.id}`}
+                      >
+                        {group.label}
+                        <ChevronRight
+                          className={cn(
+                            "h-3.5 w-3.5 opacity-0 transition group-hover/header:opacity-100 group-focus-visible/header:opacity-100",
+                            open ? "rotate-90" : "rotate-0 opacity-100",
+                          )}
+                          aria-hidden="true"
+                        />
+                      </button>
                     )}
-                    aria-expanded={open}
-                    aria-controls={`sidebar-group-items-${group.id}`}
-                  >
-                    {group.label}
-                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open ? "rotate-0" : "-rotate-90")} />
-                  </button>
-                  {open ? (
-                    <div id={`sidebar-group-items-${group.id}`} className="mt-1 grid gap-1">
-                      {group.items.map((item) => (
-                        <SidebarLink key={item.href} item={item} active={activeHref === item.href} collapsed={false} />
-                      ))}
-                    </div>
-                  ) : null}
-                </section>
-              );
-            })}
-          </div>
-        )}
-      </nav>
+                    {open ? (
+                      <div id={`sidebar-group-items-${group.id}`} className="grid gap-0.5">
+                        {group.items.map((item) => (
+                          <SidebarLink key={item.href} item={item} active={activeHref === item.href} collapsed={false} />
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </nav>
 
-      <div className="shrink-0 border-t border-white/[0.08] p-3">
-        {collapsed ? null : (
-          <div className="mb-2 flex items-center gap-2 px-3 text-xs leading-5 text-slate-500">
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-300/70" />
-            Private, source-scoped data
-          </div>
-        )}
-        <SidebarLink item={settingsNavItem} active={activeHref === settingsNavItem.href} collapsed={collapsed} />
+        <div className="shrink-0 border-t border-separator p-2.5">
+          <SidebarLink item={settingsNavItem} active={activeHref === settingsNavItem.href} collapsed={collapsed} />
+          {collapsed ? null : (
+            <p className="mt-1.5 flex items-center gap-2 px-3 text-xs leading-5 text-muted">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-positive" aria-hidden="true" />
+              Private, source-scoped data
+            </p>
+          )}
+        </div>
       </div>
     </aside>
   );

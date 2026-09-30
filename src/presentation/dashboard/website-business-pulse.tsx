@@ -1,8 +1,8 @@
 import type { WebsiteFunnelOverview, WebsiteFunnelStageKey } from "@/aggregation/services/website-funnel-types";
 import { Badge } from "@/presentation/components/ui/badge";
-import { GlassPanel } from "@/presentation/components/ui/panel";
+import { GlassPanel, SectionTitle } from "@/presentation/components/ui/panel";
 import {
-  comparisonToneClass,
+  comparisonChipClass,
   resolveComparisonDisplay,
 } from "@/presentation/dashboard/comparison-display";
 
@@ -27,15 +27,12 @@ export function WebsiteBusinessPulse({ overview }: { overview: WebsiteFunnelOver
 
   return (
     <section className="grid min-w-0 gap-3" aria-labelledby="business-pulse-title" data-testid="business-pulse">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">Business pulse</p>
-          <h2 id="business-pulse-title" className="mt-1 text-xl font-semibold text-[#f5f2eb]">
-            Storefront movement
-          </h2>
-        </div>
-        <Badge tone="cyan">First-party Website Tracker</Badge>
-      </div>
+      <SectionTitle
+        eyebrow="Business pulse"
+        title="Storefront movement"
+        id="business-pulse-title"
+        action={<Badge tone="cyan">First-party Website Tracker</Badge>}
+      />
 
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {pulseDefinitions.map((definition) => {
@@ -54,22 +51,22 @@ export function WebsiteBusinessPulse({ overview }: { overview: WebsiteFunnelOver
           return (
             <GlassPanel
               key={definition.key}
-              className="min-h-36 p-4"
+              className="flex min-h-36 flex-col rounded-[22px] p-4"
               data-testid={`business-pulse-${definition.key}`}
             >
-              <p className="text-sm leading-5 text-slate-400">{definition.label}</p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.035em] text-[#f5f2eb]">
+              <p className="text-[13px] font-medium leading-5 text-label-secondary">{definition.label}</p>
+              <p className="tabular mt-2 text-[30px] font-semibold leading-9 tracking-[-0.035em] text-label">
                 {unavailable || !measured ? "—" : count(value)}
               </p>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="text-[var(--muted)]">
-                  {!measured ? "Not measured" : definition.key === "visitors" ? "Period distinct" : "Distinct sessions"}
-                </span>
+              <div className="mt-auto flex flex-col items-start gap-1.5 pt-3 text-xs">
                 <span
-                  className={comparisonToneClass(comparison.tone)}
+                  className={`${comparisonChipClass(comparison.tone)} rounded-full px-2 py-0.5 font-semibold`}
                   data-comparison-state={comparison.kind}
                 >
                   {comparison.label}
+                </span>
+                <span className="text-[var(--muted)]">
+                  {!measured ? "Not measured" : definition.key === "visitors" ? "Period distinct" : "Distinct sessions"}
                 </span>
               </div>
             </GlassPanel>

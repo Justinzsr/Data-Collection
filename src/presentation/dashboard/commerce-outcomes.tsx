@@ -1,6 +1,7 @@
 import type { PlatformModule } from "@/aggregation/services/platform-modules-service";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
-import { GlassPanel } from "@/presentation/components/ui/panel";
+import { GlassPanel, SectionTitle } from "@/presentation/components/ui/panel";
+import { PlatformIcon } from "@/presentation/components/ui/platform-icon";
 import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 function formatMetric(value: number | string, unit: string) {
@@ -99,17 +100,16 @@ export function CommerceOutcomes({ shopify }: { shopify: PlatformModule | null }
 
   return (
     <section className="grid min-w-0 gap-3" aria-labelledby="commerce-outcomes-title" data-testid="commerce-outcomes">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-200/75">Authoritative commerce</p>
-          <h2 id="commerce-outcomes-title" className="mt-1 text-xl font-semibold text-[#f5f2eb]">
-            Commerce outcomes
-          </h2>
-        </div>
-        <Badge tone={shopifyStateTone(state, shopify)}>
-          Shopify · {state.label}
-        </Badge>
-      </div>
+      <SectionTitle
+        eyebrow="Authoritative commerce"
+        title="Commerce outcomes"
+        id="commerce-outcomes-title"
+        action={(
+          <Badge tone={shopifyStateTone(state, shopify)} dot>
+            Shopify · {state.label}
+          </Badge>
+        )}
+      />
 
       <GlassPanel className="p-4 sm:p-5">
         {state.kind === "ready" && shopify ? (
@@ -120,28 +120,31 @@ export function CommerceOutcomes({ shopify }: { shopify: PlatformModule | null }
             </div>
             <dl className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {metrics.map((metric) => (
-                <div key={metric.key} className="min-w-0 border-b border-white/[0.07] pb-3 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3 last:border-0">
-                  <dt className="text-sm text-slate-400">{metric.label}</dt>
-                  <dd className="mt-2 break-words text-2xl font-semibold tracking-[-0.03em] text-white">
+                <div key={metric.key} className="inset-surface min-w-0 p-3.5">
+                  <dt className="text-[13px] font-medium text-label-secondary">{metric.label}</dt>
+                  <dd className="tabular mt-1.5 break-words text-2xl font-semibold tracking-[-0.03em] text-label">
                     {formatMetric(metric.value, metric.unit)}
                   </dd>
                 </div>
               ))}
             </dl>
             {zeroOrders ? (
-              <p className="mt-4 rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-300">
+              <p className="inset-surface mt-3 px-3.5 py-2.5 text-sm text-label-secondary">
                 No Shopify orders were recorded in the selected period.
               </p>
             ) : null}
           </>
         ) : (
-          <div role="status">
-            <p className="text-sm font-medium text-slate-200">{state.title}</p>
-            <p className="mt-1 text-sm leading-6 text-[var(--muted)]">{state.detail}</p>
+          <div role="status" className="flex items-start gap-3">
+            <PlatformIcon sourceTypeKey="shopify" size="md" />
+            <div className="min-w-0">
+              <p className="text-[15px] font-semibold tracking-[-0.01em] text-label">{state.title}</p>
+              <p className="mt-1 text-sm leading-6 text-[var(--muted)]">{state.detail}</p>
+            </div>
           </div>
         )}
 
-        <p className="mt-4 border-t border-white/[0.08] pt-3 text-xs leading-5 text-[var(--muted)]">
+        <p className="mt-4 border-t border-separator pt-3 text-xs leading-5 text-[var(--muted)]">
           Shopify outcomes are reported separately and are not session-linked to the first-party Website funnel.
         </p>
       </GlassPanel>

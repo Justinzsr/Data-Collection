@@ -6,33 +6,25 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft,
   ArrowRight,
-  BookOpen,
-  Braces,
-  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
   Clipboard,
-  DatabaseZap,
-  FileSpreadsheet,
   Globe2,
   KeyRound,
   LinkIcon,
   Orbit,
   Play,
   Radar,
-  Rocket,
   ShieldCheck,
-  ShoppingBag,
   Sparkles,
-  Video,
   Webhook,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/presentation/components/ui/badge";
 import { Button, LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel } from "@/presentation/components/ui/panel";
+import { IconTile, PlatformIcon } from "@/presentation/components/ui/platform-icon";
 import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
 
 type ConnectorAvailability = "live" | "planned";
@@ -98,19 +90,6 @@ const PLATFORM_PRIORITY = [
   "custom_api",
   "custom_csv",
 ];
-
-const PLATFORM_ICONS: Record<string, LucideIcon> = {
-  website: Globe2,
-  vercel_web_analytics_drain: Orbit,
-  instagram: Camera,
-  tiktok: Video,
-  supabase: DatabaseZap,
-  xiaohongshu: BookOpen,
-  shopify: ShoppingBag,
-  vercel_project: Rocket,
-  custom_api: Braces,
-  custom_csv: FileSpreadsheet,
-};
 
 const STAGES: Array<{ key: WizardStage; label: string }> = [
   { key: "platform", label: "Platform" },
@@ -204,20 +183,20 @@ function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePat
       <div className="grid gap-4">
         <div>
           <Badge tone="cyan">Official Vercel Drain</Badge>
-          <h3 className="mt-3 text-base font-semibold text-white">Add auxiliary request-level evidence</h3>
-          <p className="mt-1 text-sm leading-6 text-slate-400">
+          <h3 className="mt-3 text-[17px] font-semibold tracking-[-0.018em] text-label">Add auxiliary request-level evidence</h3>
+          <p className="mt-1 text-sm leading-6 text-label-secondary">
             Vercel Drain records infrastructure and request-level events. Add the first-party Website Tracker separately for authoritative funnels, sessions, identity, and attribution.
           </p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Drain endpoint</p>
-          <p className="mt-2 break-all font-mono text-xs leading-5 text-cyan-50">{drainEndpoint}</p>
+        <div className="rounded-2xl bg-fill p-3">
+          <p className="text-[11px] font-semibold text-muted">Drain endpoint</p>
+          <p className="mt-2 break-all font-mono text-xs leading-5 text-label">{drainEndpoint}</p>
           <Button type="button" onClick={copyEndpoint} variant="secondary" className="mt-3 w-full sm:w-fit">
             <Clipboard className="h-4 w-4" />
             Copy endpoint
           </Button>
         </div>
-        <ol className="grid gap-2 text-sm leading-6 text-slate-300">
+        <ol className="grid gap-2 text-sm leading-6 text-label-secondary">
           <li>1. Open the Vercel project and create a Web Analytics Drain.</li>
           <li>2. Paste the endpoint and choose JSON or NDJSON delivery.</li>
           <li>3. Save the required signature secret below; do not use Drain totals as funnel truth.</li>
@@ -237,12 +216,12 @@ function WebsiteSourceSetup({ source, basePath }: { source: SavedSource; basePat
     <div className="grid gap-4">
       <div>
         <Badge tone="cyan">First-party tracker</Badge>
-        <h3 className="mt-3 text-base font-semibold text-white">Install the authoritative website tracker</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-400">
+        <h3 className="mt-3 text-[17px] font-semibold tracking-[-0.018em] text-label">Install the authoritative website tracker</h3>
+        <p className="mt-1 text-sm leading-6 text-label-secondary">
           The source detail page contains the exact snippet and custom-event helper for this source.
         </p>
       </div>
-      <ol className="grid gap-2 text-sm leading-6 text-slate-300">
+      <ol className="grid gap-2 text-sm leading-6 text-label-secondary">
         <li>1. Copy the generated snippet from the source detail page.</li>
         <li>2. Install it once in the website layout.</li>
         <li>3. Use the custom-event helper only for the product or marketing events you need.</li>
@@ -500,14 +479,14 @@ export function AddSourceWizard({
       className="mx-auto w-full max-w-5xl"
     >
       <GlassPanel className="overflow-hidden">
-        <div className="border-b border-white/8 px-4 py-4 sm:px-6">
-          <ol aria-label="Connection progress" className="grid grid-cols-4 gap-2 text-[11px] text-slate-500 sm:text-xs">
+        <div className="border-b border-separator px-4 py-4 sm:px-6">
+          <ol aria-label="Connection progress" className="grid grid-cols-4 gap-2 text-[11px] text-muted sm:text-xs">
             {STAGES.map((item, index) => {
               const reached = index <= currentStageIndex;
               const active = item.key === stage;
               return (
-                <li key={item.key} aria-current={active ? "step" : undefined} className={reached ? "text-cyan-100" : undefined}>
-                  <div className={`mb-2 h-1 rounded-full transition ${reached ? "bg-cyan-300" : "bg-white/10"}`} />
+                <li key={item.key} aria-current={active ? "step" : undefined} className={reached ? "font-semibold text-tint-text" : "font-medium"}>
+                  <div className={`mb-2 h-1.5 rounded-full transition-colors duration-300 ${reached ? "bg-tint" : "bg-fill-strong"}`} />
                   {item.label}
                 </li>
               );
@@ -528,8 +507,8 @@ export function AddSourceWizard({
                 <div className="grid gap-6">
                   <div>
                     <Badge tone="cyan">Step 1 of 4</Badge>
-                    <h2 className="mt-3 text-xl font-semibold tracking-tight text-white sm:text-2xl">Choose a platform first</h2>
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                    <h2 className="mt-3 text-[22px] font-bold tracking-[-0.025em] text-label sm:text-[26px]">Choose a platform first</h2>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-label-secondary">
                       Pick where the data lives. We will ask only for the setup that platform actually supports.
                     </p>
                   </div>
@@ -537,13 +516,13 @@ export function AddSourceWizard({
                   {catalogLoading ? (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Loading platforms">
                       {Array.from({ length: 6 }).map((_, index) => (
-                        <div key={index} className="h-40 animate-pulse rounded-2xl border border-white/8 bg-white/[0.025]" />
+                        <div key={index} className="h-40 animate-pulse rounded-3xl bg-fill" />
                       ))}
                     </div>
                   ) : catalogError ? (
-                    <div className="rounded-2xl border border-rose-300/20 bg-rose-400/8 p-5">
-                      <p className="text-sm font-medium text-rose-100">Platforms could not be loaded</p>
-                      <p className="mt-1 text-sm text-rose-100/70">{catalogError}</p>
+                    <div className="rounded-[22px] bg-negative-fill/10 p-5">
+                      <p className="text-sm font-semibold text-negative">Platforms could not be loaded</p>
+                      <p className="mt-1 text-sm text-label-secondary">{catalogError}</p>
                       <Button type="button" variant="secondary" className="mt-4" onClick={() => setCatalogAttempt((value) => value + 1)}>
                         Try again
                       </Button>
@@ -551,7 +530,6 @@ export function AddSourceWizard({
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {platformTypes.map((sourceType) => {
-                        const Icon = PLATFORM_ICONS[sourceType.key] ?? DatabaseZap;
                         const available = isConnectable(sourceType);
                         const selected = sourceType.key === selectedTypeKey;
                         return (
@@ -560,20 +538,18 @@ export function AddSourceWizard({
                             type="button"
                             aria-pressed={selected}
                             onClick={() => choosePlatform(sourceType)}
-                            className={`group min-h-40 rounded-2xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-cyan-300/40 ${
+                            className={`group min-h-40 rounded-[22px] p-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30 active:scale-[0.99] ${
                               selected
-                                ? "border-cyan-200/45 bg-cyan-300/9"
-                                : "border-white/9 bg-white/[0.025] hover:border-white/18 hover:bg-white/[0.045]"
+                                ? "bg-tint/10 shadow-[inset_0_0_0_2px_var(--tint)]"
+                                : "bg-fill hover:bg-fill-hover"
                             }`}
                           >
                             <div className="flex items-start justify-between gap-3">
-                              <span className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-black/20 text-cyan-100">
-                                <Icon className="h-5 w-5" />
-                              </span>
+                              <PlatformIcon sourceTypeKey={sourceType.key} size="lg" className={available ? undefined : "opacity-60 grayscale"} />
                               <Badge tone={available ? "green" : "amber"}>{available ? setupKindLabel(sourceType.setup_kind) : "Planned"}</Badge>
                             </div>
-                            <p className="mt-4 font-semibold text-white">{sourceType.display_name}</p>
-                            <p className="mt-1 line-clamp-3 text-xs leading-5 text-slate-400">{sourceType.description}</p>
+                            <p className="mt-4 text-[15px] font-semibold tracking-[-0.01em] text-label">{sourceType.display_name}</p>
+                            <p className="mt-1 line-clamp-3 text-xs leading-5 text-label-secondary">{sourceType.description}</p>
                           </button>
                         );
                       })}
@@ -581,20 +557,20 @@ export function AddSourceWizard({
                   )}
 
                   {selectedType && !isConnectable(selectedType) ? (
-                    <div className="rounded-2xl border border-amber-300/20 bg-amber-400/8 p-5" aria-live="polite">
+                    <div className="rounded-[22px] bg-warning-fill/10 p-5" aria-live="polite">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge tone="amber">Coming soon</Badge>
-                        <p className="font-semibold text-amber-50">{selectedType.display_name}</p>
+                        <p className="font-semibold text-warning">{selectedType.display_name}</p>
                       </div>
-                      <p className="mt-3 text-sm leading-6 text-amber-50/80">
+                      <p className="mt-3 text-sm leading-6 text-label-secondary">
                         {selectedType.key === "xiaohongshu"
                           ? "小红书 is a roadmap placeholder. It does not collect data, request credentials, test connections, or run syncs yet. A future connector must use an official authorized integration."
                           : "This connector is visible on the roadmap but cannot be saved or connected yet."}
                       </p>
                       {selectedType.setup_instructions.length > 0 ? (
-                        <details className="mt-4 rounded-xl border border-amber-200/15 bg-black/15 px-4 py-3">
-                          <summary className="cursor-pointer text-sm font-medium text-amber-50">Why it is not connectable</summary>
-                          <div className="mt-3 grid gap-2 text-sm leading-6 text-amber-50/70">
+                        <details className="mt-4 rounded-2xl bg-fill px-4 py-3">
+                          <summary className="cursor-pointer text-sm font-semibold text-warning">Why it is not connectable</summary>
+                          <div className="mt-3 grid gap-2 text-sm leading-6 text-label-secondary">
                             {selectedType.setup_instructions.map((instruction) => <p key={instruction}>{instruction}</p>)}
                           </div>
                         </details>
@@ -609,8 +585,8 @@ export function AddSourceWizard({
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <Badge tone="cyan">Step 2 of 4</Badge>
-                      <h2 className="mt-3 text-xl font-semibold tracking-tight text-white sm:text-2xl">Configure {selectedType.display_name}</h2>
-                      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+                      <h2 className="mt-3 text-[22px] font-bold tracking-[-0.025em] text-label sm:text-[26px]">Configure {selectedType.display_name}</h2>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-label-secondary">
                         Add the public source URL now. Private access is handled securely after the source is saved.
                       </p>
                     </div>
@@ -619,7 +595,7 @@ export function AddSourceWizard({
 
                   {selectedType.key === "website" ? (
                     <fieldset>
-                      <legend className="text-sm font-medium text-slate-200">Choose the website source to add</legend>
+                      <legend className="text-sm font-medium text-label">Choose the website source to add</legend>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         {([
                           {
@@ -645,16 +621,16 @@ export function AddSourceWizard({
                               type="button"
                               aria-pressed={checked}
                               onClick={() => chooseWebsiteMode(option.key)}
-                              className={`rounded-2xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-cyan-300/40 ${
-                                checked ? "border-cyan-200/45 bg-cyan-300/9" : "border-white/9 bg-white/[0.025] hover:border-white/18"
+                              className={`rounded-[22px] p-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30 ${
+                                checked ? "bg-tint/10 shadow-[inset_0_0_0_2px_var(--tint)]" : "bg-fill hover:bg-fill-hover"
                               }`}
                             >
                               <div className="flex items-center justify-between gap-3">
-                                <Icon className="h-5 w-5 text-cyan-100" />
+                                <Icon className="h-5 w-5 text-tint" />
                                 <Badge tone={checked ? "cyan" : "slate"}>{option.badge}</Badge>
                               </div>
-                              <p className="mt-3 text-sm font-semibold text-white">{option.title}</p>
-                              <p className="mt-1 text-xs leading-5 text-slate-400">{option.description}</p>
+                              <p className="mt-3 text-sm font-semibold text-label">{option.title}</p>
+                              <p className="mt-1 text-xs leading-5 text-label-secondary">{option.description}</p>
                             </button>
                           );
                         })}
@@ -663,8 +639,8 @@ export function AddSourceWizard({
                   ) : null}
 
                   <div>
-                    <label htmlFor="source-input" className="text-sm font-medium text-slate-200">Public source URL</label>
-                    <p className="mt-1 text-xs leading-5 text-slate-500">Used to identify the account or project. This does not grant private access.</p>
+                    <label htmlFor="source-input" className="text-sm font-medium text-label">Public source URL</label>
+                    <p className="mt-1 text-xs leading-5 text-muted">Used to identify the account or project. This does not grant private access.</p>
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <input
                         id="source-input"
@@ -673,7 +649,7 @@ export function AddSourceWizard({
                         disabled={!hydrated || detectionStatus === "checking"}
                         placeholder={inputPlaceholderFor(selectedType.key)}
                         autoComplete="url"
-                        className="min-h-11 min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-slate-600 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-55"
+                        className="field min-h-11 min-w-0 flex-1"
                       />
                       <Button type="button" onClick={detect} disabled={!hydrated || !inputUrl.trim() || detectionStatus === "checking"} variant="secondary">
                         <Radar className="h-4 w-4" />
@@ -684,17 +660,17 @@ export function AddSourceWizard({
 
                   {detectionStatus === "done" ? (
                     topDetection ? (
-                      <div className={`rounded-2xl border p-4 ${detectionMatchesSelection ? "border-emerald-300/20 bg-emerald-400/8" : "border-amber-300/20 bg-amber-400/8"}`} aria-live="polite">
+                      <div className={`rounded-[22px] p-4 ${detectionMatchesSelection ? "bg-positive-fill/10" : "bg-warning-fill/10"}`} aria-live="polite">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
-                            {detectionMatchesSelection ? <Check className="h-4 w-4 text-emerald-200" /> : <Radar className="h-4 w-4 text-amber-200" />}
-                            <p className="text-sm font-semibold text-white">
+                            {detectionMatchesSelection ? <Check className="h-4 w-4 text-positive" /> : <Radar className="h-4 w-4 text-warning" />}
+                            <p className="text-sm font-semibold text-label">
                               {detectionMatchesSelection ? `URL matches ${selectedType.display_name}` : `${topDetection.displayName} was detected instead`}
                             </p>
                           </div>
                           <Badge tone={topDetection.availability === "live" ? "cyan" : "amber"}>{Math.round(topDetection.confidence * 100)}% match</Badge>
                         </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-300">{topDetection.reasons.join(" ")}</p>
+                        <p className="mt-2 text-sm leading-6 text-label-secondary">{topDetection.reasons.join(" ")}</p>
                         {!detectionMatchesSelection ? (
                           <Button type="button" variant="secondary" className="mt-3" onClick={() => applyDetectedPlatform(topDetection)}>
                             {topDetection.availability === "live" ? `Use ${topDetection.displayName}` : `View ${topDetection.displayName} status`}
@@ -703,26 +679,26 @@ export function AddSourceWizard({
                         ) : null}
                       </div>
                     ) : (
-                      <div className="rounded-2xl border border-amber-300/20 bg-amber-400/8 p-4 text-sm leading-6 text-amber-50" aria-live="polite">
+                      <div className="rounded-[22px] bg-warning-fill/10 p-4 text-sm leading-6 text-warning" aria-live="polite">
                         We could not identify this URL. Check the full public profile or project URL before continuing.
                       </div>
                     )
                   ) : null}
 
                   {effectiveType.setup_kind === "oauth" ? (
-                    <div className="flex gap-3 rounded-2xl border border-cyan-300/15 bg-cyan-300/7 p-4">
-                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-cyan-200" />
+                    <div className="flex gap-3 rounded-[22px] bg-tint/8 p-4">
+                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-tint" />
                       <div>
-                        <p className="text-sm font-medium text-cyan-50">No token fields in this form</p>
-                        <p className="mt-1 text-sm leading-6 text-slate-300">Save the source, then use the official {selectedType.display_name} OAuth screen.</p>
+                        <p className="text-sm font-semibold text-label">No token fields in this form</p>
+                        <p className="mt-1 text-sm leading-6 text-label-secondary">Save the source, then use the official {selectedType.display_name} OAuth screen.</p>
                       </div>
                     </div>
                   ) : null}
 
-                  <details className="group rounded-2xl border border-white/9 bg-white/[0.02] px-4 py-3">
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-slate-200">
+                  <details className="group rounded-[22px] bg-fill px-4 py-3">
+                    <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-label">
                       <span>Advanced sync settings</span>
-                      <span className="flex items-center gap-2 text-xs font-normal text-slate-500">
+                      <span className="flex items-center gap-2 text-xs font-normal text-muted">
                         {syncModeLabel(syncMode)}
                         <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
                       </span>
@@ -734,8 +710,8 @@ export function AddSourceWizard({
                           key={mode}
                           aria-pressed={syncMode === mode}
                           onClick={() => setSyncMode(mode)}
-                          className={`rounded-xl border px-3 py-3 text-left text-xs leading-5 transition ${
-                            syncMode === mode ? "border-cyan-200/40 bg-cyan-300/9 text-cyan-50" : "border-white/9 bg-black/15 text-slate-400"
+                          className={`rounded-2xl px-3 py-3 text-left text-[13px] font-medium leading-5 transition ${
+                            syncMode === mode ? "bg-[var(--glass-selected)] text-label shadow-[inset_0_0_0_2px_var(--tint)]" : "bg-fill text-label-secondary hover:bg-fill-hover"
                           }`}
                         >
                           {syncModeLabel(mode)}
@@ -744,7 +720,7 @@ export function AddSourceWizard({
                     </div>
                   </details>
 
-                  <div className="flex flex-col-reverse gap-2 border-t border-white/8 pt-5 sm:flex-row sm:justify-between">
+                  <div className="flex flex-col-reverse gap-2 border-t border-separator pt-5 sm:flex-row sm:justify-between">
                     <Button type="button" variant="ghost" onClick={() => setStage("platform")}>
                       <ArrowLeft className="h-4 w-4" />
                       Change platform
@@ -754,7 +730,7 @@ export function AddSourceWizard({
                       <ArrowRight className="h-4 w-4" />
                     </Button>
                   </div>
-                  {!canReview ? <p className="text-right text-xs text-slate-500">Check a matching public URL to continue.</p> : null}
+                  {!canReview ? <p className="text-right text-xs text-muted">Check a matching public URL to continue.</p> : null}
                 </div>
               ) : null}
 
@@ -762,11 +738,11 @@ export function AddSourceWizard({
                 <div className="grid gap-6">
                   <div>
                     <Badge tone="cyan">Step 3 of 4</Badge>
-                    <h2 className="mt-3 text-xl font-semibold tracking-tight text-white sm:text-2xl">Review before saving</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">This creates the source only. Secure authorization or installation happens next.</p>
+                    <h2 className="mt-3 text-[22px] font-bold tracking-[-0.025em] text-label sm:text-[26px]">Review before saving</h2>
+                    <p className="mt-2 text-sm leading-6 text-label-secondary">This creates the source only. Secure authorization or installation happens next.</p>
                   </div>
 
-                  <dl className="divide-y divide-white/8 rounded-2xl border border-white/9 bg-white/[0.02] px-4 sm:px-5">
+                  <dl className="divide-y divide-separator rounded-[22px] bg-fill px-4 sm:px-5">
                     {[
                       ["Platform", selectedType.key === "website" ? effectiveType.display_name : selectedType.display_name],
                       ["Public source", appliedDetection?.normalizedUrl ?? inputUrl],
@@ -774,29 +750,29 @@ export function AddSourceWizard({
                       ["Sync schedule", syncModeLabel(syncMode)],
                     ].map(([label, value]) => (
                       <div key={label} className="grid gap-1 py-4 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-                        <dt className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</dt>
-                        <dd className="min-w-0 break-words text-sm text-slate-200">{value}</dd>
+                        <dt className="text-xs font-medium text-muted">{label}</dt>
+                        <dd className="min-w-0 break-words text-sm font-medium text-label">{value}</dd>
                       </div>
                     ))}
                   </dl>
 
                   <div className="grid gap-3 md:grid-cols-2">
-                    <details className="group rounded-2xl border border-white/9 bg-white/[0.02] px-4 py-3">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-slate-200">
+                    <details className="group rounded-[22px] bg-fill px-4 py-3">
+                      <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-label">
                         Setup after saving
-                        <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" />
+                        <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" />
                       </summary>
-                      <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-400">
+                      <div className="mt-3 grid gap-2 text-sm leading-6 text-label-secondary">
                         {(effectiveType.setup_instructions.length > 0
                           ? effectiveType.setup_instructions
                           : ["Open the source detail page to finish setup."]
                         ).map((instruction) => <p key={instruction}>{instruction}</p>)}
                       </div>
                     </details>
-                    <details className="group rounded-2xl border border-white/9 bg-white/[0.02] px-4 py-3">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-slate-200">
+                    <details className="group rounded-[22px] bg-fill px-4 py-3">
+                      <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-label">
                         Available metrics
-                        <span className="flex items-center gap-2 text-xs font-normal text-slate-500">
+                        <span className="flex items-center gap-2 text-xs font-normal text-muted">
                           {effectiveType.supported_metrics.length}
                           <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
                         </span>
@@ -804,19 +780,19 @@ export function AddSourceWizard({
                       <div className="mt-3 flex flex-wrap gap-2">
                         {effectiveType.supported_metrics.length > 0
                           ? effectiveType.supported_metrics.map((metric) => <Badge key={metric} tone="indigo">{metric}</Badge>)
-                          : <span className="text-sm text-slate-500">No production metrics are declared.</span>}
+                          : <span className="text-sm text-muted">No production metrics are declared.</span>}
                       </div>
                     </details>
                   </div>
 
-                  <div className="flex gap-3 rounded-2xl border border-white/9 bg-black/15 p-4">
-                    <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-cyan-200" />
-                    <p className="text-sm leading-6 text-slate-300">
+                  <div className="flex gap-3 rounded-[22px] bg-fill p-4">
+                    <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-positive" />
+                    <p className="text-sm leading-6 text-label-secondary">
                       Credentials are never included in this source record. OAuth and credential values are handled separately through server-side encrypted storage.
                     </p>
                   </div>
 
-                  <div className="flex flex-col-reverse gap-2 border-t border-white/8 pt-5 sm:flex-row sm:justify-between">
+                  <div className="flex flex-col-reverse gap-2 border-t border-separator pt-5 sm:flex-row sm:justify-between">
                     <Button type="button" variant="ghost" onClick={() => setStage("configure")} disabled={saving}>
                       <ArrowLeft className="h-4 w-4" />
                       Back
@@ -832,23 +808,21 @@ export function AddSourceWizard({
               {stage === "complete" && savedSource && savedType ? (
                 <div className="grid gap-6">
                   <div className="flex gap-4">
-                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-emerald-300/20 bg-emerald-400/10 text-emerald-100">
-                      <CheckCircle2 className="h-6 w-6" />
-                    </span>
+                    <IconTile icon={CheckCircle2} tone="positive" size="lg" />
                     <div>
                       <Badge tone="green">Source saved</Badge>
-                      <h2 className="mt-3 text-xl font-semibold tracking-tight text-white sm:text-2xl">Finish connecting {savedSource.display_name}</h2>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">Only the setup needed for this connection is shown below.</p>
+                      <h2 className="mt-3 text-[22px] font-bold tracking-[-0.025em] text-label sm:text-[26px]">Finish connecting {savedSource.display_name}</h2>
+                      <p className="mt-2 text-sm leading-6 text-label-secondary">Only the setup needed for this connection is shown below.</p>
                     </div>
                   </div>
 
                   {savedType.setup_kind === "oauth" ? (
-                    <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/7 p-5 sm:p-6">
+                    <div className="rounded-[22px] bg-tint/8 p-5 sm:p-6">
                       <div className="flex gap-3">
-                        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-cyan-200" />
+                        <PlatformIcon sourceTypeKey={savedType.key} size="lg" />
                         <div>
-                          <h3 className="font-semibold text-white">Continue with official {savedType.display_name} OAuth</h3>
-                          <p className="mt-1 text-sm leading-6 text-slate-300">You will authorize the account on {savedType.display_name}. There are no manual token fields in this flow.</p>
+                          <h3 className="font-semibold text-label">Continue with official {savedType.display_name} OAuth</h3>
+                          <p className="mt-1 text-sm leading-6 text-label-secondary">You will authorize the account on {savedType.display_name}. There are no manual token fields in this flow.</p>
                         </div>
                       </div>
                       <LinkButton
@@ -861,13 +835,13 @@ export function AddSourceWizard({
                       </LinkButton>
                     </div>
                   ) : savedSource.source_type_key === "website" || savedSource.source_type_key === "vercel_web_analytics_drain" ? (
-                    <div className="rounded-2xl border border-white/9 bg-white/[0.02] p-4 sm:p-5">
+                    <div className="rounded-[22px] bg-fill p-4 sm:p-5">
                       <WebsiteSourceSetup source={savedSource} basePath={basePath} />
                     </div>
                   ) : (
-                    <div className="rounded-2xl border border-white/9 bg-white/[0.02] p-4 sm:p-5">
-                      <h3 className="text-sm font-semibold text-white">Choose the production setup</h3>
-                      <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-400">
+                    <div className="rounded-[22px] bg-fill p-4 sm:p-5">
+                      <h3 className="text-sm font-semibold text-label">Choose the production setup</h3>
+                      <div className="mt-3 grid gap-2 text-sm leading-6 text-label-secondary">
                         {(savedType.setup_instructions.length > 0
                           ? savedType.setup_instructions
                           : ["Open the source detail page to finish this connection."]
@@ -877,12 +851,12 @@ export function AddSourceWizard({
                   )}
 
                   {savedType.setup_kind !== "oauth" && (savedType.required_fields.length > 0 || savedType.optional_fields.length > 0) ? (
-                    <details className="group rounded-2xl border border-white/9 bg-white/[0.02] px-4 py-3">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-slate-200">
+                    <details className="group rounded-[22px] bg-fill px-4 py-3">
+                      <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-label">
                         {savedSource.source_type_key === "vercel_web_analytics_drain" ? "Required drain security settings" : "Additional encrypted settings"}
-                        <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" />
+                        <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" />
                       </summary>
-                      <div className="mt-4 border-t border-white/8 pt-4">
+                      <div className="mt-4 border-t border-separator pt-4">
                         <CredentialForm sourceId={savedSource.id} title="Encrypted server-side fields" dataSpaceSlug={dataSpaceSlug} />
                       </div>
                     </details>
@@ -890,7 +864,7 @@ export function AddSourceWizard({
 
                   {syncRunId ? <Badge tone="green" className="w-fit">Initial sync queued: {syncRunId}</Badge> : null}
 
-                  <div className="flex flex-col gap-2 border-t border-white/8 pt-5 sm:flex-row sm:flex-wrap">
+                  <div className="flex flex-col gap-2 border-t border-separator pt-5 sm:flex-row sm:flex-wrap">
                     <LinkButton href={`${basePath}/sources/${savedSource.id}`} variant="primary">
                       <LinkIcon className="h-4 w-4" />
                       Open source detail

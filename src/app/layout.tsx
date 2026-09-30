@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/presentation/components/providers";
+import { themeInitScript } from "@/presentation/theme/theme-constants";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,6 +19,13 @@ export const metadata: Metadata = {
   description: "MoonArq source monitoring for website/Vercel, Supabase, and future connected platforms.",
 };
 
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f1f3f7" },
+    { media: "(prefers-color-scheme: dark)", color: "#08090c" },
+  ],
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -26,9 +34,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col app-bg">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="flex min-h-full flex-col">
         <Providers>{children}</Providers>
       </body>
     </html>

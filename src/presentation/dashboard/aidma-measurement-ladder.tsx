@@ -1,11 +1,11 @@
 import type { InstagramPaidAdsSummary, PaidMetricValue } from "@/aggregation/services/meta-ads-attribution-service";
 
 const stageTone: Record<InstagramPaidAdsSummary["aidma"]["stages"][number]["key"], string> = {
-  attention: "border-cyan-300/20 bg-cyan-300/[0.045] text-cyan-100",
-  interest: "border-sky-300/20 bg-sky-300/[0.045] text-sky-100",
-  desire: "border-fuchsia-300/20 bg-fuchsia-300/[0.045] text-fuchsia-100",
-  memory: "border-violet-300/20 bg-violet-300/[0.045] text-violet-100",
-  action: "border-emerald-300/20 bg-emerald-300/[0.045] text-emerald-100",
+  attention: "bg-tint/14 text-tint-text",
+  interest: "bg-teal-fill/16 text-teal",
+  desire: "bg-pink-fill/14 text-pink",
+  memory: "bg-purple-fill/14 text-purple",
+  action: "bg-positive-fill/16 text-positive",
 };
 
 function formatMetric(metric: PaidMetricValue) {
@@ -46,11 +46,11 @@ function MetricDatum({ label, metric }: { label: string; metric: PaidMetricValue
   const emphasized = metric.state === "ready" || (metric.state === "stale" && metric.value !== null);
 
   return (
-    <div className="min-w-0 border-t border-white/10 py-2 first:border-t-0 first:pt-0 last:pb-0" data-state={metric.state}>
-      <dt className="break-words text-[10px] font-medium uppercase leading-4 tracking-[0.1em] text-slate-400">{label}</dt>
-      <dd className={`mt-0.5 break-words font-semibold tabular-nums ${emphasized ? "text-sm text-white" : "text-xs leading-5 text-amber-100"}`}>
+    <div className="min-w-0 border-t border-separator py-2 first:border-t-0 first:pt-0 last:pb-0" data-state={metric.state}>
+      <dt className="break-words text-[11px] font-medium leading-4 text-label-secondary">{label}</dt>
+      <dd className={`mt-0.5 break-words font-semibold tabular-nums ${emphasized ? "text-sm text-label" : "text-xs leading-5 text-warning"}`}>
         <span>{formatMetric(metric)}</span>
-        {detail ? <span className="mt-0.5 block break-words text-[10px] font-normal leading-4 text-slate-400">{detail}</span> : null}
+        {detail ? <span className="mt-0.5 block break-words text-[11px] font-normal leading-4 text-label-secondary">{detail}</span> : null}
       </dd>
     </div>
   );
@@ -69,36 +69,36 @@ export function AidmaMeasurementLadder({ aidma }: { aidma: InstagramPaidAdsSumma
           <li
             key={stage.key}
             aria-label={`${stage.label} stage`}
-            className="min-w-0 rounded-lg border border-white/10 bg-black/20 p-3"
+            className="min-w-0 rounded-[14px] bg-fill p-3"
             data-aidma-stage={stage.key}
           >
             <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className={`inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md border px-1.5 text-[10px] font-semibold ${stageTone[stage.key]}`}>
+                  <span className={`inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${stageTone[stage.key]}`}>
                     {index + 1}
                   </span>
-                  <h4 className="break-words text-xs font-semibold text-white">{stage.label}</h4>
+                  <h4 className="break-words text-[13px] font-semibold text-label">{stage.label}</h4>
                   {stage.key === "memory" ? (
-                    <span className="rounded border border-violet-300/20 bg-violet-300/[0.06] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-violet-100">
+                    <span className="rounded-full bg-purple-fill/14 px-1.5 py-0.5 text-[10px] font-semibold text-purple">
                       Proxy
                     </span>
                   ) : null}
                 </div>
-                <p className="mt-1 break-words text-[10px] leading-4 text-slate-400">{stage.proxyLabel}</p>
+                <p className="mt-1 break-words text-[11px] leading-4 text-label-secondary">{stage.proxyLabel}</p>
               </div>
-              <span className="min-w-0 max-w-[45%] break-words text-right text-[9px] uppercase leading-4 tracking-[0.08em] text-slate-500">
+              <span className="min-w-0 max-w-[45%] break-words text-right text-[10px] leading-4 text-muted">
                 {stage.sourceLabel}
               </span>
             </div>
 
             <div className="mt-3 min-w-0">
-              <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-400">Count</p>
-              <p className={`mt-1 break-words font-semibold tabular-nums ${stage.count.state === "ready" ? "text-xl text-white" : stage.count.state === "stale" && stage.count.value !== null ? "text-xl text-amber-100" : "text-sm leading-6 text-amber-100"}`}>
+              <p className="text-[11px] font-medium text-label-secondary">Count</p>
+              <p className={`mt-1 break-words font-semibold tabular-nums ${stage.count.state === "ready" ? "text-xl text-label" : stage.count.state === "stale" && stage.count.value !== null ? "text-xl text-warning" : "text-sm leading-6 text-warning"}`}>
                 {formatMetric(stage.count)}
               </p>
               {countDetail ? (
-                <p className="mt-0.5 break-words text-[10px] leading-4 text-slate-400">{countDetail}</p>
+                <p className="mt-0.5 break-words text-[11px] leading-4 text-label-secondary">{countDetail}</p>
               ) : null}
             </div>
 
@@ -109,7 +109,7 @@ export function AidmaMeasurementLadder({ aidma }: { aidma: InstagramPaidAdsSumma
             </dl>
 
             {stage.caveat ? (
-              <p className="mt-3 min-w-0 break-words border-t border-white/10 pt-2 text-[10px] leading-4 text-slate-400">
+              <p className="mt-3 min-w-0 break-words border-t border-separator pt-2 text-[11px] leading-4 text-label-secondary">
                 {stage.caveat}
               </p>
             ) : null}

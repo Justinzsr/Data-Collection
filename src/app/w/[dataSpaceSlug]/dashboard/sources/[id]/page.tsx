@@ -1,5 +1,6 @@
 import { ArrowLeft, Camera, ChevronDown, Clipboard, Megaphone, RadioTower, ShieldAlert, Video, Webhook } from "lucide-react";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import {
   getConnector,
   getCredentialSetupBlockReason,
@@ -19,7 +20,10 @@ import { listCredentialHints } from "@/storage/repositories/credentials-reposito
 import type { JsonRecord } from "@/storage/db/schema";
 import { Badge, statusTone } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
-import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
+import { Callout, GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
+import { PlatformIcon } from "@/presentation/components/ui/platform-icon";
+import { formatRelativeTime } from "@/presentation/components/ui/relative-time";
+import { authorizationState } from "@/presentation/dashboard/connection-health-panel";
 import { SnippetCard } from "@/presentation/dashboard/snippet-card";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
@@ -32,6 +36,15 @@ import { dashboardPath } from "@/presentation/routes/data-space-routes";
 import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
+
+function StateRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-h-11 items-start justify-between gap-4 py-2.5">
+      <dt className="shrink-0 text-[13px] text-muted">{label}</dt>
+      <dd className="min-w-0 break-words text-right text-[13px] font-medium text-label">{children}</dd>
+    </div>
+  );
+}
 
 function tokenStatus(source: { metadata: Record<string, unknown> }) {
   const expiresAt = typeof source.metadata.token_expires_at === "string" ? source.metadata.token_expires_at : null;
@@ -149,9 +162,10 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const isOAuthSource = connector.setupKind === "oauth";
   const canTest = !actionBlockReason && connector.capabilities.canTestConnection;
   const canSync = !actionBlockReason && connector.capabilities.supportsManualSync;
+  const authorization = authorizationState(source);
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-6">
+    <div className="mx-auto grid max-w-7xl gap-5">
       <SectionHeader
         eyebrow={`${dataSpace.display_name} source detail`}
         title={source.display_name}
@@ -170,73 +184,87 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
 
       <div className={`grid gap-5 ${isOAuthSource ? "" : "lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]"}`}>
         <GlassPanel className="p-4 sm:p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-base font-semibold text-white">Connection state</h2>
-            <Badge tone={statusTone(source.status)}>{source.status.replaceAll("_", " ")}</Badge>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <PlatformIcon sourceTypeKey={source.source_type_key} size="lg" />
+              <div className="min-w-0">
+                <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">Connection state</h2>
+                <p className="truncate text-xs text-muted">{connector.displayName}</p>
+              </div>
+            </div>
+            <Badge tone={statusTone(source.status)} dot>{source.status.replaceAll("_", " ")}</Badge>
           </div>
-          <div className="grid gap-3 text-sm text-slate-300">
-            <p>Data space: <span className="text-white">{dataSpace.display_name}</span></p>
-            <p>Platform: <span className="text-white">{connector.displayName}</span></p>
-            <p>Monitored mode: <span className="text-white">{source.source_type_key === "supabase" ? `${dataSpace.display_name} Supabase` : isWebsiteSourceKey(source.source_type_key) ? getWebsiteModeLabel(source) : connector.displayName}</span></p>
-            <p>Sync mode: <span className="text-white">{source.sync_mode.replaceAll("_", " ")}</span></p>
+          <dl className="divide-y divide-separator">
+            <StateRow label="Data space">{dataSpace.display_name}</StateRow>
+            <StateRow label="Platform">{connector.displayName}</StateRow>
+            <StateRow label="Monitored mode">{source.source_type_key === "supabase" ? `${dataSpace.display_name} Supabase` : isWebsiteSourceKey(source.source_type_key) ? getWebsiteModeLabel(source) : connector.displayName}</StateRow>
+            <StateRow label="Sync mode"><span className="capitalize">{source.sync_mode.replaceAll("_", " ")}</span></StateRow>
             {showInstagramOAuth ? (
               <>
-                <p>OAuth: <span className="text-white">{instagramConnected ? "connected" : "not connected"}</span></p>
-                <p>Meta app profile: <span className="text-white">{instagramMetaApp?.label ?? "not selected"}</span></p>
-                <p>Instagram account: <span className="text-white">{typeof source.metadata.instagram_username === "string" ? source.metadata.instagram_username : source.account_name ?? "not resolved"}</span></p>
-                <p>Token expiry: <span className="text-white">{tokenStatus(source)}</span></p>
+                <StateRow label="OAuth">{instagramConnected ? "connected" : "not connected"}</StateRow>
+                <StateRow label="Meta app profile">{instagramMetaApp?.label ?? "not selected"}</StateRow>
+                <StateRow label="Instagram account">{typeof source.metadata.instagram_username === "string" ? source.metadata.instagram_username : source.account_name ?? "not resolved"}</StateRow>
+                <StateRow label="Token expiry">{tokenStatus(source)}</StateRow>
               </>
             ) : null}
             {showMetaAdsOAuth ? (
               <>
-                <p>OAuth: <span className="text-white">{metaAdsAuthorized ? "authorized" : "not connected"}</span></p>
-                <p>Permission: <span className="text-white">ads_read (read only)</span></p>
-                <p>Ad account: <span className="text-white">{metaAdsReady ? metaAdsSource?.account_name ?? selectedMetaAdsAccountId : "not selected"}</span></p>
-                <p>Token expiry: <span className="text-white">{tokenStatus(source)}</span></p>
+                <StateRow label="OAuth">{metaAdsAuthorized ? "authorized" : "not connected"}</StateRow>
+                <StateRow label="Permission">ads_read (read only)</StateRow>
+                <StateRow label="Ad account">{metaAdsReady ? metaAdsSource?.account_name ?? selectedMetaAdsAccountId : "not selected"}</StateRow>
+                <StateRow label="Token expiry">{tokenStatus(source)}</StateRow>
               </>
             ) : null}
             {showTikTokOAuth ? (
               <>
-                <p>OAuth: <span className="text-white">{tiktokConnected ? "connected" : "not connected"}</span></p>
-                <p>TikTok app profile: <span className="text-white">{tiktokOAuth?.label ?? "Default / Auto Lab TikTok app"}</span></p>
-                <p>TikTok account: <span className="text-white">{typeof source.metadata.tiktok_username === "string" ? source.metadata.tiktok_username : typeof source.metadata.tiktok_display_name === "string" ? source.metadata.tiktok_display_name : source.account_name ?? "not resolved"}</span></p>
-                <p>Open ID: <span className="text-white">{typeof source.metadata.tiktok_open_id === "string" ? source.metadata.tiktok_open_id : source.external_account_id ?? "not resolved"}</span></p>
-                <p>Token expiry: <span className="text-white">{tokenStatus(source)}</span></p>
+                <StateRow label="OAuth">{tiktokConnected ? "connected" : "not connected"}</StateRow>
+                <StateRow label="TikTok app profile">{tiktokOAuth?.label ?? "Default / Auto Lab TikTok app"}</StateRow>
+                <StateRow label="TikTok account">{typeof source.metadata.tiktok_username === "string" ? source.metadata.tiktok_username : typeof source.metadata.tiktok_display_name === "string" ? source.metadata.tiktok_display_name : source.account_name ?? "not resolved"}</StateRow>
+                <StateRow label="Open ID"><span className="font-mono text-xs">{typeof source.metadata.tiktok_open_id === "string" ? source.metadata.tiktok_open_id : source.external_account_id ?? "not resolved"}</span></StateRow>
+                <StateRow label="Token expiry">{tokenStatus(source)}</StateRow>
               </>
             ) : null}
-            <p>Last success: <span className="text-white">{formatAppDateTime(source.last_success_at)}</span></p>
-            <p>Next sync: <span className="text-white">{formatAppDateTime(source.next_sync_at, "manual only")}</span></p>
-            <p>Last error: <span className="text-white">{source.last_error ?? "none"}</span></p>
-            {source.webhook_url ? <p className="break-all">Webhook URL: <span className="text-cyan-100">{source.webhook_url}</span></p> : null}
-            {actionBlockReason ? <p className="text-amber-100">{actionBlockReason}</p> : null}
-          </div>
-          <details className="group mt-4 rounded-xl border border-white/10 bg-black/15">
-            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 text-sm font-medium text-slate-300">
-              <span>Supported metrics <span className="text-slate-500">({metricDefinitions.length})</span></span>
-              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            {authorization ? (
+              <StateRow label="Authorization">
+                <Badge tone={authorization.tone}>{authorization.label}</Badge>
+              </StateRow>
+            ) : null}
+            <StateRow label="Last success">
+              {formatAppDateTime(source.last_success_at)}
+              {source.last_success_at ? <span className="block text-xs font-normal text-muted">{formatRelativeTime(source.last_success_at)}</span> : null}
+            </StateRow>
+            <StateRow label="Next sync">{formatAppDateTime(source.next_sync_at, "manual only")}</StateRow>
+            <StateRow label="Last error"><span className={source.last_error ? "text-negative" : undefined}>{source.last_error ?? "none"}</span></StateRow>
+            {source.webhook_url ? <StateRow label="Webhook URL"><span className="break-all font-mono text-xs text-tint-text">{source.webhook_url}</span></StateRow> : null}
+          </dl>
+          {actionBlockReason ? <Callout tone="warning" className="mt-3">{actionBlockReason}</Callout> : null}
+          <details className="group inset-surface mt-4 rounded-[16px]">
+            <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-[16px] px-3.5 text-sm font-semibold text-label transition hover:bg-fill-hover">
+              <span>Supported metrics <span className="font-normal text-muted">({metricDefinitions.length})</span></span>
+              <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
             </summary>
-            <div className="flex flex-wrap gap-2 border-t border-white/10 p-3">
+            <div className="flex flex-wrap gap-2 border-t border-separator p-3">
               {metricDefinitions.map((metric) => (
-                <Badge key={metric.key} tone="indigo">{metric.key}</Badge>
+                <Badge key={metric.key} tone="indigo" className="font-mono font-medium">{metric.key}</Badge>
               ))}
             </div>
           </details>
-          {operationBlockReason ? <p className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.07] p-3 text-sm leading-6 text-amber-100">{operationBlockReason}</p> : null}
+          {operationBlockReason ? <Callout tone="warning" className="mt-4">{operationBlockReason}</Callout> : null}
         </GlassPanel>
 
         {!isOAuthSource && connector.availability === "live" ? (
-          <details className="group glass rounded-2xl">
-            <summary className="flex cursor-pointer items-center justify-between gap-4 p-4 transition hover:bg-white/[0.025] sm:p-5">
+          <details className="group glass self-start rounded-3xl">
+            <summary className="flex cursor-pointer items-center justify-between gap-4 rounded-3xl p-4 transition hover:bg-fill sm:p-5">
               <div>
-                <h2 className="text-base font-semibold text-white">Credentials and connection settings</h2>
-                <p className="mt-1 text-sm text-slate-500">Encrypted server-side. Expand only when changing this connection.</p>
+                <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">Credentials and connection settings</h2>
+                <p className="mt-1 text-sm text-muted">Encrypted server-side. Expand only when changing this connection.</p>
               </div>
-              <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+              <ChevronDown className="h-5 w-5 shrink-0 text-muted transition group-open:rotate-180" aria-hidden="true" />
             </summary>
-            <div className="border-t border-white/10 p-4 sm:p-5">
+            <div className="border-t border-separator p-4 sm:p-5">
               <CredentialForm sourceId={source.id} title="Credentials and settings" dataSpaceSlug={dataSpace.slug} />
               {credentials.length > 0 ? (
-                <p className="mt-4 text-xs text-slate-500">Saved hints: {credentials.map((item) => `${item.field_key} ${item.value_hint ?? "saved"}`).join(", ")}</p>
+                <p className="mt-4 text-xs text-muted">Saved hints: {credentials.map((item) => `${item.field_key} ${item.value_hint ?? "saved"}`).join(", ")}</p>
               ) : null}
             </div>
           </details>
@@ -247,44 +275,44 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
         <GlassPanel className="p-4 sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="mb-2 flex items-center gap-2 text-base font-semibold text-white">
-                <Camera className="h-4 w-4 text-cyan-200" />
+              <div className="mb-2 flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.018em] text-label">
+                <PlatformIcon sourceTypeKey="instagram" size="sm" />
                 Instagram OAuth
               </div>
-              <p className="text-sm leading-6 text-slate-300">
+              <p className="text-sm leading-6 text-label-secondary">
                 Connects this {dataSpace.display_name} Instagram source through the official Meta Graph API. Tokens stay encrypted server-side and are stored only for this source.
               </p>
             </div>
-            <Badge tone={instagramConnected ? "green" : "amber"}>{instagramConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
+            <Badge tone={instagramConnected ? "green" : "amber"} dot>{instagramConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
           </div>
-          <details className="group mt-4 rounded-xl border border-white/10 bg-black/15">
-            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 text-sm font-medium text-slate-300">
+          <details className="group mt-4 rounded-[16px] border border-separator">
+            <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-[16px] px-3.5 text-sm font-semibold text-label transition hover:bg-fill">
               OAuth account and app details
-              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+              <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
             </summary>
-          <div className="grid gap-3 border-t border-white/10 p-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Expected account</p>
-              <p className="mt-2 text-white">{expectedInstagramCopy(source)}</p>
+          <div className="grid gap-3 border-t border-separator p-3 text-sm text-label-secondary md:grid-cols-2 xl:grid-cols-4">
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">Expected account</p>
+              <p className="mt-2 text-label">{expectedInstagramCopy(source)}</p>
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Meta app profile</p>
-              <p className="mt-2 text-white">{instagramMetaApp?.label ?? "Default Meta app"}</p>
-              <p className="mt-1 text-xs text-slate-500">{instagramMetaApp ? `${instagramMetaApp.appIdEnvKey} ${instagramMetaApp.appIdConfigured ? "configured" : "not configured"}` : "Server-side only"}</p>
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">Meta app profile</p>
+              <p className="mt-2 text-label">{instagramMetaApp?.label ?? "Default Meta app"}</p>
+              <p className="mt-1 text-xs text-muted">{instagramMetaApp ? `${instagramMetaApp.appIdEnvKey} ${instagramMetaApp.appIdConfigured ? "configured" : "not configured"}` : "Server-side only"}</p>
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Graph API</p>
-              <p className="mt-2 text-white">{typeof source.metadata.graph_api_version === "string" ? source.metadata.graph_api_version : instagramMetaApp?.graphApiVersion ?? "v25.0"}</p>
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">Graph API</p>
+              <p className="mt-2 text-label">{typeof source.metadata.graph_api_version === "string" ? source.metadata.graph_api_version : instagramMetaApp?.graphApiVersion ?? "v25.0"}</p>
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Token</p>
-              <p className="mt-2 text-white">{tokenStatus(source)}</p>
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">Token</p>
+              <p className="mt-2 text-label">{tokenStatus(source)}</p>
             </div>
           </div>
           </details>
           <div className="mt-4 flex flex-wrap gap-2">
             {!operationBlockReason ? (
-              <LinkButton href={instagramOAuthHref} variant="primary">
+              <LinkButton href={instagramOAuthHref} variant={instagramConnected ? "secondary" : "primary"}>
                 <Camera className="h-4 w-4" />
                 {instagramConnected ? "Reconnect Instagram" : "Connect Instagram"}
               </LinkButton>
@@ -299,45 +327,45 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
         <GlassPanel className="overflow-hidden p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="mb-2 flex items-center gap-2 text-base font-semibold text-white">
-                <Megaphone className="h-4 w-4 text-cyan-200" aria-hidden="true" />
+              <div className="mb-2 flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.018em] text-label">
+                <PlatformIcon sourceTypeKey="meta_ads" size="sm" />
                 Meta Ads + first Story attribution
               </div>
-              <p className="max-w-4xl text-sm leading-6 text-slate-300">
+              <p className="max-w-4xl text-sm leading-6 text-label-secondary">
                 Read-only Marketing API delivery data is joined to first-party website UTMs and Shopify order attribution. OAuth tokens stay encrypted server-side.
               </p>
             </div>
-            <Badge tone={metaAdsHealthy ? "green" : "amber"}>
+            <Badge tone={metaAdsHealthy ? "green" : "amber"} dot>
               {metaAdsHealthy ? "Ready to sync" : metaAdsReady ? "Connected · needs attention" : metaAdsAuthorized ? "Select ad account" : "Needs OAuth"}
             </Badge>
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="min-w-0 rounded-xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Permission</p>
-              <p className="mt-2 text-sm font-medium text-white">ads_read + existing read scopes</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">Reuses Instagram/Page read-only scopes; no ad editing or publishing permission.</p>
+            <div className="inset-surface min-w-0 p-3">
+              <p className="text-xs text-muted">Permission</p>
+              <p className="mt-2 text-sm font-medium text-label">ads_read + existing read scopes</p>
+              <p className="mt-1 text-xs leading-5 text-muted">Reuses Instagram/Page read-only scopes; no ad editing or publishing permission.</p>
             </div>
-            <div className="min-w-0 rounded-xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Ad account</p>
-              <p className="mt-2 truncate text-sm font-medium text-white">
+            <div className="inset-surface min-w-0 p-3">
+              <p className="text-xs text-muted">Ad account</p>
+              <p className="mt-2 truncate text-sm font-medium text-label">
                 {metaAdsReady ? metaAdsSource?.account_name ?? selectedMetaAdsAccountId : metaAdsAuthorized ? "Selection required" : "Not connected"}
               </p>
-              {metaAdsReady && selectedMetaAdsAccountId ? <p className="mt-1 break-all font-mono text-xs text-slate-500">{selectedMetaAdsAccountId}</p> : null}
+              {metaAdsReady && selectedMetaAdsAccountId ? <p className="mt-1 break-all font-mono text-xs text-muted">{selectedMetaAdsAccountId}</p> : null}
             </div>
-            <div className="min-w-0 rounded-xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Tracked campaign</p>
-              <p className="mt-2 break-words text-sm font-medium text-white">{MOONARQ_FIRST_STORY_UTM_TAGS.utm_campaign}</p>
-              <p className="mt-1 break-words text-xs leading-5 text-slate-500">
+            <div className="inset-surface min-w-0 p-3">
+              <p className="text-xs text-muted">Tracked campaign</p>
+              <p className="mt-2 break-words text-sm font-medium text-label">{MOONARQ_FIRST_STORY_UTM_TAGS.utm_campaign}</p>
+              <p className="mt-1 break-words text-xs leading-5 text-muted">
                 {MOONARQ_FIRST_STORY_UTM_TAGS.utm_source} · {MOONARQ_FIRST_STORY_UTM_TAGS.utm_medium} · {MOONARQ_FIRST_STORY_UTM_TAGS.utm_content}
               </p>
             </div>
-            <div className="min-w-0 rounded-xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Connection</p>
-              <p className="mt-2 text-sm font-medium text-white">
+            <div className="inset-surface min-w-0 p-3">
+              <p className="text-xs text-muted">Connection</p>
+              <p className="mt-2 text-sm font-medium text-label">
                 {metaAdsAuthorized ? "OAuth authorized" : "Waiting for authorization"}
               </p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">
+              <p className="mt-1 text-xs leading-5 text-muted">
                 {metaAdsCandidates.length > 0 ? `${metaAdsCandidates.length} available ad account${metaAdsCandidates.length === 1 ? "" : "s"}` : "No account list saved yet"}
               </p>
             </div>
@@ -353,12 +381,12 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           ) : null}
 
           {!linkedInstagramSource ? (
-            <p className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.07] p-3 text-sm leading-6 text-amber-100">
+            <p className="mt-4 rounded-2xl bg-warning-fill/10 p-3.5 text-sm leading-6 text-warning">
               This Meta Ads source is not linked to an Instagram source in this data space. Open the Instagram source and start Meta Ads OAuth there.
             </p>
           ) : null}
           {metaAdsActionBlockReason && metaAdsSource && !metaAdsReady ? (
-            <p className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.07] p-3 text-sm leading-6 text-amber-100">
+            <p className="mt-4 rounded-2xl bg-warning-fill/10 p-3.5 text-sm leading-6 text-warning">
               {metaAdsActionBlockReason}
             </p>
           ) : null}
@@ -390,49 +418,49 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
         <GlassPanel className="p-4 sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="mb-2 flex items-center gap-2 text-base font-semibold text-white">
-                <Video className="h-4 w-4 text-cyan-200" />
+              <div className="mb-2 flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.018em] text-label">
+                <PlatformIcon sourceTypeKey="tiktok" size="sm" />
                 TikTok OAuth
               </div>
-              <p className="text-sm leading-6 text-slate-300">
+              <p className="text-sm leading-6 text-label-secondary">
                 Connects this {dataSpace.display_name} source through TikTok Login Kit and official TikTok APIs. Tokens stay encrypted server-side and are stored only for this source.
               </p>
             </div>
-            <Badge tone={tiktokConnected ? "green" : "amber"}>{tiktokConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
+            <Badge tone={tiktokConnected ? "green" : "amber"} dot>{tiktokConnected ? "OAuth connected" : "Needs OAuth"}</Badge>
           </div>
-          <details className="group mt-4 rounded-xl border border-white/10 bg-black/15">
-            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3 text-sm font-medium text-slate-300">
+          <details className="group mt-4 rounded-[16px] border border-separator">
+            <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-[16px] px-3.5 text-sm font-semibold text-label transition hover:bg-fill">
               OAuth account and app details
-              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+              <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
             </summary>
-          <div className="grid gap-3 border-t border-white/10 p-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Scope</p>
-              <p className="mt-2 text-white">{dataSpace.display_name}</p>
-              <p className="mt-1 text-xs text-slate-500">Data stays scoped to this source and workspace.</p>
+          <div className="grid gap-3 border-t border-separator p-3 text-sm text-label-secondary md:grid-cols-2 xl:grid-cols-4">
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">Scope</p>
+              <p className="mt-2 text-label">{dataSpace.display_name}</p>
+              <p className="mt-1 text-xs text-muted">Data stays scoped to this source and workspace.</p>
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">TikTok app</p>
-              <p className="mt-2 text-white">{tiktokOAuth?.label ?? "Default / Auto Lab TikTok app"}</p>
-              <p className="mt-1 text-xs text-slate-500">{tiktokOAuth ? `${tiktokOAuth.clientKeyEnvKey} ${tiktokOAuth.clientKeyConfigured ? "configured" : "not configured"}` : "Server-side only"}</p>
-              {tiktokOAuth?.usesDefaultFallback ? <p className="mt-1 text-xs text-amber-100">MoonArq-specific TikTok env vars are not configured; using default profile.</p> : null}
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">TikTok app</p>
+              <p className="mt-2 text-label">{tiktokOAuth?.label ?? "Default / Auto Lab TikTok app"}</p>
+              <p className="mt-1 text-xs text-muted">{tiktokOAuth ? `${tiktokOAuth.clientKeyEnvKey} ${tiktokOAuth.clientKeyConfigured ? "configured" : "not configured"}` : "Server-side only"}</p>
+              {tiktokOAuth?.usesDefaultFallback ? <p className="mt-1 text-xs text-warning">MoonArq-specific TikTok env vars are not configured; using default profile.</p> : null}
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Granted scopes</p>
-              <p className="mt-2 break-words text-white">{typeof source.metadata.tiktok_scopes === "string" ? source.metadata.tiktok_scopes : "Waiting for OAuth"}</p>
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">Granted scopes</p>
+              <p className="mt-2 break-words text-label">{typeof source.metadata.tiktok_scopes === "string" ? source.metadata.tiktok_scopes : "Waiting for OAuth"}</p>
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Token</p>
-              <p className="mt-2 text-white">{tokenStatus(source)}</p>
+            <div className="inset-surface p-3">
+              <p className="text-xs text-muted">Token</p>
+              <p className="mt-2 text-label">{tokenStatus(source)}</p>
             </div>
           </div>
           </details>
-          <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm leading-6 text-amber-50/85">
+          <Callout tone="warning" className="mt-4" icon={<ShieldAlert className="h-4 w-4" />}>
             TikTok data must come through official OAuth/API permissions. Do not enter TikTok passwords, do not scrape dashboards, and do not paste tokens in chat.
-          </div>
+          </Callout>
           <div className="mt-4 flex flex-wrap gap-2">
             {!operationBlockReason ? (
-              <LinkButton href={tiktokOAuthHref} variant="primary">
+              <LinkButton href={tiktokOAuthHref} variant={tiktokConnected ? "secondary" : "primary"}>
                 <Video className="h-4 w-4" />
                 {tiktokConnected ? "Reconnect TikTok" : "Connect TikTok"}
               </LinkButton>
@@ -443,38 +471,34 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
         </GlassPanel>
       ) : null}
 
-      <details className="group glass rounded-2xl">
-        <summary className="flex cursor-pointer items-center justify-between gap-4 p-4 transition hover:bg-white/[0.025] sm:p-5">
+      <details className="group glass rounded-3xl">
+        <summary className="flex cursor-pointer items-center justify-between gap-4 rounded-3xl p-4 transition hover:bg-fill sm:p-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/70">Technical setup</p>
-            <h2 className="mt-1 text-base font-semibold text-white">Instructions, endpoints, and code snippets</h2>
-            <p className="mt-1 text-sm text-slate-500">Expand when installing or troubleshooting this source.</p>
+            <p className="eyebrow">Technical setup</p>
+            <h2 className="mt-1 text-[17px] font-semibold tracking-[-0.018em] text-label">Instructions, endpoints, and code snippets</h2>
+            <p className="mt-1 text-sm text-muted">Expand when installing or troubleshooting this source.</p>
           </div>
-          <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+          <ChevronDown className="h-5 w-5 shrink-0 text-muted transition group-open:rotate-180" aria-hidden="true" />
         </summary>
-        <div className="grid gap-5 border-t border-white/10 p-4 sm:p-5">
-      <GlassPanel className="p-4 sm:p-5">
+        <div className="grid gap-5 border-t border-separator p-4 sm:p-5">
+      <div className="inset-surface rounded-[18px] p-4 sm:p-5">
         <div className="mb-4 flex items-center gap-2">
-          <RadioTower className="h-4 w-4 text-cyan-200" />
-          <h2 className="text-base font-semibold text-white">Setup instructions</h2>
+          <RadioTower className="h-4 w-4 text-tint-text" />
+          <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">Setup instructions</h2>
         </div>
         {publicAppUrlWarning ? (
-          <div className="mb-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3 text-sm text-amber-100">
-            <div className="mb-1 flex items-center gap-2 font-medium">
-              <ShieldAlert className="h-4 w-4" />
-              Public app URL warning
-            </div>
+          <Callout tone="warning" className="mb-4" title="Public app URL warning" icon={<ShieldAlert className="h-4 w-4" />}>
             {publicAppUrlWarning}
-          </div>
+          </Callout>
         ) : null}
-        <div className="grid gap-3">
+        <div className="grid grid-cols-1 gap-3">
           {setup.map((item, index) => (
-            <div key={`${index}-${item.slice(0, 24)}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-3 text-sm leading-6 text-slate-300">
-              {item.length > 700 ? <pre className="code-scroll text-xs leading-5 text-cyan-50">{item}</pre> : item}
+            <div key={`${index}-${item.slice(0, 24)}`} className="rounded-[14px] bg-fill-strong p-3.5 text-sm leading-6 text-label-secondary">
+              {item.length > 700 ? <pre className="code-scroll text-xs leading-5 text-label">{item}</pre> : item}
             </div>
           ))}
         </div>
-      </GlassPanel>
+      </div>
 
       {source.source_type_key === "website" ? (
         <div className="grid gap-5 xl:grid-cols-2">
@@ -482,23 +506,23 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           <SnippetCard title="React / Next.js helper" description="Use usePageViewTracking() and trackEvent(name, properties) with the v1 event contract inside a Next app." code={generateReactHelper({ endpoint, publicTrackingKey: trackingKey, sourceId: source.id })} />
         </div>
       ) : source.source_type_key === "vercel_web_analytics_drain" ? (
-        <GlassPanel className="p-4 sm:p-5">
-          <div className="mb-4 flex items-center gap-2 text-base font-semibold text-white">
-            <Webhook className="h-4 w-4 text-cyan-200" />
+        <div className="inset-surface rounded-[18px] p-4 sm:p-5">
+          <div className="mb-4 flex items-center gap-2 text-[17px] font-semibold tracking-[-0.018em] text-label">
+            <Webhook className="h-4 w-4 text-tint-text" />
             Vercel Drain endpoint
           </div>
-          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Vercel drain URL</p>
-            <p className="mt-2 break-all font-mono text-xs text-cyan-50">{`${publicAppUrl ?? "http://localhost:4000"}${source.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${source.id}`}`}</p>
+          <div className="rounded-[14px] bg-fill-strong p-3">
+            <p className="text-xs font-medium text-muted">Vercel drain URL</p>
+            <p className="mt-2 break-all font-mono text-xs text-label">{`${publicAppUrl ?? "http://localhost:4000"}${source.webhook_url ?? `/api/webhooks/vercel/analytics-drain/${source.id}`}`}</p>
           </div>
-        </GlassPanel>
+        </div>
       ) : (
-        <GlassPanel className="p-4 sm:p-5">
-          <div className="flex items-center gap-2 text-sm text-slate-300">
-            <Clipboard className="h-4 w-4 text-cyan-200" />
+        <div className="inset-surface rounded-[18px] p-4 sm:p-5">
+          <div className="flex items-center gap-2 text-sm text-label-secondary">
+            <Clipboard className="h-4 w-4 text-tint-text" />
             Tracking snippets are only shown for Website Tracker sources. Official API setup lives in the instructions above.
           </div>
-        </GlassPanel>
+        </div>
       )}
         </div>
       </details>

@@ -1,6 +1,8 @@
 import type { DataSpace } from "@/storage/db/schema";
+import { AppToolbar } from "@/presentation/layout/app-toolbar";
+import { CommandPalette } from "@/presentation/layout/command-palette";
 import { DesktopSidebar } from "@/presentation/layout/desktop-sidebar";
-import { MobileNav } from "@/presentation/layout/mobile-nav";
+import { MobileTabBar } from "@/presentation/layout/mobile-tab-bar";
 
 export function DashboardShell({
   children,
@@ -13,24 +15,15 @@ export function DashboardShell({
 }) {
   return (
     <div className="relative min-h-screen">
-      <div className="grid-bg pointer-events-none absolute inset-0" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-[1800px]">
         <DesktopSidebar dataSpace={dataSpace} dataSpaces={dataSpaces} />
         <div className="min-w-0 flex-1">
-          <header className="sticky top-0 z-40 flex min-h-14 items-center justify-between gap-4 border-b border-white/10 bg-[#070a0f]/88 px-4 py-2 backdrop-blur-xl sm:px-6 lg:px-8">
-            <div className="flex min-w-0 items-baseline gap-3">
-              <p className="truncate text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/75">
-                {dataSpace?.display_name ?? "MoonArq"} workspace
-              </p>
-              <p className="hidden truncate text-xs text-slate-500 xl:block">
-                Source monitoring, sync health, and official ingestion paths
-              </p>
-            </div>
-            <MobileNav currentDataSpace={dataSpace} dataSpaces={dataSpaces} />
-          </header>
-          <main className="px-4 py-4 sm:px-6 lg:px-8">{children}</main>
+          <AppToolbar dataSpace={dataSpace} dataSpaces={dataSpaces} />
+          <main className="px-3 pb-32 pt-4 sm:px-5 lg:px-6 lg:pb-12">{children}</main>
         </div>
       </div>
+      <MobileTabBar dataSpaceSlug={dataSpace?.slug ?? "moonarq"} />
+      <CommandPalette key={dataSpace?.slug ?? "moonarq"} dataSpace={dataSpace} dataSpaces={dataSpaces} />
     </div>
   );
 }

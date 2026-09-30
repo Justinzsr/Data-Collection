@@ -42,7 +42,7 @@ export default async function CommercePage({ params }: { params: Promise<{ dataS
           <Badge tone="cyan">server encrypted</Badge>
           <Badge tone="slate">60-day rolling window</Badge>
         </div>
-        <p className="mt-3 text-sm leading-6 text-slate-300">
+        <p className="mt-3 text-sm leading-6 text-label-secondary">
           MoonArq requests order totals and line-item names and quantities only. It does not request customer names,
           email addresses, phone numbers, addresses, IP data, notes, or payment details. Test orders are excluded, and
           every sync recomputes store-local daily totals so retries do not double count.

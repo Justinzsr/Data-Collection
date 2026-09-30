@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Download, FileText, RefreshCcw } from "lucide-react";
+import { ChevronRight, Download, FileText, RefreshCcw } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getDailyReport, listDailyReports } from "@/aggregation/services/daily-report-service";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
@@ -7,6 +7,7 @@ import { addDaysToDateKey, dateKeyInAppTimeZone, formatAppDate, normalizeDateOnl
 import { Badge } from "@/presentation/components/ui/badge";
 import { Button, LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
+import { IconTile } from "@/presentation/components/ui/platform-icon";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export default async function DailyReportPage({
   }
 
   return (
-    <div className="mx-auto grid max-w-[1500px] gap-6">
+    <div className="mx-auto grid max-w-[1500px] gap-5">
       <SectionHeader
         eyebrow="Daily Morning Report"
         title={`${dataSpace.display_name} Daily Report`}
@@ -71,16 +72,14 @@ export default async function DailyReportPage({
           <GlassPanel className="p-4 sm:p-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
-                <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10">
-                  <FileText className="h-5 w-5 text-cyan-100" />
-                </span>
+                <IconTile icon={FileText} tone="tint" size="lg" />
                 <div>
-                  <p className="text-sm text-slate-500">Generated {report.run.generated_at_pt}</p>
-                  <h2 className="mt-1 text-xl font-semibold text-white">Yesterday, {report.run.report_date_pt}</h2>
-                  <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">{report.run.summary}</p>
+                  <p className="text-sm text-muted">Generated {report.run.generated_at_pt}</p>
+                  <h2 className="mt-1 text-[20px] font-semibold tracking-[-0.022em] text-label">Yesterday, {report.run.report_date_pt}</h2>
+                  <p className="mt-2 max-w-4xl text-sm leading-6 text-label-secondary">{report.run.summary}</p>
                 </div>
               </div>
-              <Badge tone={report.run.health_status === "healthy" ? "green" : report.run.health_status === "empty" ? "slate" : "amber"}>{report.run.health_status}</Badge>
+              <Badge tone={report.run.health_status === "healthy" ? "green" : report.run.health_status === "empty" ? "slate" : "amber"} dot>{report.run.health_status}</Badge>
             </div>
           </GlassPanel>
 
@@ -88,15 +87,15 @@ export default async function DailyReportPage({
             {report.sections.map((section) => (
               <GlassPanel key={section.id} className="p-4 sm:p-5">
                 <div className="mb-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/75">{section.section_key.replaceAll("_", " ")}</p>
-                  <h2 className="mt-1 text-lg font-semibold text-white">{section.title}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{section.summary}</p>
+                  <p className="eyebrow">{section.section_key.replaceAll("_", " ")}</p>
+                  <h2 className="mt-1 text-[17px] font-semibold tracking-[-0.018em] text-label">{section.title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-label-secondary">{section.summary}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {(metricsBySection.get(section.section_key) ?? []).map((metric) => (
-                    <div key={metric.id} className="rounded-lg border border-white/10 bg-black/20 p-3">
-                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">{metric.label}</p>
-                      <p className="mt-1 break-words text-lg font-semibold text-slate-100">{displayMetric(metric.value, metric.text_value, metric.unit)}</p>
+                    <div key={metric.id} className="inset-surface p-3">
+                      <p className="text-xs font-medium text-muted">{metric.label}</p>
+                      <p className="tabular mt-1 break-words text-[19px] font-semibold tracking-[-0.02em] text-label">{displayMetric(metric.value, metric.text_value, metric.unit)}</p>
                     </div>
                   ))}
                 </div>
@@ -106,8 +105,9 @@ export default async function DailyReportPage({
         </>
       ) : (
         <GlassPanel className="p-6">
-          <h2 className="text-xl font-semibold text-white">No report generated for this PT date yet</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+          <IconTile icon={FileText} tone="neutral" size="lg" className="mb-4" />
+          <h2 className="text-[20px] font-semibold tracking-[-0.022em] text-label">No report generated for this PT date yet</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-label-secondary">
             Generate yesterday&apos;s report when you want a fixed, reviewable snapshot. The generator is idempotent per data space and date.
           </p>
         </GlassPanel>
@@ -115,15 +115,18 @@ export default async function DailyReportPage({
 
       <GlassPanel className="p-4 sm:p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="font-semibold text-white">Recent reports</h2>
+          <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">Recent reports</h2>
           <LinkButton href={`${basePath}/data`} variant="secondary">Source Data Explorer</LinkButton>
         </div>
-        <div className="grid gap-2">
-          {reports.length === 0 ? <p className="text-sm text-slate-500">No historical reports yet.</p> : null}
+        <div className="grid grid-cols-1 gap-2">
+          {reports.length === 0 ? <p className="text-sm text-muted">No historical reports yet.</p> : null}
           {reports.map((item) => (
-            <Link key={item.id} href={`${basePath}/reports/daily?date=${item.report_date}`} className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-3 transition hover:bg-white/[0.06] sm:flex-row sm:items-center sm:justify-between">
-              <span className="font-medium text-white">{item.report_date_pt}</span>
-              <span className="text-sm text-slate-500">{item.summary}</span>
+            <Link key={item.id} href={`${basePath}/reports/daily?date=${item.report_date}`} className="group flex min-h-12 items-center gap-3 rounded-2xl px-3 py-2.5 transition hover:bg-fill-hover">
+              <span className="min-w-0 flex-1 sm:flex sm:items-center sm:justify-between sm:gap-4">
+                <span className="block font-semibold text-label">{item.report_date_pt}</span>
+                <span className="block truncate text-sm text-muted">{item.summary}</span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-label-quaternary transition group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>
           ))}
         </div>

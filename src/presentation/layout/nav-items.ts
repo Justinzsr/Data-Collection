@@ -84,3 +84,29 @@ export function findActiveNavHref(pathname: string, items: DashboardNavItem[]) {
 }
 
 export const navItems = getNavItems("moonarq");
+
+const pageLabelOverrides: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\/sources\/new(?:\/|$)/u, label: "Add Source" },
+  { pattern: /\/sources\/[^/]+$/u, label: "Source detail" },
+  { pattern: /\/supabase\/email-marketing(?:\/|$)/u, label: "Email Marketing" },
+];
+
+/** Human label for the current dashboard page, used by the toolbar breadcrumb. */
+export function getPageLabel(pathname: string, dataSpaceSlug = "moonarq") {
+  for (const override of pageLabelOverrides) {
+    if (override.pattern.test(pathname)) return override.label;
+  }
+  const items = getNavItems(dataSpaceSlug);
+  const activeHref = findActiveNavHref(pathname, items);
+  return items.find((item) => item.href === activeHref)?.label ?? "Overview";
+}
+
+/** Primary destinations for the floating mobile tab bar. */
+export function getMobileTabItems(dataSpaceSlug = "moonarq"): DashboardNavItem[] {
+  return [
+    { href: dashboardPath(dataSpaceSlug), label: "Overview", icon: Gauge },
+    { href: dashboardPath(dataSpaceSlug, "/sources"), label: "Sources", icon: DatabaseZap },
+    { href: dashboardPath(dataSpaceSlug, "/sync"), label: "Sync", icon: RadioTower },
+    { href: dashboardPath(dataSpaceSlug, "/data"), label: "Data", icon: TableProperties },
+  ];
+}

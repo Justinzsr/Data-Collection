@@ -67,7 +67,14 @@ export function resolveComparisonDisplay({
 }
 
 export function comparisonToneClass(tone: ComparisonDisplayState["tone"]) {
-  if (tone === "positive") return "text-emerald-200";
-  if (tone === "negative") return "text-rose-200";
+  if (tone === "positive") return "text-positive";
+  if (tone === "negative") return "text-negative";
   return "text-[var(--muted)]";
+}
+
+/** Capsule treatment for a comparison label (text tone + tinted fill). */
+export function comparisonChipClass(tone: ComparisonDisplayState["tone"]) {
+  if (tone === "positive") return "bg-positive-fill/15 text-positive";
+  if (tone === "negative") return "bg-negative-fill/12 text-negative";
+  return "bg-fill-strong text-[var(--muted)]";
 }

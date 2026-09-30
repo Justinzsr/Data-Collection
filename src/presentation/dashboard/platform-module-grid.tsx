@@ -6,10 +6,10 @@ export function PlatformModuleGrid({ modules, basePath, dataSpaceSlug }: { modul
     <section className="grid gap-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Platform modules</p>
-          <h2 className="mt-1 text-xl font-semibold text-white">Connected platform command grid</h2>
+          <p className="eyebrow">Platform modules</p>
+          <h2 className="mt-1 text-[20px] font-semibold tracking-[-0.022em] text-label">Connected platform command grid</h2>
         </div>
-        <p className="max-w-2xl text-sm leading-6 text-slate-400">
+        <p className="max-w-2xl text-sm leading-6 text-label-secondary">
           Each card is a source module with sync state, setup health, primary metrics, and a mini signal graph.
         </p>
       </div>

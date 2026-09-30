@@ -89,13 +89,13 @@ export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug 
   }
 
   if (loading) {
-    return <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">Loading credential fields...</div>;
+    return <div className="rounded-xl bg-fill p-4 text-sm text-label-secondary">Loading credential fields...</div>;
   }
 
   if (fields.length === 0) {
     return (
-      <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/8 p-4 text-sm leading-6 text-cyan-50">
-        <div className="mb-2 flex items-center gap-2 font-medium">
+      <div className="rounded-2xl bg-positive-fill/10 p-4 text-sm leading-6 text-label-secondary">
+        <div className="mb-1 flex items-center gap-2 font-semibold text-positive">
           <Check className="h-4 w-4" />
           No API credentials required
         </div>
@@ -107,24 +107,24 @@ export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug 
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
-          <KeyRound className="h-4 w-4 text-cyan-200" />
+        <h3 className="flex items-center gap-2 text-[15px] font-semibold text-label">
+          <KeyRound className="h-4 w-4 text-tint" />
           {title}
         </h3>
-        <Badge tone="amber">server-side</Badge>
+        <Badge tone="slate">Encrypted server-side</Badge>
       </div>
       <div className="grid gap-3">
         {fields.map((field) => {
           const savedItem = savedByKey.get(field.key);
           return (
-            <label key={field.key} className="grid gap-2 rounded-lg border border-white/10 bg-black/20 p-3">
+            <label key={field.key} className="grid gap-2 rounded-2xl bg-fill p-3.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-medium text-slate-100">
-                  {field.label} {field.required ? <span className="text-amber-200">*</span> : null}
+                <span className="text-sm font-medium text-label">
+                  {field.label} {field.required ? <span className="text-warning">*</span> : null}
                 </span>
-                {savedItem ? <Badge tone="green">{savedItem.value_hint ?? "saved"}</Badge> : <Badge tone={field.required ? "amber" : "slate"}>{field.required ? "required" : "optional"}</Badge>}
+                {savedItem ? <Badge tone="green" dot className="font-mono">{savedItem.value_hint ?? "saved"}</Badge> : <Badge tone={field.required ? "amber" : "slate"}>{field.required ? "required" : "optional"}</Badge>}
               </div>
-              <span className="text-xs leading-5 text-slate-500">{field.description}</span>
+              <span className="text-xs leading-5 text-muted">{field.description}</span>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
                   aria-label={field.label}
@@ -132,7 +132,7 @@ export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug 
                   value={values[field.key] ?? ""}
                   onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
                   placeholder={savedItem ? "Leave blank to keep existing value" : field.placeholder ?? field.label}
-                  className="min-h-10 min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm text-white outline-none ring-cyan-300/30 transition placeholder:text-slate-600 focus:ring-2"
+                  className="field min-h-11 min-w-0 flex-1 bg-[var(--glass-strong)] hover:bg-[var(--glass-strong)]"
                 />
                 {savedItem ? (
                   <Button type="button" variant="danger" className="px-3" onClick={() => remove(field.key)} aria-label={`Delete ${field.label}`}>

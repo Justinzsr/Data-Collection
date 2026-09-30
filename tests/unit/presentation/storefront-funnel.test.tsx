@@ -143,12 +143,12 @@ describe("StorefrontFunnel", () => {
       expect.objectContaining({
         kind: "negative",
         label: "-12.3% vs previous",
-        className: expect.stringContaining("text-rose-200"),
+        className: expect.stringContaining("text-negative"),
       }),
       expect.objectContaining({
         kind: "positive",
         label: "+12.3% vs previous",
-        className: expect.stringContaining("text-emerald-200"),
+        className: expect.stringContaining("text-positive"),
       }),
     ]);
   });

@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Gauge, Menu, MoonStar, ShieldCheck, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown, Menu, ShieldCheck, X } from "lucide-react";
 import { cn } from "@/presentation/components/ui/utils";
+import { workspaceTarget } from "@/presentation/layout/data-space-switcher";
 import {
   findActiveNavHref,
   getNavGroups,
@@ -12,7 +14,8 @@ import {
   type DashboardNavGroup,
   type DashboardNavItem,
 } from "@/presentation/layout/nav-items";
-import { dashboardPath } from "@/presentation/routes/data-space-routes";
+import { WorkspaceIcon } from "@/presentation/layout/workspace-icon";
+import { ThemeToggle } from "@/presentation/theme/theme-toggle";
 import type { DataSpace } from "@/storage/db/schema";
 
 const defaultOpenGroups: Record<DashboardNavGroup["id"], boolean> = {
@@ -21,12 +24,6 @@ const defaultOpenGroups: Record<DashboardNavGroup["id"], boolean> = {
   operations: true,
   insights: true,
 };
-
-function workspaceTarget(pathname: string, currentSlug: string, nextSlug: string) {
-  const marker = `/w/${currentSlug}/dashboard`;
-  if (!pathname.startsWith(marker)) return dashboardPath(nextSlug);
-  return `/w/${nextSlug}/dashboard${pathname.slice(marker.length)}`;
-}
 
 function MobileNavLink({
   item,
@@ -44,17 +41,11 @@ function MobileNavLink({
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex min-h-11 items-center gap-3 rounded-lg border px-3 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-cyan-300/40",
-        active
-          ? "border-cyan-200/20 bg-cyan-300/12 text-cyan-50"
-          : "border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.05] hover:text-white",
+        "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-[15px] transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+        active ? "bg-fill-strong font-semibold text-label" : "font-medium text-label-secondary hover:bg-fill-hover hover:text-label",
       )}
     >
-      <span
-        aria-hidden="true"
-        className={cn("absolute inset-y-2 left-0 w-0.5 rounded-full bg-cyan-300", active ? "opacity-100" : "opacity-0")}
-      />
-      <Icon className={cn("h-4 w-4 shrink-0", active ? "text-cyan-200" : "text-slate-500")} />
+      <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-tint" : "text-muted")} aria-hidden="true" />
       {item.label}
     </Link>
   );
@@ -78,7 +69,6 @@ export function MobileNav({
   const primaryItems = groups.flatMap((group) => group.items);
   const settingsNavItem = getSettingsNavItem(currentDataSpace?.slug ?? "moonarq");
   const activeHref = findActiveNavHref(pathname, [...primaryItems, settingsNavItem]);
-  const WorkspaceIcon = currentDataSpace?.slug === "auto-lab" ? Gauge : MoonStar;
 
   useEffect(() => {
     const desktopQuery = window.matchMedia("(min-width: 1024px)");
@@ -146,6 +136,128 @@ export function MobileNav({
     setOpenGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
   }
 
+  const drawer = open ? (
+    <div className="fixed inset-0 z-[70] lg:hidden">
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Dismiss navigation"
+        className="absolute inset-0 bg-[var(--scrim)] backdrop-blur-[2px]"
+        onClick={closeNavigation}
+      />
+      <div
+        id="mobile-dashboard-navigation"
+        ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mobile-navigation-title"
+        tabIndex={-1}
+        className="glass-chrome absolute inset-y-2 right-2 flex w-[min(88vw,22rem)] max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-[28px]"
+      >
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-separator px-4 py-3.5">
+          <div className="flex min-w-0 items-center gap-3">
+            <WorkspaceIcon slug={currentDataSpace?.slug ?? "moonarq"} />
+            <div className="min-w-0">
+              <p id="mobile-navigation-title" className="truncate text-[15px] font-semibold tracking-[-0.015em] text-label">
+                {currentDataSpace?.display_name ?? "MoonArq"}
+              </p>
+              <p className="truncate text-xs text-muted">Data command center</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            ref={closeButtonRef}
+            aria-label="Close navigation"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-fill-strong text-label-secondary transition hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+            onClick={closeNavigation}
+          >
+            <X className="h-[18px] w-[18px]" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+          {currentDataSpace && dataSpaces.length > 0 ? (
+            <section className="mb-3 rounded-2xl bg-fill p-1.5" aria-labelledby="mobile-workspace-switcher-label">
+              <button
+                id="mobile-workspace-switcher-label"
+                type="button"
+                onClick={() => setWorkspaceOpen((current) => !current)}
+                aria-expanded={workspaceOpen}
+                aria-controls="mobile-workspace-options"
+                className="flex min-h-10 w-full items-center justify-between rounded-xl px-2.5 text-left text-[13px] font-semibold text-label-secondary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+              >
+                Switch workspace
+                <ChevronDown className={cn("h-4 w-4 transition-transform", workspaceOpen ? "rotate-0" : "-rotate-90")} />
+              </button>
+              {workspaceOpen ? (
+                <div id="mobile-workspace-options" className="mt-1 grid gap-1">
+                  {dataSpaces.map((space) => {
+                    const active = space.slug === currentDataSpace.slug;
+                    return (
+                      <Link
+                        key={space.id}
+                        href={workspaceTarget(pathname, currentDataSpace.slug, space.slug)}
+                        onClick={closeNavigation}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex min-h-11 items-center gap-3 rounded-xl px-2 text-[14px] transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30",
+                          active ? "bg-glass-selected font-semibold text-label shadow-sm" : "text-label-secondary hover:bg-fill-hover",
+                        )}
+                      >
+                        <WorkspaceIcon slug={space.slug} size="sm" />
+                        <span className="min-w-0 flex-1 truncate">{space.display_name}</span>
+                        {active ? <Check className="h-4 w-4 shrink-0 text-tint" aria-hidden="true" /> : null}
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          <nav className="grid gap-3" aria-label="Mobile primary navigation">
+            {groups.map((group) => {
+              const groupOpen = openGroups[group.id];
+              return (
+                <section key={group.id} aria-labelledby={`mobile-nav-group-${group.id}`}>
+                  <button
+                    id={`mobile-nav-group-${group.id}`}
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    aria-expanded={groupOpen}
+                    aria-controls={`mobile-nav-items-${group.id}`}
+                    className="flex min-h-9 w-full items-center justify-between rounded-xl px-3 text-[12px] font-semibold text-muted focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
+                  >
+                    {group.label}
+                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", groupOpen ? "rotate-0" : "-rotate-90")} />
+                  </button>
+                  {groupOpen ? (
+                    <div id={`mobile-nav-items-${group.id}`} className="mt-0.5 grid gap-0.5">
+                      {group.items.map((item) => (
+                        <MobileNavLink key={item.href} item={item} active={activeHref === item.href} onNavigate={closeNavigation} />
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
+          </nav>
+        </div>
+
+        <div className="shrink-0 border-t border-separator px-3 py-3">
+          <MobileNavLink item={settingsNavItem} active={activeHref === settingsNavItem.href} onNavigate={closeNavigation} />
+          <div className="mt-2 px-1">
+            <ThemeToggle showLabels className="flex w-full" />
+          </div>
+          <p className="mt-3 flex items-center gap-2 px-3 text-xs text-muted">
+            <ShieldCheck className="h-3.5 w-3.5 text-positive" />
+            Private, source-scoped data
+          </p>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="lg:hidden">
       <button
@@ -155,131 +267,12 @@ export function MobileNav({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="mobile-dashboard-navigation"
-        className="inline-flex min-h-10 items-center justify-center rounded-lg border border-transparent px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/[0.06] hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-300/40"
+        className="grid h-9 w-9 place-items-center rounded-full text-label-secondary transition hover:bg-fill-hover hover:text-label focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tint/30"
         onClick={() => setOpen(true)}
       >
         <Menu className="h-5 w-5" />
       </button>
-
-      {open ? (
-        <div className="fixed inset-0 z-[60]">
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-label="Dismiss navigation"
-            className="absolute inset-0 bg-black/72 backdrop-blur-sm"
-            onClick={closeNavigation}
-          />
-          <div
-            id="mobile-dashboard-navigation"
-            ref={drawerRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mobile-navigation-title"
-            tabIndex={-1}
-            className="relative ml-auto flex h-dvh w-[min(88vw,22rem)] max-w-full flex-col overflow-y-auto overscroll-contain border-l border-white/10 bg-[#090e16] shadow-2xl"
-          >
-            <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#090e16]/95 px-5 py-4 backdrop-blur-xl">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-cyan-200/20 bg-cyan-300/10">
-                  <WorkspaceIcon className="h-5 w-5 text-cyan-100" />
-                </span>
-                <div className="min-w-0">
-                  <p id="mobile-navigation-title" className="truncate text-sm font-semibold text-white">
-                    {currentDataSpace?.display_name ?? "MoonArq"}
-                  </p>
-                  <p className="truncate text-xs text-slate-500">Data command center</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                ref={closeButtonRef}
-                aria-label="Close navigation"
-                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg border border-transparent px-3 py-2 text-slate-300 transition hover:bg-white/[0.06] hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-300/40"
-                onClick={closeNavigation}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 px-4 py-4">
-              {currentDataSpace && dataSpaces.length > 0 ? (
-                <section className="mb-4 rounded-lg border border-white/10 bg-white/[0.025] p-2" aria-labelledby="mobile-workspace-switcher-label">
-                  <button
-                    id="mobile-workspace-switcher-label"
-                    type="button"
-                    onClick={() => setWorkspaceOpen((current) => !current)}
-                    aria-expanded={workspaceOpen}
-                    aria-controls="mobile-workspace-options"
-                    className="flex min-h-10 w-full items-center justify-between rounded-md px-2 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-300/35"
-                  >
-                    Switch workspace
-                    <ChevronDown className={cn("h-4 w-4 transition-transform", workspaceOpen ? "rotate-0" : "-rotate-90")} />
-                  </button>
-                  {workspaceOpen ? (
-                    <div id="mobile-workspace-options" className="mt-1 grid gap-1">
-                      {dataSpaces.map((space) => (
-                        <Link
-                          key={space.id}
-                          href={workspaceTarget(pathname, currentDataSpace.slug, space.slug)}
-                          onClick={closeNavigation}
-                          aria-current={space.slug === currentDataSpace.slug ? "page" : undefined}
-                          className={cn(
-                            "rounded-md px-3 py-2.5 text-sm transition focus:outline-none focus:ring-2 focus:ring-cyan-300/35",
-                            space.slug === currentDataSpace.slug ? "bg-cyan-300/10 text-cyan-50" : "text-slate-300 hover:bg-white/[0.05]",
-                          )}
-                        >
-                          {space.display_name}
-                        </Link>
-                      ))}
-                    </div>
-                  ) : null}
-                </section>
-              ) : null}
-
-              <nav className="grid gap-3" aria-label="Mobile primary navigation">
-                {groups.map((group) => {
-                  const groupOpen = openGroups[group.id];
-                  const containsActiveItem = group.items.some((item) => item.href === activeHref);
-                  return (
-                    <section key={group.id} aria-labelledby={`mobile-nav-group-${group.id}`}>
-                      <button
-                        id={`mobile-nav-group-${group.id}`}
-                        type="button"
-                        onClick={() => toggleGroup(group.id)}
-                        aria-expanded={groupOpen}
-                        aria-controls={`mobile-nav-items-${group.id}`}
-                        className={cn(
-                          "flex min-h-9 w-full items-center justify-between rounded-md px-3 text-[0.68rem] font-semibold uppercase tracking-[0.16em] focus:outline-none focus:ring-2 focus:ring-cyan-300/35",
-                          containsActiveItem ? "text-cyan-200/85" : "text-slate-600",
-                        )}
-                      >
-                        {group.label}
-                        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", groupOpen ? "rotate-0" : "-rotate-90")} />
-                      </button>
-                      {groupOpen ? (
-                        <div id={`mobile-nav-items-${group.id}`} className="mt-1 grid gap-1">
-                          {group.items.map((item) => (
-                            <MobileNavLink key={item.href} item={item} active={activeHref === item.href} onNavigate={closeNavigation} />
-                          ))}
-                        </div>
-                      ) : null}
-                    </section>
-                  );
-                })}
-              </nav>
-            </div>
-
-            <div className="shrink-0 border-t border-white/10 px-4 py-4">
-              <MobileNavLink item={settingsNavItem} active={activeHref === settingsNavItem.href} onNavigate={closeNavigation} />
-              <p className="mt-3 flex items-center gap-2 px-3 text-xs text-slate-500">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-300/70" />
-                Private, source-scoped data
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {drawer ? createPortal(drawer, document.body) : null}
     </div>
   );
 }

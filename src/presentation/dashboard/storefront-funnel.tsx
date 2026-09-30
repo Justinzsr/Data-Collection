@@ -1,6 +1,6 @@
 import type { WebsiteFunnelOverview, WebsiteFunnelStage } from "@/aggregation/services/website-funnel-types";
 import { Badge } from "@/presentation/components/ui/badge";
-import { GlassPanel } from "@/presentation/components/ui/panel";
+import { Callout, GlassPanel } from "@/presentation/components/ui/panel";
 import {
   comparisonToneClass,
   resolveComparisonDisplay,
@@ -54,51 +54,51 @@ function FunnelStageRow({
 
   return (
     <li
-      className="grid min-w-0 gap-3 rounded-xl border border-white/[0.09] bg-black/15 p-3 sm:grid-cols-[minmax(9rem,0.8fr)_minmax(12rem,1.4fr)_minmax(13rem,1fr)] sm:items-center"
+      className="inset-surface grid min-w-0 gap-3 rounded-[18px] p-3.5 @md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] @md:items-center @4xl:grid-cols-[minmax(9rem,0.8fr)_minmax(12rem,1.4fr)_minmax(13rem,1fr)]"
       data-funnel-stage={stage.key}
       aria-label={stage.measured ? `${stage.label}: ${count(stage.sessions)} sessions` : `${stage.label}: not measured`}
     >
       <div className="min-w-0">
-        <p className="font-medium text-[#f5f2eb]">{stage.label}</p>
+        <p className="text-[15px] font-semibold tracking-[-0.01em] text-label">{stage.label}</p>
         <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{stage.description}</p>
       </div>
 
       <div className="min-w-0">
         <div className="mb-1.5 flex items-baseline justify-between gap-3">
-          <span className="text-2xl font-semibold tracking-[-0.03em] text-white">{stage.measured ? count(stage.sessions) : "—"}</span>
-          <span className="text-xs text-slate-400">{stage.measured ? `${percent(stage.percentOfStart)} of visits` : "Not measured"}</span>
+          <span className="tabular text-2xl font-semibold tracking-[-0.03em] text-label">{stage.measured ? count(stage.sessions) : "—"}</span>
+          <span className="text-xs text-label-secondary">{stage.measured ? `${percent(stage.percentOfStart)} of visits` : "Not measured"}</span>
         </div>
-        <div className="h-2.5 overflow-hidden rounded-full bg-white/[0.06]" aria-hidden="true">
+        <div className="h-2 overflow-hidden rounded-full bg-fill-strong" aria-hidden="true">
           <span
             className="block h-full rounded-full"
             style={{
               width: `${stage.measured ? barPercent : 0}%`,
-              backgroundImage: "linear-gradient(to right, #94a3b8, #67e8f9)",
+              backgroundImage: "linear-gradient(to right, var(--funnel-start), var(--funnel-end))",
             }}
             data-funnel-bar={stage.key}
           />
         </div>
       </div>
 
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs @md:col-span-2 @md:grid-cols-4 @md:border-t @md:border-separator @md:pt-3 @4xl:col-span-1 @4xl:grid-cols-2 @4xl:border-t-0 @4xl:pt-0">
         <div>
           <dt className="text-[var(--muted)]">From previous</dt>
-          <dd className="mt-0.5 font-medium text-slate-200">{stage.measured ? percent(stage.fromPrevious) : "—"}</dd>
+          <dd className="tabular mt-0.5 font-semibold text-label">{stage.measured ? percent(stage.fromPrevious) : "—"}</dd>
         </div>
         <div>
           <dt className="text-[var(--muted)]">Drop-off</dt>
-          <dd className="mt-0.5 font-medium text-slate-200">
+          <dd className="tabular mt-0.5 font-semibold text-label">
             {!stage.measured || stage.dropOff === null ? "—" : count(stage.dropOff)}
           </dd>
         </div>
         <div>
           <dt className="text-[var(--muted)]">Raw events</dt>
-          <dd className="mt-0.5 font-medium text-slate-200">{stage.measured ? count(stage.events) : "—"}</dd>
+          <dd className="tabular mt-0.5 font-semibold text-label">{stage.measured ? count(stage.events) : "—"}</dd>
         </div>
         <div>
           <dt className="text-[var(--muted)]">Period change</dt>
           <dd
-            className={`mt-0.5 font-medium ${comparisonToneClass(comparison.tone)}`}
+            className={`mt-0.5 font-semibold ${comparisonToneClass(comparison.tone)}`}
             data-comparison-state={comparison.kind}
           >
             {comparison.label}
@@ -117,14 +117,14 @@ export function StorefrontFunnel({ overview }: { overview: WebsiteFunnelOverview
 
   return (
     <GlassPanel
-      className="grid min-w-0 gap-4 p-4 sm:p-5"
+      className="grid min-w-0 content-start gap-4 p-4 sm:p-5"
       data-testid="storefront-funnel"
       aria-labelledby="storefront-funnel-title"
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">Primary conversion path</p>
-          <h2 id="storefront-funnel-title" className="mt-1 text-xl font-semibold text-[#f5f2eb]">
+          <p className="eyebrow">Primary conversion path</p>
+          <h2 id="storefront-funnel-title" className="mt-1 text-[20px] font-semibold tracking-[-0.022em] text-label">
             Storefront session funnel
           </h2>
         </div>
@@ -132,19 +132,15 @@ export function StorefrontFunnel({ overview }: { overview: WebsiteFunnelOverview
       </div>
 
       {message ? (
-        <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.07] p-4" role="status">
-          <p className="text-sm leading-6 text-amber-50/85">{message}</p>
-        </div>
+        <Callout tone="warning" role="status">{message}</Callout>
       ) : null}
 
       {overview.lowVolume ? (
-        <div className="rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-sm text-slate-300">
-          Limited data — rates are directional.
-        </div>
+        <Callout tone="neutral">Limited data — rates are directional.</Callout>
       ) : null}
 
       {overview.dataState !== "source_unavailable" && overview.dataState !== "pre_coverage" ? (
-        <ol className="grid min-w-0 gap-2.5" aria-label="Ordered first-party storefront funnel">
+        <ol className="@container grid min-w-0 gap-2.5" aria-label="Ordered first-party storefront funnel">
           {overview.stages.map((stage) => (
             <FunnelStageRow
               key={stage.key}
@@ -158,12 +154,10 @@ export function StorefrontFunnel({ overview }: { overview: WebsiteFunnelOverview
       ) : null}
 
       {noCart ? (
-        <p className="rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-sm text-slate-300">
-          No add-to-cart events were observed in this range.
-        </p>
+        <Callout tone="neutral">No add-to-cart events were observed in this range.</Callout>
       ) : null}
 
-      <p id="storefront-funnel-footnote" className="border-t border-white/[0.08] pt-3 text-xs leading-5 text-[var(--muted)]">
+      <p id="storefront-funnel-footnote" className="border-t border-separator pt-3 text-xs leading-5 text-[var(--muted)]">
         First-party session funnel; ends at checkout started. Orders and revenue are reported separately by Shopify.
       </p>
     </GlassPanel>
