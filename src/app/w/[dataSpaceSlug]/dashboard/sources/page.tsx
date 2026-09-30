@@ -139,7 +139,9 @@ export default async function SourcesPage({ params }: { params: Promise<{ dataSp
                       {authorization ? <Badge tone={authorization.tone}>{authorization.label}</Badge> : <span className="text-xs text-muted">Not required</span>}
                     </td>
                     <td className="whitespace-nowrap px-4 py-4">
-                      <p className="text-label" title={formatAppDateTime(source.last_success_at)}>{formatRelativeTime(source.last_success_at, { now })}</p>
+                      {source.source_type_key === "website"
+                        ? <p className="text-label">Live tracker</p>
+                        : <p className="text-label" title={formatAppDateTime(source.last_success_at)}>{formatRelativeTime(source.last_success_at, { now })}</p>}
                     </td>
                     <td className="px-4 py-4">
                       <p className="whitespace-nowrap text-label-secondary">{humanize(source.sync_mode)} · every {source.sync_frequency_minutes}m</p>
@@ -173,7 +175,7 @@ export default async function SourcesPage({ params }: { params: Promise<{ dataSp
                 </div>
                 <dl className="inset-surface mt-4 grid gap-2 p-3 text-[13px]">
                   <div className="flex justify-between gap-3"><dt className="text-muted">Sync mode</dt><dd className="text-right text-label">{humanize(source.sync_mode)} · {source.sync_frequency_minutes}m</dd></div>
-                  <div className="flex justify-between gap-3"><dt className="text-muted">Last success</dt><dd className="text-right text-label">{formatRelativeTime(source.last_success_at, { now })}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-muted">Last success</dt><dd className="text-right text-label">{source.source_type_key === "website" ? "Live tracker" : formatRelativeTime(source.last_success_at, { now })}</dd></div>
                   <div className="flex justify-between gap-3"><dt className="text-muted">Next</dt><dd className="text-right text-label">{formatAppDateTime(source.next_sync_at, "manual only")}</dd></div>
                   {authorization ? (
                     <div className="flex items-center justify-between gap-3"><dt className="text-muted">Authorization</dt><dd><Badge tone={authorization.tone}>{authorization.label}</Badge></dd></div>
