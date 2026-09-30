@@ -45,12 +45,12 @@ export function AppToolbar({
           <button
             type="button"
             onClick={openCommandPalette}
-            className="glass-control inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-full px-2.5 text-[13px] text-muted transition hover:text-label focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30 sm:pl-3 sm:pr-2"
+            className="glass-control hidden h-10 min-w-10 items-center justify-center gap-2 rounded-full px-2.5 lg:inline-flex text-[13px] text-muted transition hover:text-label focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-tint/30 lg:pl-3 lg:pr-2"
             aria-label="Search pages, sources, and actions"
           >
             <Search className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden sm:inline">Search</span>
-            <kbd className="hidden rounded-md bg-fill-strong px-1.5 py-0.5 font-sans text-[11px] font-medium text-label-secondary sm:inline">⌘K</kbd>
+            <span>Search</span>
+            <kbd className="rounded-md bg-fill-strong px-1.5 py-0.5 font-sans text-[11px] font-medium text-label-secondary">⌘K</kbd>
           </button>
           <ThemeToggle className="hidden md:inline-flex" />
           <MobileNav currentDataSpace={dataSpace} dataSpaces={dataSpaces} />

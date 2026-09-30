@@ -17,8 +17,12 @@ export function workspaceTarget(currentPath: string | undefined, currentSlug: st
   return `/w/${nextSlug}/dashboard${currentPath.slice(marker.length)}`;
 }
 
+function categoryName(category: string) {
+  return `${category.charAt(0).toUpperCase()}${category.slice(1)}`;
+}
+
 function categoryLabel(category: string) {
-  return `${category.charAt(0).toUpperCase()}${category.slice(1)} workspace`;
+  return `${categoryName(category)} workspace`;
 }
 
 export function DataSpaceSwitcher({
@@ -87,7 +91,7 @@ export function DataSpaceSwitcher({
         <WorkspaceIcon slug={current.slug} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[15px] font-semibold tracking-[-0.015em] text-label">{current.display_name}</span>
-          <span className="block truncate text-xs text-muted">{categoryLabel(current.category)}</span>
+          <span className="block truncate text-xs text-muted">{categoryName(current.category)}</span>
         </span>
         <ChevronsUpDown className="h-4 w-4 shrink-0 text-label-quaternary" aria-hidden="true" />
       </button>
