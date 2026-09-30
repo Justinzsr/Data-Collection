@@ -136,6 +136,15 @@ export function ConnectionHealthPanel({
                   <span className="block truncate text-xs text-muted">
                     {account ? `${account} · ` : ""}{synced}
                   </span>
+                  <span className="mt-1.5 flex flex-wrap gap-1.5 sm:hidden">
+                    <Badge tone={statusTone(source.status)} dot>{statusLabel(source.status)}</Badge>
+                    {authorization ? (
+                      <Badge tone={authorization.tone}>
+                        <KeyRound className="h-3 w-3" aria-hidden="true" />
+                        {authorization.label}
+                      </Badge>
+                    ) : null}
+                  </span>
                 </span>
                 {authorization ? (
                   <span className="hidden shrink-0 sm:inline-flex">
@@ -145,12 +154,11 @@ export function ConnectionHealthPanel({
                     </Badge>
                   </span>
                 ) : null}
-                <Badge tone={statusTone(source.status)} dot className="shrink-0">{statusLabel(source.status)}</Badge>
+                <span className="hidden shrink-0 sm:inline-flex">
+                  <Badge tone={statusTone(source.status)} dot>{statusLabel(source.status)}</Badge>
+                </span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-label-quaternary transition group-hover:translate-x-0.5 group-hover:text-muted" aria-hidden="true" />
               </Link>
-              {authorization?.attention ? (
-                <p className="px-2.5 pb-1 text-xs text-warning sm:hidden">{authorization.label}</p>
-              ) : null}
             </li>
           );
         })}
