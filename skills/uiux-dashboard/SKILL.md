@@ -7,10 +7,11 @@ description: Use when changing MoonArq dashboard UI, visual hierarchy, charts, s
 
 ## Standards
 
-- Dark-first futuristic internal command center.
+- Apple Liquid Glass language: translucent glass materials over a soft wallpaper, specular rims, capsule controls, large titles. See `docs/design-system.md`.
+- Light and dark appearance from semantic tokens (`text-label`, `text-label-secondary`, `text-muted`, `bg-fill`, `border-separator`, `bg-tint`, status `*-fill` colors). Never hardcode palette colors.
 - Premium, clean, readable, not childish, not generic admin template.
-- No unreadable neon overload.
-- KPI grid: 4 columns desktop, 3 laptop, 2 tablet, 1 mobile.
+- No unreadable neon overload; text keeps WCAG AA contrast on the worst-case glass composite.
+- KPI grid: 4 columns desktop, 3 laptop, 2 tablet, 1 mobile (compact summary tiles may run 2 per row on phones).
 - Tables must become mobile cards or safe scroll.
 - Charts must use responsive containers.
 - Use subtle motion only.
@@ -34,7 +35,8 @@ description: Use when changing MoonArq dashboard UI, visual hierarchy, charts, s
 - Text contrast is strong.
 - Long URLs truncate.
 - Mobile nav works.
-- No cards nested inside decorative cards.
+- No glass cards nested inside glass cards; nested content uses `inset-surface` or `bg-fill`.
+- Chart colors come from `src/presentation/charts/chart-theme.ts`.
 - No fixed-width chart containers.
 
 ## Commands

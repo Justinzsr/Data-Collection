@@ -1,4 +1,4 @@
-import { ArrowRight, Bookmark, Camera, Car, ChevronDown, ExternalLink, Eye, FileText, Heart, MessageCircle, Plus, Share2, TableProperties, Video } from "lucide-react";
+import { ArrowRight, Bookmark, Car, ChevronDown, ExternalLink, Eye, FileText, Heart, MessageCircle, Plus, Share2, TableProperties, Video } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { getDailyReport } from "@/aggregation/services/daily-report-service";
 import { getInstagramDashboardSummary, type InstagramDashboardSummary } from "@/aggregation/services/instagram-dashboard-service";
@@ -18,9 +18,12 @@ import { isRuntimeDatabaseConfigured } from "@/storage/db/client";
 import { addDaysToDateKey, dateKeyInAppTimeZone, formatAppDateTime } from "@/storage/runtime/app-time";
 import { Badge } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
-import { GlassPanel } from "@/presentation/components/ui/panel";
+import { Callout, GlassPanel, StatTile } from "@/presentation/components/ui/panel";
+import { IconTile, PlatformIcon } from "@/presentation/components/ui/platform-icon";
+import { platformSeriesColor } from "@/presentation/charts/chart-theme";
 import { PlatformTrendChart } from "@/presentation/charts/platform-trend-chart";
 import { CommerceOutcomes } from "@/presentation/dashboard/commerce-outcomes";
+import { ConnectionHealthPanel } from "@/presentation/dashboard/connection-health-panel";
 import { CommandCenterHeader } from "@/presentation/dashboard/command-center-header";
 import { GlobalHealthStrip } from "@/presentation/dashboard/global-health-strip";
 import { PlatformModuleCard } from "@/presentation/dashboard/platform-module-card";
@@ -114,17 +117,12 @@ function localShopifyFixture(
 }
 
 function moduleSeries(modules: Awaited<ReturnType<typeof getPlatformModules>>) {
-  const preferred = [
-    { key: "website", color: "#38bdf8" },
-    { key: "supabase", color: "#2dd4bf" },
-    { key: "tiktok", color: "#fb7185" },
-    { key: "instagram", color: "#818cf8" },
-  ] as const;
+  const preferred = ["website", "supabase", "tiktok", "instagram"] as const;
   return preferred
-    .map((item) => {
-      const platformModule = modules.find((candidate) => candidate.sourceTypeKey === item.key);
+    .map((key) => {
+      const platformModule = modules.find((candidate) => candidate.sourceTypeKey === key);
       if (!platformModule) return null;
-      return { key: platformModule.sourceTypeKey, label: platformModule.platformLabel, color: item.color, data: platformModule.sparkline };
+      return { key: platformModule.sourceTypeKey, label: platformModule.platformLabel, color: platformSeriesColor(key), data: platformModule.sparkline };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
 }
@@ -182,24 +180,12 @@ function compactPaidMetric(metric: PaidMetricValue) {
 }
 
 function InstagramMetricTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-      {detail ? <p className="mt-1 text-xs text-slate-500">{detail}</p> : null}
-    </div>
-  );
+  return <StatTile label={label} value={value} detail={detail} />;
 }
 
 function TikTokMetricTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
   const waiting = value === "Waiting for scope/data";
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className={`mt-2 break-words font-semibold ${waiting ? "text-sm leading-5 text-amber-100" : "text-2xl text-white"}`}>{value}</p>
-      {detail ? <p className="mt-1 text-xs text-slate-500">{detail}</p> : null}
-    </div>
-  );
+  return <StatTile label={label} value={value} detail={detail} tone={waiting ? "warning" : "default"} />;
 }
 
 function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
@@ -213,39 +199,37 @@ function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
   const media = primary.media;
 
   return (
-    <details className="overview-social-card group glass min-w-0 overflow-hidden rounded-xl">
-      <summary className="cursor-pointer p-3 transition hover:bg-white/[0.025]">
+    <details className="overview-social-card group glass min-w-0 overflow-hidden rounded-3xl">
+      <summary className="cursor-pointer p-4 transition hover:bg-fill">
         <div className="flex min-w-0 items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-fuchsia-300/20 bg-fuchsia-300/10">
-              <Camera className="h-4 w-4 text-fuchsia-100" />
-            </span>
+          <div className="flex min-w-0 items-center gap-3">
+            <PlatformIcon sourceTypeKey="instagram" size="lg" />
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fuchsia-200/75">Instagram Graph API</p>
-              <h2 className="mt-0.5 truncate text-sm font-semibold text-white">
+              <p className="eyebrow">Instagram Graph API</p>
+              <h2 className="mt-0.5 truncate text-[15px] font-semibold tracking-[-0.01em] text-label">
                 {primary.username ? `@${primary.username}` : primary.displayName}
               </h2>
-              <p className="mt-0.5 truncate text-xs text-slate-500">
+              <p className="mt-0.5 truncate text-xs text-muted">
                 {displayCount(primary.stats.followers)} followers · {displayCount(primary.stats.reach)} reach · {media.length} posts
               </p>
               {paid ? (
-                <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5 text-[10px] text-slate-400">
-                  <span className="rounded border border-fuchsia-300/15 bg-fuchsia-300/[0.05] px-1.5 py-0.5 text-fuchsia-100">Ads: {paidStateLabel(paid.state)}</span>
-                  <span className="rounded border border-white/10 bg-black/20 px-1.5 py-0.5">Spend {compactPaidMetric(paid.outcomes.spend)}</span>
-                  <span className="rounded border border-white/10 bg-black/20 px-1.5 py-0.5">Revenue {compactPaidMetric(paid.outcomes.attributedNetRevenue)}</span>
-                  <span className="rounded border border-white/10 bg-black/20 px-1.5 py-0.5">ROAS {compactPaidMetric(paid.outcomes.shopifyRoas)}</span>
+                <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-[11px] font-medium text-label-secondary">
+                  <span className="rounded-full bg-pink-fill/12 px-2 py-0.5 font-semibold text-pink">Ads: {paidStateLabel(paid.state)}</span>
+                  <span className="rounded-full bg-fill-strong px-2 py-0.5">Spend {compactPaidMetric(paid.outcomes.spend)}</span>
+                  <span className="rounded-full bg-fill-strong px-2 py-0.5">Revenue {compactPaidMetric(paid.outcomes.attributedNetRevenue)}</span>
+                  <span className="rounded-full bg-fill-strong px-2 py-0.5">ROAS {compactPaidMetric(paid.outcomes.shopifyRoas)}</span>
                 </div>
               ) : null}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Badge tone={primary.status === "healthy" ? "green" : primary.status === "error" ? "rose" : "amber"}>{statusLabel(primary.status)}</Badge>
-            <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            <Badge tone={primary.status === "healthy" ? "green" : primary.status === "error" ? "rose" : "amber"} dot>{statusLabel(primary.status)}</Badge>
+            <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
           </div>
         </div>
       </summary>
 
-      <div className="grid gap-4 border-t border-white/10 p-3 sm:p-4">
+      <div className="grid gap-4 border-t border-separator p-3 sm:p-4">
         {paid ? (
           <InstagramPaidAdsPanel
             summary={paid}
@@ -255,12 +239,12 @@ function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
           />
         ) : null}
 
-        <details className="group rounded-xl border border-white/10 bg-black/10">
-          <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 text-xs font-medium text-slate-300">
+        <details className="group inset-surface rounded-[18px]">
+          <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-[18px] px-3.5 py-2.5 text-[13px] font-semibold text-label transition hover:bg-fill-hover">
             <span>Organic account &amp; media details</span>
-            <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
           </summary>
-          <div className="grid gap-4 border-t border-white/10 p-3">
+          <div className="grid gap-4 border-t border-separator p-3">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <InstagramMetricTile label="Followers" value={displayCount(primary.stats.followers)} detail="Account snapshot" />
           <InstagramMetricTile label="Account media" value={displayCount(primary.stats.accountMediaCount)} detail={`${displayCount(primary.stats.fetchedMediaCount)} fetched`} />
@@ -272,13 +256,13 @@ function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
           <InstagramMetricTile label="Interactions" value={displayCount(primary.stats.totalInteractions)} />
         </div>
 
-        <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/15 p-3 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 rounded-2xl bg-fill-strong p-3 text-xs text-label-secondary sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <span>Last sync: <span className="text-slate-200">{primary.lastSyncedAt ? formatAppDateTime(primary.lastSyncedAt) : "No sync yet"}</span></span>
-            {primary.graphApiVersion ? <span>Graph API: <span className="text-slate-200">{primary.graphApiVersion}</span></span> : null}
-            {primary.accountId ? <span>IG account: <span className="text-slate-200">{primary.accountId}</span></span> : null}
-            {primary.pageId ? <span>Page: <span className="text-slate-200">{primary.pageId}</span></span> : null}
-            {primary.tokenExpiresAt ? <span>Token expires: <span className="text-slate-200">{formatAppDateTime(primary.tokenExpiresAt)}</span></span> : null}
+            <span>Last sync: <span className="text-label">{primary.lastSyncedAt ? formatAppDateTime(primary.lastSyncedAt) : "No sync yet"}</span></span>
+            {primary.graphApiVersion ? <span>Graph API: <span className="text-label">{primary.graphApiVersion}</span></span> : null}
+            {primary.accountId ? <span>IG account: <span className="text-label">{primary.accountId}</span></span> : null}
+            {primary.pageId ? <span>Page: <span className="text-label">{primary.pageId}</span></span> : null}
+            {primary.tokenExpiresAt ? <span>Token expires: <span className="text-label">{formatAppDateTime(primary.tokenExpiresAt)}</span></span> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <LinkButton href={`${basePath}/sources/${primary.sourceId}`} variant="secondary" className="min-h-9 px-3 text-xs">
@@ -295,8 +279,8 @@ function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
         <div>
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-fuchsia-200/75">Media performance</p>
-              <h3 className="mt-1 text-base font-semibold text-white">Latest synced posts and reels</h3>
+              <p className="eyebrow">Media performance</p>
+              <h3 className="mt-1 text-[17px] font-semibold tracking-[-0.018em] text-label">Latest synced posts and reels</h3>
             </div>
             <Badge tone="slate">{media.length} visible media rows</Badge>
           </div>
@@ -304,14 +288,14 @@ function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
           {media.length > 0 ? (
             <div className="grid gap-3">
               {media.map((item) => (
-                <div key={`${item.sourceId}-${item.externalContentId}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                <div key={`${item.sourceId}-${item.externalContentId}`} className="rounded-2xl bg-fill-strong p-3.5">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="mb-2 flex flex-wrap gap-2">
                         <Badge tone="indigo">{item.mediaType}</Badge>
                         {item.publishedAt ? <Badge tone="slate">{formatAppDateTime(item.publishedAt)}</Badge> : null}
                       </div>
-                      <p className="break-words text-sm leading-6 text-slate-200">{item.captionPreview}</p>
+                      <p className="break-words text-sm leading-6 text-label">{item.captionPreview}</p>
                     </div>
                     {item.url ? (
                       <LinkButton href={item.url} variant="ghost" className="min-h-9 shrink-0 px-3 text-xs" target="_blank" rel="noreferrer">
@@ -321,35 +305,34 @@ function InstagramInsightsPanel({ summary, paid, basePath, dataSpaceSlug }: {
                     ) : null}
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Reach</p>
-                      <p className="mt-1 text-sm font-semibold text-white">{displayCount(item.reach)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="text-[11px] text-muted">Reach</p>
+                      <p className="mt-1 text-sm font-semibold text-label">{displayCount(item.reach)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500"><Heart className="h-3 w-3" /> Likes</p>
-                      <p className="mt-1 text-sm font-semibold text-white">{displayCount(item.likes)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="flex items-center gap-1 text-[11px] text-muted"><Heart className="h-3 w-3" /> Likes</p>
+                      <p className="mt-1 text-sm font-semibold text-label">{displayCount(item.likes)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500"><MessageCircle className="h-3 w-3" /> Comments</p>
-                      <p className="mt-1 text-sm font-semibold text-white">{displayCount(item.comments)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="flex items-center gap-1 text-[11px] text-muted"><MessageCircle className="h-3 w-3" /> Comments</p>
+                      <p className="mt-1 text-sm font-semibold text-label">{displayCount(item.comments)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500"><Bookmark className="h-3 w-3" /> Saved</p>
-                      <p className="mt-1 text-sm font-semibold text-white">{displayCount(item.saved)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="flex items-center gap-1 text-[11px] text-muted"><Bookmark className="h-3 w-3" /> Saved</p>
+                      <p className="mt-1 text-sm font-semibold text-label">{displayCount(item.saved)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Interactions</p>
-                      <p className="mt-1 text-sm font-semibold text-white">{displayCount(item.totalInteractions)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="text-[11px] text-muted">Interactions</p>
+                      <p className="mt-1 text-sm font-semibold text-label">{displayCount(item.totalInteractions)}</p>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-4">
-              <p className="text-sm font-medium text-amber-100">No synced Instagram media metrics yet</p>
-              <p className="mt-2 text-sm leading-6 text-amber-50/75">Open the Instagram source and run a manual sync to populate account and media insights.</p>
-            </div>
+            <Callout tone="warning" title="No synced Instagram media metrics yet">
+              Open the Instagram source and run a manual sync to populate account and media insights.
+            </Callout>
           )}
         </div>
           </div>
@@ -364,29 +347,27 @@ function TikTokSourceInsightsPanel({ source, basePath }: { source: TikTokDashboa
   const accountLabel = source.username ? `@${source.username.replace(/^@/, "")}` : source.displayNameOnPlatform ?? source.displayName;
 
   return (
-    <details className="overview-social-card group glass min-w-0 overflow-hidden rounded-xl">
-      <summary className="cursor-pointer p-3 transition hover:bg-white/[0.025]">
+    <details className="overview-social-card group glass min-w-0 overflow-hidden rounded-3xl">
+      <summary className="cursor-pointer p-4 transition hover:bg-fill">
         <div className="flex min-w-0 items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-rose-300/20 bg-rose-300/10">
-              <Video className="h-4 w-4 text-rose-100" />
-            </span>
+          <div className="flex min-w-0 items-center gap-3">
+            <PlatformIcon sourceTypeKey="tiktok" size="lg" />
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-200/75">TikTok official API</p>
-              <h2 className="mt-0.5 truncate text-sm font-semibold text-white">{accountLabel}</h2>
-              <p className="mt-0.5 truncate text-xs text-slate-500">{displayWaitingCount(source.stats.videoViews)} views · {displayWaitingCount(source.stats.followers)} followers · {source.stats.fetchedVideoCount} fetched videos</p>
+              <p className="eyebrow">TikTok official API</p>
+              <h2 className="mt-0.5 truncate text-[15px] font-semibold tracking-[-0.01em] text-label">{accountLabel}</h2>
+              <p className="mt-0.5 truncate text-xs text-muted">{displayWaitingCount(source.stats.videoViews)} views · {displayWaitingCount(source.stats.followers)} followers · {source.stats.fetchedVideoCount} fetched videos</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Badge tone={source.status === "healthy" ? "green" : source.status === "error" ? "rose" : "amber"}>{statusLabel(source.status)}</Badge>
-            <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+            <Badge tone={source.status === "healthy" ? "green" : source.status === "error" ? "rose" : "amber"} dot>{statusLabel(source.status)}</Badge>
+            <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
           </div>
         </div>
       </summary>
 
-      <div className="grid gap-4 border-t border-white/10 p-3 sm:p-4">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-          <Badge tone="rose">Current snapshot</Badge>
+      <div className="grid gap-4 border-t border-separator p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-label-secondary">
+          <Badge tone="slate">Current snapshot</Badge>
           <span>Cumulative account and fetched-video totals from the latest TikTok sync; not affected by the dashboard date range.</span>
         </div>
 
@@ -401,13 +382,13 @@ function TikTokSourceInsightsPanel({ source, basePath }: { source: TikTokDashboa
           <TikTokMetricTile label="Profile likes" value={displayWaitingCount(source.stats.profileLikes)} detail="Current account snapshot" />
         </div>
 
-        <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/15 p-3 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 rounded-2xl bg-fill p-3 text-xs text-label-secondary sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <span>Last sync: <span className="text-slate-200">{source.lastSyncedAt ? formatAppDateTime(source.lastSyncedAt) : "No sync yet"}</span></span>
-            <span>Token: <span className={source.tokenExpiresAt ? "text-slate-200" : "text-amber-100"}>{source.tokenExpiresAt ? `expires ${formatAppDateTime(source.tokenExpiresAt)}` : "expiry pending"}</span></span>
-            {source.openId ? <span>Open ID: <span className="text-slate-200">{source.openId}</span></span> : <span>Open ID: <span className="text-amber-100">Waiting for scope/data</span></span>}
-            <span>Scopes: <span className="text-slate-200">{source.scopes.length ? source.scopes.join(", ") : "Waiting for granted scopes"}</span></span>
-            {source.lastError ? <span>Last error: <span className="text-rose-200">{source.lastError}</span></span> : null}
+            <span>Last sync: <span className="text-label">{source.lastSyncedAt ? formatAppDateTime(source.lastSyncedAt) : "No sync yet"}</span></span>
+            <span>Token: <span className={source.tokenExpiresAt ? "text-label" : "text-warning"}>{source.tokenExpiresAt ? `expires ${formatAppDateTime(source.tokenExpiresAt)}` : "expiry pending"}</span></span>
+            {source.openId ? <span>Open ID: <span className="text-label">{source.openId}</span></span> : <span>Open ID: <span className="text-warning">Waiting for scope/data</span></span>}
+            <span>Scopes: <span className="text-label">{source.scopes.length ? source.scopes.join(", ") : "Waiting for granted scopes"}</span></span>
+            {source.lastError ? <span>Last error: <span className="text-negative">{source.lastError}</span></span> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <LinkButton href={`${basePath}/sources/${source.sourceId}`} variant="secondary" className="min-h-9 px-3 text-xs">
@@ -424,8 +405,8 @@ function TikTokSourceInsightsPanel({ source, basePath }: { source: TikTokDashboa
         <div>
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-200/75">Video performance</p>
-              <h3 className="mt-1 text-base font-semibold text-white">Videos in the latest TikTok snapshot</h3>
+              <p className="eyebrow">Video performance</p>
+              <h3 className="mt-1 text-[17px] font-semibold tracking-[-0.018em] text-label">Videos in the latest TikTok snapshot</h3>
             </div>
             <Badge tone="slate">{videos.length} visible video rows</Badge>
           </div>
@@ -433,15 +414,15 @@ function TikTokSourceInsightsPanel({ source, basePath }: { source: TikTokDashboa
           {videos.length > 0 ? (
             <div className="grid gap-3">
               {videos.map((item) => (
-                <div key={`${item.sourceId}-${item.externalContentId}`} className="rounded-lg border border-rose-200/10 bg-rose-300/[0.04] p-3">
+                <div key={`${item.sourceId}-${item.externalContentId}`} className="inset-surface rounded-2xl p-3.5">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="mb-2 flex flex-wrap gap-2">
-                        <Badge tone="rose">TikTok video</Badge>
+                        <Badge tone="indigo">TikTok video</Badge>
                         {item.publishedAt ? <Badge tone="slate">{formatAppDateTime(item.publishedAt)}</Badge> : null}
                       </div>
-                      <p className="break-words text-sm font-semibold text-white">{item.title}</p>
-                      <p className="mt-1 break-words text-sm leading-6 text-slate-300">{item.description}</p>
+                      <p className="break-words text-sm font-semibold text-label">{item.title}</p>
+                      <p className="mt-1 break-words text-sm leading-6 text-label-secondary">{item.description}</p>
                     </div>
                     {item.url ? (
                       <LinkButton href={item.url} variant="ghost" className="min-h-9 shrink-0 px-3 text-xs" target="_blank" rel="noreferrer">
@@ -451,35 +432,34 @@ function TikTokSourceInsightsPanel({ source, basePath }: { source: TikTokDashboa
                     ) : null}
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500"><Eye className="h-3 w-3" /> Views</p>
-                      <p className="mt-1 break-words text-sm font-semibold text-white">{displayWaitingCount(item.views)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="flex items-center gap-1 text-[11px] text-muted"><Eye className="h-3 w-3" /> Views</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-label">{displayWaitingCount(item.views)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500"><Heart className="h-3 w-3" /> Likes</p>
-                      <p className="mt-1 break-words text-sm font-semibold text-white">{displayWaitingCount(item.likes)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="flex items-center gap-1 text-[11px] text-muted"><Heart className="h-3 w-3" /> Likes</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-label">{displayWaitingCount(item.likes)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500"><MessageCircle className="h-3 w-3" /> Comments</p>
-                      <p className="mt-1 break-words text-sm font-semibold text-white">{displayWaitingCount(item.comments)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="flex items-center gap-1 text-[11px] text-muted"><MessageCircle className="h-3 w-3" /> Comments</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-label">{displayWaitingCount(item.comments)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500"><Share2 className="h-3 w-3" /> Shares</p>
-                      <p className="mt-1 break-words text-sm font-semibold text-white">{displayWaitingCount(item.shares)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="flex items-center gap-1 text-[11px] text-muted"><Share2 className="h-3 w-3" /> Shares</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-label">{displayWaitingCount(item.shares)}</p>
                     </div>
-                    <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                      <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Engagement</p>
-                      <p className="mt-1 break-words text-sm font-semibold text-white">{displayWaitingPercent(item.engagementRate)}</p>
+                    <div className="rounded-xl bg-fill p-2.5">
+                      <p className="text-[11px] text-muted">Engagement</p>
+                      <p className="mt-1 break-words text-sm font-semibold text-label">{displayWaitingPercent(item.engagementRate)}</p>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-4">
-              <p className="text-sm font-medium text-amber-100">Waiting for TikTok video metrics</p>
-              <p className="mt-2 text-sm leading-6 text-amber-50/75">Run a manual sync after TikTok grants the video.list scope to populate video rows and performance metrics.</p>
-            </div>
+            <Callout tone="warning" title="Waiting for TikTok video metrics">
+              Run a manual sync after TikTok grants the video.list scope to populate video rows and performance metrics.
+            </Callout>
           )}
         </div>
       </div>
@@ -499,12 +479,10 @@ function AutoLabEmptyState({ dataSpaceSlug }: { dataSpaceSlug: string }) {
     <GlassPanel className="grid gap-5 p-5 sm:p-7">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-3xl">
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-rose-200/20 bg-rose-300/10">
-            <Car className="h-6 w-6 text-rose-100" />
-          </div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-200/80">Isolated testing space</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Auto Lab has no sources yet</h2>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
+          <IconTile icon={Car} tone="warning" size="lg" className="mb-4" />
+          <p className="eyebrow">Isolated testing space</p>
+          <h2 className="mt-1 text-[24px] font-bold tracking-[-0.025em] text-label">Auto Lab has no sources yet</h2>
+          <p className="mt-3 text-sm leading-6 text-label-secondary">
             Use this space to test personal car/content TikTok and Instagram accounts. Company sources are intentionally excluded from this workspace.
           </p>
         </div>
@@ -684,27 +662,27 @@ export default async function DataSpaceDashboardPage({
 
       {websiteOverview ? <GlobalHealthStrip health={health} /> : null}
 
+      {!autoLabEmpty ? <ConnectionHealthPanel sources={sources} basePath={basePath} /> : null}
+
       {!autoLabEmpty ? (
-        <details className="group glass rounded-xl" data-testid="daily-report-module">
-          <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 transition hover:bg-white/[0.025]">
+        <details className="group glass rounded-3xl" data-testid="daily-report-module">
+          <summary className="flex cursor-pointer items-center justify-between gap-3 rounded-3xl p-4 transition hover:bg-fill">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10">
-                <FileText className="h-4 w-4 text-cyan-100" />
-              </span>
+              <IconTile icon={FileText} tone="tint" />
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/70">Daily Morning Report</p>
-                <h2 className="truncate text-sm font-semibold text-white">
+                <p className="eyebrow">Daily Morning Report</p>
+                <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-label">
                   {yesterdayReport ? "Yesterday's report is ready" : "Yesterday's report has not been generated"}
                 </h2>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Badge tone={yesterdayReport ? "green" : "amber"}>{yesterdayReport ? "Ready" : "Action"}</Badge>
-              <ChevronDown className="h-4 w-4 text-slate-500 transition group-open:rotate-180" aria-hidden="true" />
+              <Badge tone={yesterdayReport ? "green" : "amber"} dot>{yesterdayReport ? "Ready" : "Action"}</Badge>
+              <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
             </div>
           </summary>
-          <div className="flex flex-col gap-3 border-t border-white/10 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-400">
+          <div className="flex flex-col gap-3 border-t border-separator p-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-label-secondary">
               {yesterdayReport ? `Generated ${yesterdayReport.run.generated_at_pt}.` : "Generate a safe PT daily snapshot from this data space when you are ready."}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -722,18 +700,21 @@ export default async function DataSpaceDashboardPage({
       ) : null}
 
       {!autoLabEmpty ? (
-        <details className="group glass rounded-xl" data-testid="more-integrations">
-          <summary className="flex cursor-pointer items-center justify-between gap-4 p-3 transition hover:bg-white/[0.025]">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">More integrations</p>
-              <h2 className="mt-0.5 text-sm font-semibold text-white">Planned and custom sources</h2>
+        <details className="group glass rounded-3xl" data-testid="more-integrations">
+          <summary className="flex cursor-pointer items-center justify-between gap-4 rounded-3xl p-4 transition hover:bg-fill">
+            <div className="flex min-w-0 items-center gap-3">
+              <IconTile icon={Plus} tone="neutral" />
+              <div className="min-w-0">
+                <p className="eyebrow">More integrations</p>
+                <h2 className="mt-0.5 text-[15px] font-semibold tracking-[-0.01em] text-label">Planned and custom sources</h2>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-500">
+            <div className="flex items-center gap-2 text-xs text-muted">
               <span>{futureModules.length} modules</span>
               <ChevronDown className="h-4 w-4 shrink-0 transition group-open:rotate-180" aria-hidden="true" />
             </div>
           </summary>
-          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 border-t border-white/10 p-3 sm:p-4">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 border-t border-separator p-4">
             <div className="flex justify-end">
               <LinkButton href={`${basePath}/sources`} variant="secondary" className="min-h-11 px-3 text-xs">
                 Source management
@@ -742,7 +723,7 @@ export default async function DataSpaceDashboardPage({
             </div>
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 [&_a]:!min-h-11 [&_button]:!min-h-11">
               {futureModules.map((module) => (
-                <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
+                <PlatformModuleCard key={module.sourceTypeKey} module={module} basePath={basePath} dataSpaceSlug={dataSpace.slug} surface="inset" />
               ))}
             </div>
           </div>

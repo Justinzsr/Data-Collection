@@ -31,40 +31,40 @@ export function MetricTrendChart({
     <GlassPanel className="min-h-[22rem] p-4 sm:p-5">
       <div className="mb-4">
         <div>
-          <h2 className="text-base font-semibold text-white">{title}</h2>
-          <p className="text-sm text-slate-400">{description}</p>
+          <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">{title}</h2>
+          <p className="text-sm text-label-secondary">{description}</p>
         </div>
       </div>
-      <div className="h-72 min-w-0 rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="h-72 min-w-0 rounded-xl bg-fill p-3">
         {chartData.length > 0 ? (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label={`${title} chart`}>
             <defs>
               <linearGradient id="moonTrendSvg" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.42" />
-                <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.04" />
+                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity="0.28" />
+                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity="0.02" />
               </linearGradient>
             </defs>
             {[20, 40, 60, 80].map((y) => (
-              <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="rgba(148,163,184,0.13)" strokeWidth="0.25" />
+              <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="var(--chart-grid)" strokeWidth="0.25" />
             ))}
             {paths.line ? (
               <>
                 <path d={paths.area} fill="url(#moonTrendSvg)" />
-                <path d={paths.line} fill="none" stroke="#38bdf8" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+                <path d={paths.line} fill="none" stroke="var(--chart-1)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
               </>
             ) : null}
           </svg>
         ) : (
           <div className="grid h-full place-items-center px-4 text-center" role="status">
             <div>
-              <p className="text-sm font-medium text-slate-200">No trend data yet</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">Connect or sync this source to populate the chart.</p>
+              <p className="text-sm font-medium text-label">No trend data yet</p>
+              <p className="mt-1 text-xs leading-5 text-muted">Connect or sync this source to populate the chart.</p>
             </div>
           </div>
         )}
       </div>
       {chartData.length > 0 ? (
-        <div className="mt-2 flex justify-between text-xs text-slate-500">
+        <div className="mt-2 flex justify-between text-xs text-muted">
           <span>{first}</span>
           <span>{last}</span>
         </div>
@@ -81,21 +81,21 @@ export function SourceComparisonChart({
   const max = Math.max(...data.flatMap((item) => [item.page_views, item.custom_events, item.signups]), 1);
   return (
     <GlassPanel className="p-4 sm:p-5">
-      <h2 className="text-base font-semibold text-white">Source comparison</h2>
-      <p className="mb-4 text-sm text-slate-400">Website and Supabase are primary in this MVP.</p>
-      <div className="grid h-64 min-w-0 grid-cols-2 items-end gap-4 rounded-lg border border-white/10 bg-black/20 p-4">
+      <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">Source comparison</h2>
+      <p className="mb-4 text-sm text-label-secondary">Website and Supabase are primary in this MVP.</p>
+      <div className="grid h-64 min-w-0 grid-cols-2 items-end gap-4 rounded-xl bg-fill p-4">
         {data.slice(0, 4).map((item) => {
           const total = item.page_views + item.custom_events + item.signups;
           return (
             <div key={item.sourceId} className="flex h-full min-w-0 flex-col justify-end gap-2">
               <div className="flex min-h-0 flex-1 items-end gap-1">
-                <span className="block w-full rounded-t bg-cyan-300/80" style={{ height: `${Math.max(4, (item.page_views / max) * 100)}%` }} />
-                <span className="block w-full rounded-t bg-teal-300/80" style={{ height: `${Math.max(4, (item.custom_events / max) * 100)}%` }} />
-                <span className="block w-full rounded-t bg-indigo-300/80" style={{ height: `${Math.max(4, (item.signups / max) * 100)}%` }} />
+                <span className="block w-full rounded-t bg-tint" style={{ height: `${Math.max(4, (item.page_views / max) * 100)}%` }} />
+                <span className="block w-full rounded-t bg-teal" style={{ height: `${Math.max(4, (item.custom_events / max) * 100)}%` }} />
+                <span className="block w-full rounded-t bg-indigo" style={{ height: `${Math.max(4, (item.signups / max) * 100)}%` }} />
               </div>
               <div>
-                <p className="truncate text-xs font-medium text-slate-200">{item.sourceType}</p>
-                <p className="text-xs text-slate-500">{new Intl.NumberFormat("en-US").format(total)}</p>
+                <p className="truncate text-xs font-medium text-label">{item.sourceType}</p>
+                <p className="text-xs text-muted">{new Intl.NumberFormat("en-US").format(total)}</p>
               </div>
             </div>
           );

@@ -72,8 +72,8 @@ export function MetaAdsAccountSelector({
   return (
     <div className="mt-4 grid gap-3">
       <div>
-        <p className="text-sm font-medium text-white">Choose the Meta ad account to monitor</p>
-        <p className="mt-1 text-xs leading-5 text-slate-500">
+        <p className="text-sm font-medium text-label">Choose the Meta ad account to monitor</p>
+        <p className="mt-1 text-xs leading-5 text-muted">
           These accounts came directly from the completed OAuth connection. The selection is saved by the server and the OAuth token never reaches this page.
         </p>
       </div>
@@ -82,18 +82,18 @@ export function MetaAdsAccountSelector({
           const selected = selectedAccountId === candidate.id;
           const loading = selectingId === candidate.id;
           return (
-            <div key={candidate.id} className="min-w-0 rounded-xl border border-white/10 bg-black/20 p-3">
+            <div key={candidate.id} className="min-w-0 rounded-2xl bg-fill p-3">
               <div className="flex min-w-0 items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-2">
-                  <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" aria-hidden="true" />
+                  <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-tint-text" aria-hidden="true" />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-white">{candidate.name ?? "Unnamed Meta ad account"}</p>
-                    <p className="mt-1 break-all font-mono text-xs text-slate-500">{candidate.id}</p>
+                    <p className="truncate text-sm font-medium text-label">{candidate.name ?? "Unnamed Meta ad account"}</p>
+                    <p className="mt-1 break-all font-mono text-xs text-muted">{candidate.id}</p>
                   </div>
                 </div>
                 {selected ? <Badge tone="green">selected</Badge> : null}
               </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
+              <div className="mt-3 flex flex-wrap gap-2 text-xs text-label-secondary">
                 {candidate.currency ? <Badge>{candidate.currency}</Badge> : null}
                 {candidate.timezone ? <Badge className="max-w-full truncate">{candidate.timezone}</Badge> : null}
                 {candidate.accountStatus !== null ? <Badge>status {candidate.accountStatus}</Badge> : null}

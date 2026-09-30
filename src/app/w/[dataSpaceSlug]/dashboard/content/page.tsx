@@ -1,15 +1,23 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Camera, ChevronLeft, ChevronRight, ExternalLink, Eye, Heart, MessageCircle, Share2, Video } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Eye, Heart, MessageCircle, Share2, Video } from "lucide-react";
 import type { ReactNode } from "react";
 import { getContentDashboard } from "@/aggregation/services/content-service";
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { Badge } from "@/presentation/components/ui/badge";
 import { LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
+import { IconTile, PlatformIcon } from "@/presentation/components/ui/platform-icon";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
 import { formatAppDateTime } from "@/storage/runtime/app-time";
 
 export const dynamic = "force-dynamic";
+
+const PLATFORM_FILTER_LABELS: Record<string, string> = {
+  tiktok: "TikTok",
+  instagram: "Instagram",
+  xiaohongshu: "Xiaohongshu",
+};
 
 type ContentDashboard = Awaited<ReturnType<typeof getContentDashboard>>;
 type ContentItemRow = ContentDashboard["items"][number];
@@ -54,14 +62,13 @@ function contentMetricTiles(content: ContentDashboard, itemId: string, sourceTyp
   return [];
 }
 
-function platformMeta(sourceTypeKey: string): { eyebrow: string; title: string; tone: BadgeTone; icon: ReactNode; sectionClass: string } {
+function platformMeta(sourceTypeKey: string): { eyebrow: string; title: string; tone: BadgeTone; icon: ReactNode } {
   if (sourceTypeKey === "tiktok") {
     return {
       eyebrow: "Official TikTok API",
       title: "TikTok videos",
-      tone: "rose",
-      icon: <Video className="h-5 w-5 text-rose-100" />,
-      sectionClass: "border-rose-200/10 bg-rose-300/[0.04]",
+      tone: "indigo",
+      icon: <PlatformIcon sourceTypeKey="tiktok" size="lg" />,
     };
   }
   if (sourceTypeKey === "instagram") {
@@ -69,16 +76,14 @@ function platformMeta(sourceTypeKey: string): { eyebrow: string; title: string; 
       eyebrow: "Instagram Graph API",
       title: "Instagram media",
       tone: "indigo",
-      icon: <Camera className="h-5 w-5 text-indigo-100" />,
-      sectionClass: "border-indigo-200/10 bg-indigo-300/[0.04]",
+      icon: <PlatformIcon sourceTypeKey="instagram" size="lg" />,
     };
   }
   return {
     eyebrow: "Content source",
     title: "Other content",
     tone: "slate",
-    icon: <Video className="h-5 w-5 text-slate-100" />,
-    sectionClass: "border-white/10 bg-white/[0.03]",
+    icon: <PlatformIcon sourceTypeKey={sourceTypeKey} size="lg" />,
   };
 }
 
@@ -125,7 +130,7 @@ export default async function ContentPage({
   const filterHref = (nextPlatform: string, nextPage = 1) => `${basePath}/content?platform=${encodeURIComponent(nextPlatform)}&page=${nextPage}`;
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-6">
+    <div className="mx-auto grid max-w-7xl gap-5">
       <SectionHeader
         eyebrow="Aggregation layer"
         title={`${dataSpace.display_name} Content performance`}
@@ -133,15 +138,15 @@ export default async function ContentPage({
       />
       {content.items.length ? (
         <div className="grid gap-6">
-          <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.025] p-3 sm:flex-row sm:items-center sm:justify-between">
-            <nav className="flex max-w-full gap-2 overflow-x-auto pb-1" aria-label="Filter content by platform">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <nav className="segmented max-w-full flex-nowrap overflow-x-auto" aria-label="Filter content by platform">
               {["all", ...availablePlatforms].map((key) => (
-                <LinkButton key={key} href={filterHref(key)} variant={platform === key ? "primary" : "ghost"} className="min-h-9 shrink-0 px-3 capitalize" aria-current={platform === key ? "page" : undefined}>
-                  {key === "all" ? `All (${content.items.length})` : key}
-                </LinkButton>
+                <Link key={key} href={filterHref(key)} className="segmented-item min-h-9 shrink-0" aria-current={platform === key ? "page" : undefined}>
+                  {key === "all" ? `All (${content.items.length})` : PLATFORM_FILTER_LABELS[key] ?? key}
+                </Link>
               ))}
             </nav>
-            <p className="text-xs text-slate-500">Showing {pagedItems.length} of {filteredItems.length}</p>
+            <p className="px-1 text-xs text-muted">Showing {pagedItems.length} of {filteredItems.length}</p>
           </div>
           {contentGroups.map(([sourceTypeKey, items]) => {
             const meta = platformMeta(sourceTypeKey);
@@ -149,12 +154,10 @@ export default async function ContentPage({
               <section key={sourceTypeKey} className="grid gap-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                   <div className="flex items-start gap-3">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06]">
-                      {meta.icon}
-                    </span>
+                    {meta.icon}
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{meta.eyebrow}</p>
-                      <h2 className="mt-1 text-xl font-semibold text-white">{meta.title}</h2>
+                      <p className="eyebrow">{meta.eyebrow}</p>
+                      <h2 className="mt-1 text-[20px] font-semibold tracking-[-0.022em] text-label">{meta.title}</h2>
                     </div>
                   </div>
                   <Badge tone={meta.tone} className="self-start">{items.length} content rows</Badge>
@@ -165,7 +168,7 @@ export default async function ContentPage({
                     const title = item.title ?? item.external_content_id;
                     const description = item.caption ?? "Waiting for caption/description data";
                     return (
-                      <GlassPanel key={item.id} className={`p-4 ${meta.sectionClass}`}>
+                      <GlassPanel key={item.id} className="p-4 sm:p-5">
                         <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
                           <div className="min-w-0">
                             <div className="mb-2 flex flex-wrap gap-2">
@@ -173,8 +176,8 @@ export default async function ContentPage({
                               <Badge>{item.content_type}</Badge>
                               {item.published_at ? <Badge tone="slate">{formatAppDateTime(item.published_at)}</Badge> : null}
                             </div>
-                            <p className="break-words font-medium text-white">{title}</p>
-                            <p className="mt-1 break-words text-sm leading-6 text-slate-300">{description}</p>
+                            <p className="break-words text-[15px] font-semibold tracking-[-0.01em] text-label">{title}</p>
+                            <p className="mt-1 break-words text-sm leading-6 text-label-secondary">{description}</p>
                           </div>
                           {item.url ? (
                             <LinkButton href={item.url} variant="ghost" className="min-h-9 shrink-0 px-3 text-xs" target="_blank" rel="noreferrer">
@@ -187,12 +190,12 @@ export default async function ContentPage({
                           {contentMetricTiles(content, item.id, item.source_type_key).map((metric) => {
                             const waiting = metric.value === "Waiting for scope/data";
                             return (
-                              <div key={metric.label} className="rounded-lg border border-white/10 bg-black/20 p-2">
-                                <p className="flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                              <div key={metric.label} className="inset-surface p-2.5">
+                                <p className="flex items-center gap-1 text-[11px] text-muted">
                                   <MetricIcon label={metric.label} />
                                   {metric.label}
                                 </p>
-                                <p className={`mt-1 break-words font-semibold ${waiting ? "text-xs leading-4 text-amber-100" : "text-sm text-white"}`}>{metric.value}</p>
+                                <p className={`mt-1 break-words font-semibold ${waiting ? "text-xs leading-4 text-warning" : "text-sm text-label"}`}>{metric.value}</p>
                               </div>
                             );
                           })}
@@ -208,11 +211,11 @@ export default async function ContentPage({
             );
           })}
           {totalPages > 1 ? (
-            <nav className="flex items-center justify-between gap-3 border-t border-white/10 pt-4" aria-label="Content pagination">
+            <nav className="flex items-center justify-between gap-3 border-t border-separator pt-4" aria-label="Content pagination">
               {page > 1 ? (
                 <LinkButton href={filterHref(platform, page - 1)} variant="secondary"><ChevronLeft className="h-4 w-4" /> Previous</LinkButton>
               ) : <span />}
-              <p className="text-sm text-slate-400">Page {page} of {totalPages}</p>
+              <p className="text-sm text-label-secondary">Page {page} of {totalPages}</p>
               {page < totalPages ? (
                 <LinkButton href={filterHref(platform, page + 1)} variant="secondary">Next <ChevronRight className="h-4 w-4" /></LinkButton>
               ) : <span />}
@@ -220,9 +223,10 @@ export default async function ContentPage({
           ) : null}
         </div>
       ) : (
-        <GlassPanel className="p-5">
-          <h2 className="text-lg font-semibold text-white">{dataSpace.display_name} has no content sources yet</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-300">
+        <GlassPanel className="p-6">
+          <IconTile icon={Video} tone="pink" size="lg" className="mb-4" />
+          <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">{dataSpace.display_name} has no content sources yet</h2>
+          <p className="mt-2 text-sm leading-6 text-label-secondary">
             {dataSpace.slug === "auto-lab"
               ? "Use this space to test personal car/content TikTok and Instagram accounts."
               : "Connect a content source later with official APIs or webhooks before content metrics appear."}

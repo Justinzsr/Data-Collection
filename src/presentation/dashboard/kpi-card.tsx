@@ -1,4 +1,3 @@
-import { ArrowUpRight, Info } from "lucide-react";
 import { Badge } from "@/presentation/components/ui/badge";
 import { GlassPanel } from "@/presentation/components/ui/panel";
 
@@ -9,19 +8,11 @@ function formatValue(value: string | number) {
 
 export function KpiCard({ label, value, source, demo }: { label: string; value: string | number; source: string; demo?: boolean }) {
   return (
-    <GlassPanel className="min-h-36 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="flex items-center gap-1.5 text-sm text-slate-400">
-            {label}
-            <Info className="h-3.5 w-3.5 text-slate-600" />
-          </p>
-          <p className="mt-3 text-3xl font-semibold tracking-tight text-white">{formatValue(value)}</p>
-        </div>
-        <ArrowUpRight className="h-5 w-5 text-cyan-200/70" />
-      </div>
-      <div className="mt-5 flex flex-wrap items-center gap-2">
-        <Badge tone="cyan">{source}</Badge>
+    <GlassPanel className="flex min-h-32 flex-col rounded-[22px] p-4">
+      <p className="text-[13px] font-medium leading-5 text-label-secondary">{label}</p>
+      <p className="tabular mt-2 text-[30px] font-semibold leading-9 tracking-[-0.035em] text-label">{formatValue(value)}</p>
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
+        <Badge tone="slate" className="font-mono font-medium">{source}</Badge>
         {demo ? <Badge tone="amber">demo</Badge> : null}
       </div>
     </GlassPanel>

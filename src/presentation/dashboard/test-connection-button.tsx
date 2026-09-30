@@ -25,7 +25,7 @@ export function TestConnectionButton({ sourceId, compact = false, dataSpaceSlug 
     }
   }
   return (
-    <Button onClick={run} disabled={loading} variant="secondary" className={compact ? "px-3" : undefined}>
+    <Button onClick={run} disabled={loading} variant="secondary" className={compact ? "px-3.5" : undefined}>
       {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
       {compact ? "Test" : "Test Connection"}
     </Button>

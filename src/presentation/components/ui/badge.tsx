@@ -1,33 +1,53 @@
 import { cn } from "@/presentation/components/ui/utils";
 
 const tones = {
-  cyan: "border-cyan-300/25 bg-cyan-300/10 text-cyan-100",
-  green: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100",
-  amber: "border-amber-300/25 bg-amber-400/10 text-amber-100",
-  rose: "border-rose-300/25 bg-rose-400/10 text-rose-100",
-  slate: "border-slate-300/15 bg-slate-400/10 text-slate-200",
-  indigo: "border-indigo-300/25 bg-indigo-400/10 text-indigo-100",
+  cyan: "bg-tint/12 text-tint-text",
+  green: "bg-positive-fill/15 text-positive",
+  amber: "bg-warning-fill/16 text-warning",
+  rose: "bg-negative-fill/12 text-negative",
+  slate: "bg-fill-strong text-label-secondary",
+  indigo: "bg-indigo-fill/14 text-indigo",
 };
+
+const dots: Record<keyof typeof tones, string> = {
+  cyan: "bg-tint",
+  green: "bg-positive-fill",
+  amber: "bg-warning-fill",
+  rose: "bg-negative-fill",
+  slate: "bg-label-quaternary",
+  indigo: "bg-indigo-fill",
+};
+
+export type BadgeTone = keyof typeof tones;
 
 export function Badge({
   children,
   tone = "slate",
+  dot = false,
   className,
 }: {
   children: React.ReactNode;
-  tone?: keyof typeof tones;
+  tone?: BadgeTone;
+  dot?: boolean;
   className?: string;
 }) {
   return (
-    <span className={cn("inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium", tones[tone], className)}>
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-[3px] text-xs font-semibold leading-4 tracking-[-0.005em]",
+        tones[tone],
+        className,
+      )}
+    >
+      {dot ? <span aria-hidden="true" className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dots[tone])} /> : null}
       {children}
     </span>
   );
 }
 
-export function statusTone(status: string): keyof typeof tones {
+export function statusTone(status: string): BadgeTone {
   if (["healthy", "success", "connected"].includes(status)) return "green";
-  if (["demo", "running"].includes(status)) return "cyan";
+  if (["demo", "running", "info"].includes(status)) return "cyan";
   if (["needs_credentials", "warning", "queued", "skipped"].includes(status)) return "amber";
   if (["error", "disabled"].includes(status)) return "rose";
   return "slate";

@@ -33,7 +33,8 @@ Aggregation and sync rules:
 - Store raw payload hashes and upsert daily metrics by date/source/metric/dimensions.
 
 UI rules:
-- Keep the UI futuristic, premium, readable, responsive, and dark-first.
+- Follow the Liquid Glass design system in `docs/design-system.md`: clean, minimal, premium, readable, and responsive.
+- Support light and dark appearance (the OS setting by default, overridable in Settings). Use only the semantic tokens from `src/app/globals.css`; never hardcode palette colors.
 - Avoid generic admin-template visuals and unreadable neon overload.
 - Verify no horizontal overflow on mobile widths.
 

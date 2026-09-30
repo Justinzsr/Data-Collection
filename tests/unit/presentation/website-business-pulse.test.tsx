@@ -31,7 +31,7 @@ describe("WebsiteBusinessPulse", () => {
         expect.objectContaining({
           kind: "positive",
           label: "+20.0% vs previous",
-          className: expect.stringContaining("text-emerald-200"),
+          className: expect.stringContaining("text-positive"),
         }),
       ]),
     );

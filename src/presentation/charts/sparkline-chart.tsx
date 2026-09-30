@@ -26,25 +26,30 @@ export function buildSparklinePath(data: { value: number }[]) {
     .join(" ");
 }
 
+const legacyTones = {
+  cyan: "var(--chart-1)",
+  teal: "var(--chart-3)",
+  indigo: "var(--chart-7)",
+  amber: "var(--chart-4)",
+  rose: "var(--chart-8)",
+} as const;
+
 export function SparklineChart({
   data,
   tone = "cyan",
+  color,
   label,
   compact = false,
 }: {
   data: { date: string; value: number }[];
-  tone?: "cyan" | "teal" | "indigo" | "amber" | "rose";
+  tone?: keyof typeof legacyTones;
+  color?: string;
   label: string;
   compact?: boolean;
 }) {
-  const stroke = {
-    cyan: "#38bdf8",
-    teal: "#2dd4bf",
-    indigo: "#818cf8",
-    amber: "#f59e0b",
-    rose: "#fb7185",
-  }[tone];
+  const stroke = color ?? legacyTones[tone];
   const path = buildSparklinePath(data);
+  const area = path && data.length > 1 ? `${path} L 100.00 100.00 L 0.00 100.00 Z` : "";
   const values = data.map((point) => point.value);
   const dateDescription = data.length > 1
     ? `, dates ${data[0].date} to ${data.at(-1)!.date}`
@@ -56,14 +61,15 @@ export function SparklineChart({
     : ", no data in the selected range";
   return (
     <div
-      className={compact ? "h-11 min-w-0" : "h-20 min-w-0 rounded-lg border border-white/10 bg-black/20 px-2 py-2"}
+      className={compact ? "h-11 min-w-0" : "h-20 min-w-0 rounded-xl bg-fill px-2 py-2"}
       data-testid="platform-sparkline"
       data-overview-chart={compact ? "true" : undefined}
     >
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" role="img" aria-label={`${label} sparkline${dateDescription}${rangeDescription}`}>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={`${label} sparkline${dateDescription}${rangeDescription}`}>
         {(compact ? [50] : [28, 52, 76]).map((y) => (
-          <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="rgba(148,163,184,0.12)" strokeWidth="0.3" />
+          <line key={y} x1="0" x2="100" y1={y} y2={y} stroke="var(--chart-grid)" strokeWidth="0.3" />
         ))}
+        {area ? <path d={area} fill={stroke} fillOpacity={0.1} stroke="none" /> : null}
         <path d={path} fill="none" stroke={stroke} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </div>

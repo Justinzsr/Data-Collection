@@ -49,11 +49,15 @@ export function SyncActionButton({ sourceId, compact = false, dataSpaceSlug }: {
   }
   return (
     <span className="inline-flex flex-col gap-1">
-      <Button type="button" onClick={run} disabled={loading} variant="primary" className={compact ? "px-3" : undefined}>
+      <Button type="button" onClick={run} disabled={loading} variant={compact ? "tinted" : "primary"} className={compact ? "px-3.5" : undefined}>
         {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
         {compact ? "Sync" : "Run Sync Now"}
       </Button>
-      {resultLabel ? <span className="text-xs text-slate-400">{resultLabel}</span> : null}
+      {resultLabel ? (
+        <span className={`text-xs font-medium ${resultLabel === "Sync success" ? "text-positive" : "text-negative"}`} role="status">
+          {resultLabel}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -78,7 +82,7 @@ export function RunAllDueButton({ dataSpaceSlug, compact = false }: { dataSpaceS
     }
   }
   return (
-    <Button type="button" onClick={run} disabled={loading} variant="secondary" className={compact ? "min-h-9 px-3 text-xs" : undefined}>
+    <Button type="button" onClick={run} disabled={loading} variant="secondary" className={compact ? "px-3.5" : undefined}>
       {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
       Run All Due Sources
     </Button>
