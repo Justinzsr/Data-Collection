@@ -503,14 +503,6 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
-
-  .overview-module-card:has(> details[open]) {
-    grid-column: 1 / -1;
-  }
-
-  .overview-social-card[open] {
-    grid-column: 1 / -1;
-  }
 }
 
 /* Toasts share the navigation material (sonner injects unlayered CSS). */

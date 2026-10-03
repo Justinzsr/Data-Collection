@@ -20,7 +20,20 @@ function errorMessage(body: Record<string, unknown>, fallback: string) {
   return typeof body.error === "string" && body.error ? body.error : fallback;
 }
 
-export function SyncActionButton({ sourceId, compact = false, dataSpaceSlug }: { sourceId: string; compact?: boolean; dataSpaceSlug?: string }) {
+export function SyncActionButton({
+  sourceId,
+  compact = false,
+  dataSpaceSlug,
+  label,
+  className,
+}: {
+  sourceId: string;
+  compact?: boolean;
+  dataSpaceSlug?: string;
+  /** Overrides the default "Sync" / "Run Sync Now" text. */
+  label?: string;
+  className?: string;
+}) {
   const [loading, setLoading] = useState(false);
   const [resultLabel, setResultLabel] = useState<string | null>(null);
   const router = useRouter();
@@ -49,9 +62,9 @@ export function SyncActionButton({ sourceId, compact = false, dataSpaceSlug }: {
   }
   return (
     <span className="inline-flex flex-col gap-1">
-      <Button type="button" onClick={run} disabled={loading} variant={compact ? "tinted" : "primary"} className={compact ? "px-3.5" : undefined}>
-        {loading ? <RotateCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-        {compact ? "Sync" : "Run Sync Now"}
+      <Button type="button" onClick={run} disabled={loading} variant={compact ? "tinted" : "primary"} className={[compact ? "px-3.5" : null, className].filter(Boolean).join(" ") || undefined}>
+        {loading ? <RotateCw className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : label ? <RotateCw className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        {label ?? (compact ? "Sync" : "Run Sync Now")}
       </Button>
       {resultLabel ? (
         <span className={`text-xs font-medium ${resultLabel === "Sync success" ? "text-positive" : "text-negative"}`} role="status">

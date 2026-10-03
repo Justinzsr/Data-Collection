@@ -20,6 +20,7 @@ import type { DataSpace } from "@/storage/db/schema";
 
 const defaultOpenGroups: Record<DashboardNavGroup["id"], boolean> = {
   command: true,
+  platforms: true,
   manage: true,
   operations: true,
   insights: true,

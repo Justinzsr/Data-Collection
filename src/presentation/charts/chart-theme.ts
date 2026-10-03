@@ -9,9 +9,10 @@ const PLATFORM_SERIES: Record<string, string> = {
   tiktok: "var(--chart-3)",
   instagram: "var(--chart-4)",
   shopify: "var(--chart-5)",
-  meta_ads: "var(--chart-6)",
-  vercel_web_analytics_drain: "var(--chart-7)",
-  vercel_project: "var(--chart-7)",
+  // Meta Ads stays clear of the green used for "better" changes beside it.
+  meta_ads: "var(--chart-7)",
+  vercel_web_analytics_drain: "var(--chart-6)",
+  vercel_project: "var(--chart-6)",
   xiaohongshu: "var(--chart-8)",
 };
 

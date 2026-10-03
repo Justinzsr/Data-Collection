@@ -1,7 +1,10 @@
 # MoonArq Website Funnel Overview V1
 
-The canonical MoonArq Overview at `/w/moonarq/dashboard` derives storefront
-behavior from the authoritative first-party Website Tracker. It is an on-demand,
+The MoonArq Website page at `/w/moonarq/dashboard/platforms/website` derives
+storefront behavior from the authoritative first-party Website Tracker. (It was
+the Overview until the Overview became a per-platform summary; see
+[Platform Overview](platform-overview.md). Old Overview links carrying storefront
+filters are forwarded here after sanitization.) It is an on-demand,
 read-only view over retained `web_events`; V1 does not add a migration or a
 persisted funnel table.
 
@@ -187,6 +190,8 @@ and delayed/disagreeing daily aggregate states. Fewer than 20 starting sessions
 shows `Limited data — rates are directional` while retaining exact counts and
 rates.
 
+Shopify commerce outcomes now live on the Shopify page
+(`/w/moonarq/dashboard/platforms/shopify`) with the same rules.
 Shopify commerce values are authoritative only when the source is healthy and
 has a non-null successful-sync timestamp. Not connected, credentials required,
 awaiting first sync, sync error, demo, and disabled states withhold numeric

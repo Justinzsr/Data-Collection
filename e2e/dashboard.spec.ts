@@ -4,12 +4,10 @@ import { loginDashboard } from "./auth";
 test("dashboard login loads demo data", async ({ page }) => {
   await loginDashboard(page);
   await expect(page.getByRole("heading", { name: "MoonArq Overview" })).toBeVisible();
-  await expect(page.getByTestId("business-pulse")).toBeVisible();
-  await expect(page.getByTestId("storefront-funnel")).toBeVisible();
-  await expect(page.getByTestId("storefront-conversion-trend")).toBeVisible();
-  const overview = page.getByTestId("dashboard-overview");
-  await expect(overview.getByRole("link", { name: "Sources", exact: true })).toBeVisible();
-  await expect(overview.getByRole("link", { name: "Sync Center", exact: true })).toBeVisible();
+  await expect(page.getByTestId("paid-ads-overview")).toBeVisible();
+  await expect(page.getByTestId("platform-card-website")).toContainText("Sessions");
+  await expect(page.getByTestId("platform-card-supabase")).toContainText("New signups");
+  await expect(page.getByTestId("overview-header").getByRole("button", { name: "Refresh" })).toBeVisible();
 });
 
 test("add source wizard detects Supabase and website", async ({ page }) => {
@@ -45,13 +43,15 @@ test("events page shows snippets", async ({ page }) => {
 });
 
 test("data explorer and daily report are reachable from the dashboard", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard");
-  const dailyReportModule = page.getByTestId("daily-report-module");
-  await expect(dailyReportModule).toHaveJSProperty("open", false);
-  await dailyReportModule.locator("summary").click();
-  await expect(page.getByRole("link", { name: /Open Report/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Explore Data/ })).toBeVisible();
+  const sidebar = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(sidebar.getByRole("link", { name: "Data Explorer" })).toHaveAttribute("href", "/w/moonarq/dashboard/data");
+  await expect(sidebar.getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/w/moonarq/dashboard/reports/daily");
+  for (const platform of ["Meta Ads", "Website", "Shopify", "Instagram", "TikTok", "Supabase"]) {
+    await expect(sidebar.getByRole("link", { name: platform, exact: true })).toBeVisible();
+  }
   await page.goto("/w/moonarq/dashboard/data");
   await expect(page.getByRole("heading", { name: "MoonArq Source Data Explorer" })).toBeVisible();
   await expect(page.getByText("Website / Vercel").first()).toBeVisible();
@@ -64,13 +64,18 @@ test("data explorer and daily report are reachable from the dashboard", async ({
 test("Auto Lab workspace is empty and isolated", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/auto-lab/dashboard");
-  await expect(page.getByRole("heading", { name: "Auto Lab command center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Auto Lab Overview" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Auto Lab has no sources yet" })).toBeVisible();
   await expect(page.getByText("Use this space to test personal car/content TikTok and Instagram accounts.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Add Auto Lab TikTok" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Add Auto Lab Instagram" })).toBeVisible();
-  await expect(page.locator("article").filter({ hasText: "MoonArq Website / Vercel" })).toHaveCount(0);
-  await expect(page.locator("article").filter({ hasText: "MoonArq Supabase" })).toHaveCount(0);
+  await expect(page.getByTestId("paid-ads-overview")).toHaveCount(0);
+  await expect(page.locator("[data-testid^='platform-card-']")).toHaveCount(0);
+  const sidebar = page.getByRole("navigation", { name: "Primary navigation" });
+  if (await sidebar.isVisible()) {
+    await expect(sidebar.getByRole("link", { name: "Meta Ads", exact: true })).toHaveCount(0);
+    await expect(sidebar.getByRole("link", { name: "Instagram", exact: true })).toHaveAttribute("href", "/w/auto-lab/dashboard/platforms/instagram");
+  }
 });
 
 test("settings preserves the selected workspace", async ({ page }) => {

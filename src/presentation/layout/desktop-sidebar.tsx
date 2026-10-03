@@ -18,6 +18,7 @@ import { WorkspaceIcon } from "@/presentation/layout/workspace-icon";
 
 const defaultOpenGroups: Record<DashboardNavGroup["id"], boolean> = {
   command: true,
+  platforms: true,
   manage: true,
   operations: true,
   insights: true,

@@ -69,6 +69,25 @@ Rules:
   gradients are the `--icon-*` tokens (identical in light and dark, like Apple's Settings
   icons) applied through the `.app-icon` class; they are for icons only, never UI state.
 - `formatRelativeTime` / `daysUntil` — server-rendered relative times.
+- `formatMetricValue` / `formatAxisValue` (`format.ts`) — one formatter for counts, percentages,
+  ratios, and currencies; `null` always renders as an em dash, never as zero.
+
+## Overview and platform pages
+
+- The Overview leads with the paid-ads monitor (`PaidAdsHero`), the one large element on the
+  page, followed by a grid of `PlatformOverviewCard`s (one column on phones, two from `sm`,
+  three from `xl`) and an "Add a platform" tile. On phones each card condenses to one row:
+  name and status on the left, the headline number and its change on the right.
+- A card is a single link: the title carries a stretched `::after` hit area and the card
+  draws the focus ring with `has-[a:focus-visible]`. Keep other links and buttons out of
+  cards so the hit area never nests interactive elements.
+- `MetricDelta` shows change with an arrow and a signed value (`+12.4%`, `−38`, `+0.3 pt`);
+  tone comes from whether higher is better, so costs turn green when they fall and spend stays
+  neutral. Flat changes read "No change", and unmeasurable ones render nothing.
+- Detail pages start with `PlatformPageHeader` (back to Overview, platform icon, title, status,
+  date range, actions), then `MetricTileGrid`, then `DailyMetricChart`s.
+- Status comes from `platformHealth`, which folds the source status, sync freshness, and OAuth
+  renewal dates into one label; `AttentionBanner` lists only the connections someone must act on.
 
 ## Navigation
 
@@ -76,10 +95,17 @@ Rules:
 - Mobile: toolbar with the navigation sheet (`Open navigation`) and a floating tab bar
   (Overview, Sources, Sync, Data, Search).
 - ⌘K / Ctrl+K opens the command palette: pages, sources, actions, and workspaces.
+- The sidebar groups pages as Command (Overview), Platforms (one page per platform; Auto Lab
+  lists only Instagram and TikTok), Manage, Operations, and Insights.
 
 ## Charts
 
 Series colors come from `src/presentation/charts/chart-theme.ts`, which maps each
 platform to a fixed slot of the validated categorical palette (`--chart-1…8`). A platform
 keeps its color everywhere. Axis ticks use `--chart-axis`, grids `--chart-grid`, and
-tooltips share the navigation glass.
+tooltips share the navigation glass. Meta Ads uses an indigo slot so its series never reads
+as the green of an improving change beside it.
+
+`DailyMetricChart` draws one daily series with a single axis: bars for amounts that add up per
+day (spend, orders, signups) and a line for running levels (followers). Every chart keeps a
+"View daily values" table with the same numbers.

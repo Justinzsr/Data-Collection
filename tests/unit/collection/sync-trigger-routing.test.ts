@@ -166,6 +166,74 @@ describe("sync engine", () => {
     expect(JSON.stringify(body)).not.toContain("error_stack");
   });
 
+  it("live monitors share one sync per interval: a fresh source is not synced again", async () => {
+    const store = getDemoStore();
+    const source = store.sources.find((item) => item.id === DEMO_SOURCE_IDS.supabase);
+    if (!source) throw new Error("Missing Supabase source");
+    source.last_success_at = new Date(Date.now() - 5 * 60_000).toISOString();
+    const runsBefore = store.syncRuns.length;
+
+    const response = await syncSourceRoute(
+      new Request(`https://app.example.com/api/sources/${source.id}/sync?minAgeMinutes=15`, { method: "POST" }),
+      { params: Promise.resolve({ id: source.id }) },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ ok: true, fresh: true, run: null, last_success_at: source.last_success_at });
+    // Ask again when the server's clock says the data turns stale: about ten minutes from now.
+    expect(body.retry_after_ms).toBeGreaterThan(9 * 60_000);
+    expect(body.retry_after_ms).toBeLessThanOrEqual(10 * 60_000);
+    expect(store.syncRuns).toHaveLength(runsBefore);
+  });
+
+  it("live monitors wait for a running sync instead of recording a skipped run", async () => {
+    const store = getDemoStore();
+    const source = store.sources.find((item) => item.id === DEMO_SOURCE_IDS.supabase);
+    if (!source) throw new Error("Missing Supabase source");
+    source.last_success_at = new Date(Date.now() - 20 * 60_000).toISOString();
+    const lock = await acquireSourceLock(source.id, "other-run");
+    if (!lock) throw new Error("Could not take the source lock");
+    const runsBefore = store.syncRuns.length;
+    try {
+      const response = await syncSourceRoute(
+        new Request(`https://app.example.com/api/sources/${source.id}/sync?minAgeMinutes=15`, { method: "POST" }),
+        { params: Promise.resolve({ id: source.id }) },
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, in_progress: true, run: null });
+      expect(store.syncRuns).toHaveLength(runsBefore);
+    } finally {
+      await releaseSourceLock(source.id, "other-run", lock.lock_key);
+    }
+  });
+
+  it("live monitors sync a source once it is older than the allowed age", async () => {
+    const store = getDemoStore();
+    const source = store.sources.find((item) => item.id === DEMO_SOURCE_IDS.supabase);
+    if (!source) throw new Error("Missing Supabase source");
+    source.last_success_at = new Date(Date.now() - 20 * 60_000).toISOString();
+
+    const response = await syncSourceRoute(
+      new Request(`https://app.example.com/api/sources/${source.id}/sync?minAgeMinutes=15`, { method: "POST" }),
+      { params: Promise.resolve({ id: source.id }) },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, run: { trigger: "manual", status: "success" } });
+  });
+
+  it("rejects an invalid live-monitor age without syncing", async () => {
+    const store = getDemoStore();
+    const runsBefore = store.syncRuns.length;
+    for (const value of ["0", "1.5", "abc", "1441"]) {
+      const response = await syncSourceRoute(
+        new Request(`https://app.example.com/api/sources/${DEMO_SOURCE_IDS.supabase}/sync?minAgeMinutes=${value}`, { method: "POST" }),
+        { params: Promise.resolve({ id: DEMO_SOURCE_IDS.supabase }) },
+      );
+      expect(response.status, value).toBe(400);
+    }
+    expect(store.syncRuns).toHaveLength(runsBefore);
+  });
+
   it("manual sync API returns structured success data for the toast and refresh path", async () => {
     const response = await syncSourceRoute(
       new Request(`https://app.example.com/api/sources/${DEMO_SOURCE_IDS.supabase}/sync`, { method: "POST" }),

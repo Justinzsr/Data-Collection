@@ -1,15 +1,20 @@
 import {
   Activity,
   BarChart3,
+  Camera,
   DatabaseZap,
   FileText,
   Gauge,
+  Globe2,
   HeartPulse,
+  Megaphone,
   RadioTower,
   Settings,
   ShoppingBag,
   Sparkles,
   TableProperties,
+  Users,
+  Video,
   type LucideIcon,
 } from "lucide-react";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
@@ -21,10 +26,26 @@ export type DashboardNavItem = {
 };
 
 export type DashboardNavGroup = {
-  id: "command" | "manage" | "operations" | "insights";
+  id: "command" | "platforms" | "manage" | "operations" | "insights";
   label: string;
   items: DashboardNavItem[];
 };
+
+/** Platform detail pages. MoonArq has the full set; other spaces hold social accounts only. */
+export function getPlatformNavItems(dataSpaceSlug = "moonarq"): DashboardNavItem[] {
+  const social: DashboardNavItem[] = [
+    { href: dashboardPath(dataSpaceSlug, "/platforms/instagram"), label: "Instagram", icon: Camera },
+    { href: dashboardPath(dataSpaceSlug, "/platforms/tiktok"), label: "TikTok", icon: Video },
+  ];
+  if (dataSpaceSlug !== "moonarq") return social;
+  return [
+    { href: dashboardPath(dataSpaceSlug, "/platforms/ads"), label: "Meta Ads", icon: Megaphone },
+    { href: dashboardPath(dataSpaceSlug, "/platforms/website"), label: "Website", icon: Globe2 },
+    { href: dashboardPath(dataSpaceSlug, "/platforms/shopify"), label: "Shopify", icon: ShoppingBag },
+    ...social,
+    { href: dashboardPath(dataSpaceSlug, "/platforms/supabase"), label: "Supabase", icon: Users },
+  ];
+}
 
 export function getNavGroups(dataSpaceSlug = "moonarq"): DashboardNavGroup[] {
   return [
@@ -32,6 +53,11 @@ export function getNavGroups(dataSpaceSlug = "moonarq"): DashboardNavGroup[] {
       id: "command",
       label: "Command",
       items: [{ href: dashboardPath(dataSpaceSlug), label: "Overview", icon: Gauge }],
+    },
+    {
+      id: "platforms",
+      label: "Platforms",
+      items: getPlatformNavItems(dataSpaceSlug),
     },
     {
       id: "manage",
@@ -46,6 +72,7 @@ export function getNavGroups(dataSpaceSlug = "moonarq"): DashboardNavGroup[] {
       label: "Operations",
       items: [
         { href: dashboardPath(dataSpaceSlug, "/sync"), label: "Sync Center", icon: RadioTower },
+        { href: dashboardPath(dataSpaceSlug, "/health"), label: "Health", icon: HeartPulse },
         { href: dashboardPath(dataSpaceSlug, "/data"), label: "Data Explorer", icon: TableProperties },
         { href: dashboardPath(dataSpaceSlug, "/reports/daily"), label: "Reports", icon: FileText },
       ],
@@ -56,8 +83,6 @@ export function getNavGroups(dataSpaceSlug = "moonarq"): DashboardNavGroup[] {
       items: [
         { href: dashboardPath(dataSpaceSlug, "/events"), label: "Events", icon: Activity },
         { href: dashboardPath(dataSpaceSlug, "/content"), label: "Content", icon: BarChart3 },
-        { href: dashboardPath(dataSpaceSlug, "/commerce"), label: "Commerce", icon: ShoppingBag },
-        { href: dashboardPath(dataSpaceSlug, "/health"), label: "Health", icon: HeartPulse },
       ],
     },
   ];

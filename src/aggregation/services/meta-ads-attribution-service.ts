@@ -395,17 +395,17 @@ function normalizedMetaAccountId(value: unknown) {
   return stringValue(value)?.replace(/^act_/u, "") ?? null;
 }
 
-function selectedMetaAccountId(source: Source | null) {
+export function selectedMetaAccountId(source: Source | null) {
   return normalizedMetaAccountId(
     source?.external_account_id ?? source?.metadata.selected_ad_account_id,
   );
 }
 
-function metaRowMatchesAccount(row: MetricDaily, accountId: string | null) {
+export function metaRowMatchesAccount(row: MetricDaily, accountId: string | null) {
   return Boolean(accountId && normalizedMetaAccountId(row.dimensions.account_id) === accountId);
 }
 
-function metaSyncIsStale(source: Source | null, now: Date) {
+export function metaSyncIsStale(source: Source | null, now: Date) {
   if (!source?.last_success_at || !source.next_sync_at) return false;
   const frequencyMs = Math.max(1, source.sync_frequency_minutes) * 60_000;
   const minimumGraceMs = 3 * 60 * 60_000;

@@ -67,73 +67,128 @@ test.beforeEach(async ({ request }) => {
   await assertDeterministicDemoRuntime(request);
 });
 
-test("MoonArq Overview centers the business pulse and first-party funnel", async ({ page }) => {
+test("MoonArq Overview leads with paid ads and one card per platform", async ({ page }) => {
   await loginDashboard(page);
   await page.goto("/w/moonarq/dashboard");
-  await expect(page.getByRole("heading", { name: "MoonArq Overview" })).toBeVisible();
-  await expect(page.getByTestId("business-pulse")).toBeVisible();
-  await expect(page.getByTestId("storefront-funnel")).toBeVisible();
-  await expect(page.getByTestId("storefront-conversion-trend")).toBeVisible();
-  await expect(page.getByTestId("commerce-outcomes")).toBeVisible();
-  await expect(page.getByTestId("overview-module-summary-supabase")).toBeVisible();
-  await expect(page.locator("summary").filter({ hasText: "TikTok official API" })).toBeVisible();
-  await expect(page.locator("summary").filter({ hasText: "Instagram Graph API" })).toBeVisible();
-  await expect(page.getByText("Planned and custom sources")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "MoonArq Overview", level: 1 })).toBeVisible();
+  const ads = page.getByTestId("paid-ads-overview");
+  await expect(ads).toBeVisible();
+  await expect(ads.getByRole("heading", { name: "Meta Ads" })).toBeVisible();
+  await expect(ads.getByRole("link", { name: "Connect Meta Ads" })).toHaveAttribute(
+    "href",
+    /\/api\/oauth\/meta-ads\/start\?instagramSourceId=.*dataSpaceSlug=moonarq/,
+  );
+  const grid = page.getByTestId("overview-platform-grid");
+  await expect(grid.locator("[data-testid^='platform-card-']")).toHaveCount(5);
+  for (const platform of ["website", "shopify", "instagram", "tiktok", "supabase"]) {
+    await expect(page.getByTestId(`platform-card-${platform}`)).toBeVisible();
+  }
+  await expect(page.getByTestId("overview-add-platform")).toHaveAttribute("href", "/w/moonarq/dashboard/sources/new");
+  // Storefront analysis lives on the Website page now.
+  await expect(page.getByTestId("business-pulse")).toHaveCount(0);
+  await expect(page.getByTestId("storefront-funnel")).toHaveCount(0);
 });
 
-test("business pulse and funnel intentionally replace the five-card above-the-fold contract", async ({ page }) => {
+test("paid ads and the first row of platforms sit above the fold", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await loginDashboard(page);
-  await page.goto("/w/moonarq/dashboard");
+  await page.goto("/w/moonarq/dashboard?demo_state=ads-live");
 
-  const placement = await page.evaluate(() => ({
-    scrollY: window.scrollY,
-    headerTop: document.querySelector<HTMLElement>("[data-testid='dashboard-overview']")?.getBoundingClientRect().top ?? Infinity,
-    pulseTop: document.querySelector<HTMLElement>("[data-testid='business-pulse']")?.getBoundingClientRect().top ?? Infinity,
-    funnelTop: document.querySelector<HTMLElement>("[data-testid='storefront-funnel']")?.getBoundingClientRect().top ?? Infinity,
-    trendTop: document.querySelector<HTMLElement>("[data-testid='storefront-conversion-trend']")?.getBoundingClientRect().top ?? Infinity,
-    pulseCards: Array.from(document.querySelectorAll<HTMLElement>("[data-testid^='business-pulse-']")).map((element) => {
-      const rect = element.getBoundingClientRect();
-      return { top: rect.top, bottom: rect.bottom };
-    }),
-    funnelStages: document.querySelectorAll("[data-funnel-stage]").length,
-    viewportHeight: window.innerHeight,
-  }));
+  const placement = await page.evaluate(() => {
+    const top = (selector: string) => document.querySelector<HTMLElement>(selector)?.getBoundingClientRect().top ?? Infinity;
+    return {
+      scrollY: window.scrollY,
+      headerTop: top("[data-testid='overview-header']"),
+      adsTop: top("[data-testid='paid-ads-overview']"),
+      cardTops: Array.from(document.querySelectorAll<HTMLElement>("[data-testid^='platform-card-']"))
+        .map((card) => card.getBoundingClientRect().top),
+      viewportHeight: window.innerHeight,
+    };
+  });
 
   expect(placement.scrollY).toBe(0);
-  expect(placement.headerTop).toBeLessThan(100);
-  expect(placement.pulseTop).toBeLessThan(placement.viewportHeight);
-  expect(placement.funnelTop).toBeLessThan(placement.viewportHeight);
-  expect(placement.trendTop).toBeLessThan(placement.viewportHeight);
-  expect(placement.pulseCards).toHaveLength(5);
-  expect(placement.pulseCards.every((card) => card.top < placement.viewportHeight && card.bottom > 0)).toBe(true);
-  expect(placement.funnelStages).toBe(4);
+  expect(placement.headerTop).toBeLessThan(120);
+  expect(placement.adsTop).toBeLessThan(placement.headerTop + 200);
+  expect(placement.cardTops).toHaveLength(5);
+  expect(placement.cardTops.filter((top) => top < placement.viewportHeight).length).toBeGreaterThanOrEqual(3);
 });
 
-test("lower operational modules retain progressive disclosure", async ({ page }) => {
-  await loginDashboard(page);
-  await page.goto("/w/moonarq/dashboard");
+function recordSyncRequests(page: Page) {
+  const syncRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && /\/api\/sources\/[^/]+\/sync(?:\?|$)/u.test(request.url())) syncRequests.push(request.url());
+  });
+  return syncRequests;
+}
 
-  for (const type of ["supabase", "tiktok", "instagram"]) {
-    await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", false);
-    await expect(page.getByTestId(`overview-module-summary-${type}`)).toBeVisible();
-    await expect(page.getByTestId(`overview-module-detail-${type}`)).toBeHidden();
+test("live paid delivery shows today, the period with direction, and freshness", async ({ page }) => {
+  await loginDashboard(page);
+  const syncRequests = recordSyncRequests(page);
+  await page.goto("/w/moonarq/dashboard?demo_state=ads-live");
+  const ads = page.getByTestId("paid-ads-overview");
+  await expect(ads).toHaveAttribute("data-ads-state", "live");
+  await expect(ads.getByText("Delivering", { exact: true })).toBeVisible();
+  await expect(ads.getByTestId("paid-ads-today").getByText("Spend today", { exact: true })).toBeVisible();
+  await expect(ads.getByTestId("paid-ads-period").getByText("Last 30 days", { exact: true })).toBeVisible();
+  for (const label of ["Spend", "Link clicks", "CTR (link)", "CPC (link)"]) {
+    await expect(ads.getByTestId("paid-ads-period").getByText(label, { exact: true })).toBeVisible();
+  }
+  await expect(ads.locator("[data-delta]").first()).toBeVisible();
+  await expect(ads.getByTestId("paid-ads-freshness")).toContainText(
+    /Updated (?:just now|\d+ min ago)\. Syncs with Meta every 15 minutes while this page is open\./,
+  );
+  await expect(ads.getByRole("link", { name: "Ads details" })).toHaveAttribute("href", "/w/moonarq/dashboard/platforms/ads?demo_state=ads-live");
+
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]range=today(?:&|$)/);
+  await expect(page.getByTestId("paid-ads-period").getByText("Yesterday", { exact: true })).toBeVisible();
+  // The Ads page opens on the same range.
+  await expect(ads.getByRole("link", { name: "Ads details" })).toHaveAttribute(
+    "href",
+    "/w/moonarq/dashboard/platforms/ads?range=today&demo_state=ads-live",
+  );
+  // The fixture previews the live copy but has no connection to sync.
+  expect(syncRequests).toEqual([]);
+});
+
+test("old Commerce links open the Shopify page", async ({ page }) => {
+  await loginDashboard(page);
+  for (const path of ["/w/moonarq/dashboard/commerce", "/dashboard/commerce"]) {
+    const response = await page.goto(path);
+    expect(response?.ok(), path).toBe(true);
+    await expect(page, path).toHaveURL(/\/w\/moonarq\/dashboard\/platforms\/shopify$/);
+    await expect(page.getByRole("heading", { name: "Shopify", level: 1 })).toBeVisible();
   }
 });
 
-test("Instagram detail exposes the paid Story attribution and a stable no-data Meta connection state", async ({ page }) => {
+test("each platform card opens its detail page and leads back to the Overview", async ({ page }) => {
   await loginDashboard(page);
-  await page.goto("/w/moonarq/dashboard");
+  await page.goto("/w/moonarq/dashboard?range=7d");
 
-  const instagram = page.locator("details.overview-social-card").filter({
-    has: page.getByText("Instagram Graph API", { exact: true }),
-  });
+  const routes = [
+    { platform: "website", heading: "Website" },
+    { platform: "shopify", heading: "Shopify" },
+    { platform: "instagram", heading: "Instagram" },
+    { platform: "tiktok", heading: "TikTok" },
+    { platform: "supabase", heading: "Supabase" },
+  ];
+  for (const route of routes) {
+    await page.goto("/w/moonarq/dashboard?range=7d");
+    await page.getByTestId(`platform-card-${route.platform}`).getByRole("link", { name: route.heading, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/w/moonarq/dashboard/platforms/${route.platform}\\?range=7d$`));
+    await expect(page.getByRole("heading", { name: route.heading, level: 1 })).toBeVisible();
+  }
+  await page.getByRole("link", { name: "Overview", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/w\/moonarq\/dashboard$/);
+});
+
+test("the Ads page exposes the paid Story attribution and a stable no-data Meta connection state", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard/platforms/ads");
+  await expect(page.getByRole("heading", { name: "Meta Ads", level: 1 })).toBeVisible();
+  await expect(page.getByTestId("ads-header").getByText("Not connected", { exact: true })).toBeVisible();
+
   const paidPanel = page.getByTestId("instagram-paid-ads-panel");
-  await expect(instagram).toHaveJSProperty("open", false);
-  await expect(paidPanel).toBeHidden();
-
-  await instagram.locator("summary").first().click();
-  await expect(instagram).toHaveJSProperty("open", true);
   await expect(paidPanel).toBeVisible();
   await expect(paidPanel.getByText("Paid Story attribution", { exact: true })).toBeVisible();
   await expect(paidPanel.getByText("MoonArq_IGStory_Traffic_BraceletGrid_Jul2026", { exact: true })).toBeVisible();
@@ -142,9 +197,6 @@ test("Instagram detail exposes the paid Story attribution and a stable no-data M
     { exact: true },
   )).toBeVisible();
   await expect(paidPanel.getByText("Connect Ads", { exact: true })).toBeVisible();
-  await expect(instagram.getByText("Spend —", { exact: true })).toBeVisible();
-  await expect(instagram.getByText("Revenue —", { exact: true })).toBeVisible();
-  await expect(instagram.getByText("ROAS —", { exact: true })).toBeVisible();
   await expect(paidPanel.getByRole("link", { name: "Connect Meta Ads" })).toHaveAttribute(
     "href",
     /\/api\/oauth\/meta-ads\/start\?instagramSourceId=.*dataSpaceSlug=moonarq/,
@@ -161,6 +213,24 @@ test("Instagram detail exposes the paid Story attribution and a stable no-data M
   await expect(paidPanel.getByTestId("paid-raw-efficiency")).toHaveJSProperty("open", false);
   await expect(paidPanel.getByTestId("paid-budget-pacing")).toHaveJSProperty("open", false);
   await expect(paidPanel.getByTestId("paid-memory-economics")).toHaveJSProperty("open", false);
+});
+
+test("the Ads page breaks live delivery into today, the period, daily charts, and campaigns", async ({ page }) => {
+  await loginDashboard(page);
+  const syncRequests = recordSyncRequests(page);
+  await page.goto("/w/moonarq/dashboard/platforms/ads?demo_state=ads-live");
+  await expect(page.getByTestId("ads-header").getByText("Delivering", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("paid-ads-today-strip")).toContainText("Yesterday");
+  await expect(page.getByTestId("paid-ads-today-strip").getByTestId("ads-freshness")).toContainText(
+    "Syncs with Meta every 15 minutes while this page is open.",
+  );
+  await expect(page.getByTestId("ads-period-metrics").locator("[data-metric]")).toHaveCount(8);
+  await expect(page.getByTestId("ads-daily-spend").locator(".recharts-bar-rectangle").first()).toBeVisible();
+  const campaigns = page.getByRole("region", { name: "Scrollable campaigns table" });
+  await expect(campaigns.getByRole("rowheader")).toHaveCount(3);
+  await expect(campaigns.getByRole("rowheader").first()).toContainText("Moonlit Studio Reels");
+  await expect(campaigns.getByText("Paused", { exact: true })).toBeVisible();
+  expect(syncRequests).toEqual([]);
 });
 
 test("Shopify CTA opens the official connector directly and keeps credentials empty", async ({ page, request }) => {
@@ -333,10 +403,15 @@ test("sources page supports sync controls", async ({ page }) => {
 test("mobile dashboard has no horizontal overflow", async ({ page }) => {
   await loginDashboard(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/w/moonarq/dashboard");
+  await page.goto("/w/moonarq/dashboard?demo_state=ads-live");
   await settleResponsiveLayout(page);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
-  await expect(page.getByTestId("business-pulse")).toBeVisible();
-  await expect(page.getByTestId("storefront-funnel")).toBeVisible();
+  await expect(page.getByTestId("paid-ads-overview")).toBeVisible();
+  await expect(page.getByTestId("overview-platform-grid")).toBeVisible();
+  // Phones get one compact row per platform so every platform fits on about one screen.
+  const cardHeights = await page.locator("[data-testid^='platform-card-']").evaluateAll((cards) =>
+    cards.map((card) => card.getBoundingClientRect().height));
+  expect(cardHeights).toHaveLength(5);
+  expect(cardHeights.every((height) => height <= 140)).toBe(true);
 });
