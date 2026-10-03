@@ -47,16 +47,20 @@ export function LinkButton({
   children: ReactNode;
   prefetch?: boolean | "auto" | null;
 }) {
-  const resolvedPrefetch = prefetch !== undefined
-    ? prefetch
-    : href.startsWith("/api/")
-      ? false
-      : undefined;
+  // API actions such as OAuth starts answer with cross-origin redirects, so they must be
+  // real page navigations: no prefetch and no client-side (RSC) navigation attempt.
+  if (prefetch === undefined && href.startsWith("/api/")) {
+    return (
+      <a href={href} className={cn(base, variants[variant], className)} {...props}>
+        {children}
+      </a>
+    );
+  }
 
   return (
     <Link
       href={href}
-      prefetch={resolvedPrefetch}
+      prefetch={prefetch}
       className={cn(base, variants[variant], className)}
       {...props}
     >

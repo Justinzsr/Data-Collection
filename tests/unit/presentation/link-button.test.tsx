@@ -13,12 +13,13 @@ vi.mock("next/link", () => ({
 import { LinkButton } from "@/presentation/components/ui/button";
 
 describe("LinkButton", () => {
-  it("disables Next prefetch for API action links", () => {
+  it("renders API action links as plain anchors so OAuth redirects never prefetch or client-navigate", () => {
     const markup = renderToStaticMarkup(
       <LinkButton href="/api/oauth/meta-ads/start?instagramSourceId=source-1">Connect Meta Ads</LinkButton>,
     );
 
-    expect(markup).toContain('data-prefetch="false"');
+    expect(markup).toContain('href="/api/oauth/meta-ads/start?instagramSourceId=source-1"');
+    expect(markup).not.toContain("data-prefetch");
   });
 
   it("keeps Next's default prefetch behavior for dashboard page links", () => {

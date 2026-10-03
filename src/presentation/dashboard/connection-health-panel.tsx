@@ -121,9 +121,12 @@ export function ConnectionHealthPanel({
             ?? metadataText(source, "tiktok_username")
             ?? source.normalized_url
             ?? source.input_url;
-          const synced = source.last_success_at
-            ? `synced ${formatRelativeTime(source.last_success_at, { now })}`
-            : "never synced";
+          // The first-party tracker receives events continuously; it has no sync schedule.
+          const synced = source.source_type_key === "website"
+            ? "live first-party tracker"
+            : source.last_success_at
+              ? `synced ${formatRelativeTime(source.last_success_at, { now })}`
+              : "never synced";
           return (
             <li key={source.id}>
               <Link
