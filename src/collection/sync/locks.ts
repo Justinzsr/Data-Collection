@@ -107,6 +107,26 @@ export async function renewSourceLock(
   return rows[0] ?? null;
 }
 
+/**
+ * Read-only: whether a sync holds an unexpired lease on the source right now.
+ * It never takes or changes the lock; only the engine acquires it, atomically.
+ */
+export async function isSourceLocked(sourceId: string, now = new Date()): Promise<boolean> {
+  if (!isRuntimeDatabaseConfigured()) {
+    const lock = getDemoStore().sourceLocks.find((candidate) => candidate.source_id === sourceId);
+    return Boolean(lock && new Date(lock.expires_at).getTime() > now.getTime());
+  }
+  const rows = await queryRows<{ locked: boolean }>(
+    `
+      select exists (
+        select 1 from source_locks where source_id = $1 and expires_at > $2
+      ) as locked
+    `,
+    [sourceId, now.toISOString()],
+  );
+  return rows[0]?.locked === true;
+}
+
 export async function releaseSourceLock(sourceId: string, syncRunId: string, lockKey?: string): Promise<void> {
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();

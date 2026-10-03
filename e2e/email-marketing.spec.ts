@@ -227,14 +227,14 @@ test("unauthenticated Email Marketing UI and API expose no protected data", asyn
   expect(html).not.toContain("gid://shopify/Customer/101");
 });
 
-test("new Overview Supabase card opens the Email Marketing page", async ({ page }) => {
+test("the Overview Supabase card leads to the Email Marketing page", async ({ page }) => {
   await mockEmailSignups(page);
   await page.goto("/w/moonarq/dashboard");
 
-  const supabaseModule = page.getByTestId("overview-module-supabase");
-  await supabaseModule.getByTestId("overview-module-summary-supabase").click();
-  await expect(supabaseModule).toHaveJSProperty("open", true);
-  const emailMarketingLink = supabaseModule.getByRole("link", { name: "Email Marketing", exact: true });
+  await page.getByTestId("platform-card-supabase").getByRole("link", { name: "Supabase", exact: true }).click();
+  await expect(page).toHaveURL("/w/moonarq/dashboard/platforms/supabase");
+  await expect(page.getByRole("heading", { name: "Supabase", level: 1 })).toBeVisible();
+  const emailMarketingLink = page.getByTestId("supabase-header").getByRole("link", { name: "Email Marketing", exact: true });
   await expect(emailMarketingLink).toHaveAttribute(
     "href",
     "/w/moonarq/dashboard/supabase/email-marketing",

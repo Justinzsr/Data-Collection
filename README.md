@@ -219,8 +219,13 @@ In production, v1 tracker events must include a valid `source_id` and matching `
 
 See [Website Event Contract v1](docs/website-event-contract-v1.md) for payload, privacy, validation, rate-limit, and compatibility details. Set optional `WEBSITE_TRACKING_RATE_LIMIT_PER_MINUTE` to tune the default 600 requests per minute per source/client.
 
-The canonical MoonArq Overview uses a strict, same-session, first-party funnel
-that ends at checkout started. See
+The Overview shows the Meta Ads monitor first and one card per platform, each with
+its direction of change; every card opens that platform's detail page. See
+[Platform Overview](docs/platform-overview.md) for how values and changes are
+calculated.
+
+The Website page uses a strict, same-session, first-party funnel that ends at
+checkout started. See
 [MoonArq Website Funnel Overview V1](docs/website-funnel-overview-v1.md) for
 stage denominators, ordering policy, filters, privacy boundaries, and honest
 data states.

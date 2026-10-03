@@ -23,51 +23,32 @@ for (const viewport of [
 }
 
 for (const width of [390, 320]) {
-  test(`expanded dashboard modules stay inside the ${width}px viewport`, async ({ page }) => {
+  test(`platform cards and detail pages stay inside the ${width}px viewport`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
-    await page.goto("/w/moonarq/dashboard");
-
-    await expect(page.getByTestId("business-pulse")).toBeVisible();
-    await expect(page.getByTestId("storefront-funnel")).toBeVisible();
-    await expect(page.getByTestId("storefront-conversion-trend")).toBeVisible();
-    await expect(page.getByTestId("commerce-outcomes")).toBeVisible();
-
-    for (const type of ["supabase", "tiktok", "instagram"]) {
-      await page.getByTestId(`overview-module-summary-${type}`).click();
-      await expect(page.getByTestId(`overview-module-${type}`)).toHaveJSProperty("open", true);
-    }
-    const emailMarketingLink = page
-      .getByTestId("overview-module-supabase")
-      .getByRole("link", { name: "Email Marketing", exact: true });
-    await expect(emailMarketingLink).toBeVisible();
-    await expect(emailMarketingLink).toHaveAttribute(
-      "href",
-      "/w/moonarq/dashboard/supabase/email-marketing",
-    );
-
-    const instagram = page.locator("details.overview-social-card").filter({
-      has: page.getByText("Instagram Graph API", { exact: true }),
+    await page.goto("/w/moonarq/dashboard?demo_state=ads-live");
+    await expect(page.getByTestId("paid-ads-overview")).toBeVisible();
+    await settleResponsiveLayout(page);
+    const overview = await page.evaluate(() => {
+      const viewportWidth = document.documentElement.clientWidth;
+      return {
+        overflow: document.documentElement.scrollWidth - viewportWidth,
+        viewportWidth,
+        cards: Array.from(document.querySelectorAll<HTMLElement>("[data-testid^='platform-card-'], [data-testid='overview-add-platform']"))
+          .map((card) => {
+            const rect = card.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, height: rect.height };
+          }),
+      };
     });
-    await instagram.locator("summary").first().click();
-    await expect(instagram).toHaveJSProperty("open", true);
-    await instagram.getByText("Organic account & media details", { exact: true }).click();
+    expect(overview.overflow).toBeLessThanOrEqual(1);
+    expect(overview.cards).toHaveLength(6);
+    expect(overview.cards.every((card) => card.left >= -1 && card.right <= overview.viewportWidth + 1 && card.height >= 44)).toBe(true);
 
-    const tiktok = page.locator("details.overview-social-card").filter({
-      has: page.getByText("TikTok official API", { exact: true }),
-    });
-    await tiktok.locator("summary").first().click();
-    await expect(tiktok).toHaveJSProperty("open", true);
-
+    await page.goto("/w/moonarq/dashboard/platforms/ads");
     const paidPanel = page.getByTestId("instagram-paid-ads-panel");
     await expect(paidPanel).toBeVisible();
     await expect(paidPanel.getByText("Paid Story attribution", { exact: true })).toBeVisible();
-    await expect(paidPanel.getByText("Connect Ads", { exact: true })).toBeVisible();
     await expect(paidPanel.getByRole("link", { name: "Connect Meta Ads" })).toBeVisible();
-    await expect(paidPanel.getByText(
-      "utm_source=instagram&utm_medium=paid_social&utm_campaign=bracelet_grid_jul2026&utm_content=story_v1",
-      { exact: true },
-    )).toBeVisible();
-
     for (const testId of [
       "paid-raw-efficiency",
       "paid-budget-pacing",
@@ -79,79 +60,63 @@ for (const width of [390, 320]) {
       await detail.locator("summary").click();
       await expect(detail).toHaveJSProperty("open", true);
     }
-
     await settleResponsiveLayout(page);
-    const layout = await page.evaluate(() => {
-      const socialRoot = document.querySelector<HTMLElement>("[data-testid='social-platform-detail-modules']");
-      const socialTouchTargets = socialRoot
-        ? Array.from(socialRoot.querySelectorAll<HTMLElement>("a,button"))
-          .filter((element) => {
-            const style = getComputedStyle(element);
-            return style.display !== "none"
-              && style.visibility !== "hidden"
-              && !element.closest("details:not([open])")
-              && element.getClientRects().length > 0;
-          })
-          .map((element) => {
-            const rect = element.getBoundingClientRect();
-            return { width: rect.width, height: rect.height };
-          })
-        : [];
-      return {
-        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        chartRights: Array.from(document.querySelectorAll<HTMLElement>("[data-overview-chart='true']")).map((element) => element.getBoundingClientRect().right),
-        paidPanel: (() => {
-          const element = document.querySelector<HTMLElement>("[data-testid='instagram-paid-ads-panel']");
-          if (!element) return null;
+    const ads = await page.evaluate(() => {
+      const viewportWidth = document.documentElement.clientWidth;
+      const panel = document.querySelector<HTMLElement>("[data-testid='instagram-paid-ads-panel']");
+      const panelRect = panel?.getBoundingClientRect() ?? null;
+      const touchTargets = Array.from(document.querySelectorAll<HTMLElement>("main a, main button"))
+        .filter((element) => {
+          const style = getComputedStyle(element);
+          return style.display !== "none"
+            && style.visibility !== "hidden"
+            && !element.closest("details:not([open])")
+            && element.getClientRects().length > 0;
+        })
+        .map((element) => {
           const rect = element.getBoundingClientRect();
-          return {
-            left: rect.left,
-            right: rect.right,
-            overflow: element.scrollWidth - element.clientWidth,
-          };
-        })(),
+          return { label: element.textContent?.trim().slice(0, 60) ?? element.tagName, width: rect.width, height: rect.height };
+        });
+      return {
+        overflow: document.documentElement.scrollWidth - viewportWidth,
+        viewportWidth,
+        panel: panelRect ? { left: panelRect.left, right: panelRect.right, overflow: panel!.scrollWidth - panel!.clientWidth } : null,
         aidmaStageRects: Array.from(document.querySelectorAll<HTMLElement>("[data-aidma-stage]")).map((element) => {
           const rect = element.getBoundingClientRect();
           return { left: rect.left, right: rect.right, width: rect.width };
         }),
-        socialTouchTargets,
-        emailMarketingLink: (() => {
-          const element = document.querySelector<HTMLElement>(
-            "[data-testid='overview-module-supabase'] a[href$='/supabase/email-marketing']",
-          );
-          if (!element) return null;
-          const rect = element.getBoundingClientRect();
-          return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
-        })(),
-        viewportWidth: document.documentElement.clientWidth,
+        touchTargets,
       };
     });
-    expect(layout.overflow).toBeLessThanOrEqual(1);
-    expect(layout.chartRights.every((right) => right <= layout.viewportWidth + 1)).toBe(true);
-    expect(layout.paidPanel).not.toBeNull();
-    expect(layout.paidPanel!.left).toBeGreaterThanOrEqual(-1);
-    expect(layout.paidPanel!.right).toBeLessThanOrEqual(layout.viewportWidth + 1);
-    expect(layout.paidPanel!.overflow).toBeLessThanOrEqual(1);
-    expect(layout.aidmaStageRects).toHaveLength(5);
-    expect(layout.aidmaStageRects.every((rect) => rect.left >= -1 && rect.right <= layout.viewportWidth + 1 && rect.width > 0)).toBe(true);
-    expect(layout.emailMarketingLink).not.toBeNull();
-    expect(layout.emailMarketingLink!.left).toBeGreaterThanOrEqual(-1);
-    expect(layout.emailMarketingLink!.right).toBeLessThanOrEqual(layout.viewportWidth + 1);
-    expect(layout.emailMarketingLink!.width).toBeGreaterThanOrEqual(40);
-    expect(layout.emailMarketingLink!.height).toBeGreaterThanOrEqual(40);
-    expect(layout.socialTouchTargets.length).toBeGreaterThanOrEqual(5);
+    expect(ads.overflow).toBeLessThanOrEqual(1);
+    expect(ads.panel).not.toBeNull();
+    expect(ads.panel!.left).toBeGreaterThanOrEqual(-1);
+    expect(ads.panel!.right).toBeLessThanOrEqual(ads.viewportWidth + 1);
+    expect(ads.panel!.overflow).toBeLessThanOrEqual(1);
+    expect(ads.aidmaStageRects).toHaveLength(5);
+    expect(ads.aidmaStageRects.every((rect) => rect.left >= -1 && rect.right <= ads.viewportWidth + 1 && rect.width > 0)).toBe(true);
+    expect(ads.touchTargets.length).toBeGreaterThanOrEqual(5);
     expect(
-      layout.socialTouchTargets.every((target) => target.width >= 40 && target.height >= 40),
+      ads.touchTargets.every((target) => target.width >= 40 && target.height >= 40),
+      JSON.stringify(ads.touchTargets.filter((target) => target.width < 40 || target.height < 40)),
     ).toBe(true);
+
+    await page.goto("/w/moonarq/dashboard/platforms/supabase");
+    const emailMarketingLink = page.getByTestId("supabase-header").getByRole("link", { name: "Email Marketing", exact: true });
+    await expect(emailMarketingLink).toHaveAttribute("href", "/w/moonarq/dashboard/supabase/email-marketing");
+    await settleResponsiveLayout(page);
+    const linkBox = await emailMarketingLink.boundingBox();
+    expect(linkBox).not.toBeNull();
+    expect(linkBox!.x).toBeGreaterThanOrEqual(-1);
+    expect(linkBox!.x + linkBox!.width).toBeLessThanOrEqual(width + 1);
+    expect(linkBox!.width).toBeGreaterThanOrEqual(40);
+    expect(linkBox!.height).toBeGreaterThanOrEqual(40);
   });
 }
 
 test("AIDMA stages use five columns on desktop and two columns on tablet", async ({ page }) => {
-  await page.goto("/w/moonarq/dashboard");
-  const instagram = page.locator("details.overview-social-card").filter({
-    has: page.getByText("Instagram Graph API", { exact: true }),
-  });
-  await instagram.locator("summary").first().click();
+  await page.goto("/w/moonarq/dashboard/platforms/ads");
+  await expect(page.getByTestId("instagram-paid-ads-panel")).toBeVisible();
 
   for (const expectation of [
     { width: 1440, columns: 5 },
@@ -173,7 +138,12 @@ for (const path of [
   "/w/moonarq/dashboard/sources/new",
   "/w/moonarq/dashboard/events",
   "/w/moonarq/dashboard/content",
-  "/w/moonarq/dashboard/commerce",
+  "/w/moonarq/dashboard/platforms/ads?demo_state=ads-live",
+  "/w/moonarq/dashboard/platforms/website",
+  "/w/moonarq/dashboard/platforms/shopify",
+  "/w/moonarq/dashboard/platforms/instagram",
+  "/w/moonarq/dashboard/platforms/tiktok",
+  "/w/moonarq/dashboard/platforms/supabase",
   "/w/moonarq/dashboard/sync",
   "/w/moonarq/dashboard/data",
   "/w/moonarq/dashboard/reports/daily",

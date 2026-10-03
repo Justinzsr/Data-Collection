@@ -63,17 +63,251 @@ async function assertDeterministicDemoRuntime(request: APIRequestContext) {
   ).toBe(1);
 }
 
+/** Composites every painted layer under each measured text node (run inside the page). */
+function measureContrast(options: { storefront: boolean; reconciliation: boolean }) {
+  type Color = [number, number, number, number];
+
+  const fail = (): never => {
+    throw new Error("Required contrast evidence could not be normalized.");
+  };
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) fail();
+  const parseColor = (value: string): Color => {
+    if (!value) fail();
+    context!.clearRect(0, 0, 1, 1);
+    context!.fillStyle = "rgb(1, 2, 3)";
+    const sentinel = context!.fillStyle;
+    context!.fillStyle = value;
+    if (context!.fillStyle === sentinel && value !== sentinel) fail();
+    context!.fillRect(0, 0, 1, 1);
+    const channels = context!.getImageData(0, 0, 1, 1).data;
+    const color: Color = [channels[0], channels[1], channels[2], channels[3] / 255];
+    if (color.some((channel) => !Number.isFinite(channel))) fail();
+    return color;
+  };
+  const composite = (foreground: Color, background: Color): Color => {
+    const alpha = foreground[3] + background[3] * (1 - foreground[3]);
+    if (!Number.isFinite(alpha) || alpha < 0 || alpha > 1) fail();
+    if (alpha === 0) return [0, 0, 0, 0];
+    return [
+      (foreground[0] * foreground[3] + background[0] * background[3] * (1 - foreground[3])) / alpha,
+      (foreground[1] * foreground[3] + background[1] * background[3] * (1 - foreground[3])) / alpha,
+      (foreground[2] * foreground[3] + background[2] * background[3] * (1 - foreground[3])) / alpha,
+      alpha,
+    ];
+  };
+  const luminance = (color: Color) => {
+    const linear = color.slice(0, 3).map((channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const ratio = (left: Color, right: Color) => {
+    const values = [luminance(left), luminance(right)].sort((a, b) => b - a);
+    return (values[0] + 0.05) / (values[1] + 0.05);
+  };
+  const normalizeColor = (color: Color) =>
+    `rgba(${color[0].toFixed(3)},${color[1].toFixed(3)},${color[2].toFixed(3)},${color[3].toFixed(4)})`;
+  const deduplicate = (colors: Color[]) => {
+    const unique = new Map<string, Color>();
+    for (const color of colors) unique.set(normalizeColor(color), color);
+    const values = [...unique.values()];
+    if (values.length === 0 || values.length > 4_096) fail();
+    return values;
+  };
+  const splitBackgroundLayers = (value: string) => {
+    const layers: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      if (value[index] === "(") depth += 1;
+      else if (value[index] === ")") depth -= 1;
+      else if (value[index] === "," && depth === 0) {
+        layers.push(value.slice(start, index).trim());
+        start = index + 1;
+      }
+      if (depth < 0) fail();
+    }
+    if (depth !== 0) fail();
+    layers.push(value.slice(start).trim());
+    return layers.filter(Boolean);
+  };
+  const gradientStops = (layer: string) => {
+    if (!/^(?:linear|radial)-gradient\(/u.test(layer)) fail();
+    const tokens = layer.match(
+      /(?:rgba?|hsla?|lab|lch|oklab|oklch|color)\([^)]*\)|\btransparent\b/gu,
+    ) ?? [];
+    if (tokens.length === 0) fail();
+    const stops = tokens.map(parseColor);
+    const candidates = [...stops];
+    for (let index = 1; index < stops.length; index += 1) {
+      const previous = stops[index - 1];
+      const current = stops[index];
+      candidates.push([
+        (previous[0] + current[0]) / 2,
+        (previous[1] + current[1]) / 2,
+        (previous[2] + current[2]) / 2,
+        (previous[3] + current[3]) / 2,
+      ]);
+    }
+    return deduplicate(candidates);
+  };
+  const isVisible = (element: Element) => {
+    const style = getComputedStyle(element);
+    return style.display !== "none"
+      && style.visibility !== "hidden"
+      && style.visibility !== "collapse"
+      && element.getClientRects().length > 0;
+  };
+  const paintedBackgrounds = (element: HTMLElement | SVGElement) => {
+    const ancestors: Element[] = [];
+    for (let current: Element | null = element; current; current = current.parentElement) {
+      ancestors.unshift(current);
+    }
+    if (ancestors[0] !== document.documentElement) fail();
+    let candidates: Color[] = [[0, 0, 0, 0]];
+    for (const ancestor of ancestors) {
+      const style = getComputedStyle(ancestor);
+      const opacity = Number.parseFloat(style.opacity);
+      if (
+        !Number.isFinite(opacity)
+        || opacity !== 1
+        || style.filter !== "none"
+        || style.mixBlendMode !== "normal"
+        || style.backgroundBlendMode.split(",").some((mode) => mode.trim() !== "normal")
+      ) {
+        fail();
+      }
+      const backgroundColor = parseColor(style.backgroundColor);
+      candidates = deduplicate(
+        candidates.map((background) => composite(backgroundColor, background)),
+      );
+      if (style.backgroundImage === "none") continue;
+      const layers = splitBackgroundLayers(style.backgroundImage);
+      for (const layer of [...layers].reverse()) {
+        if (layer === "none") continue;
+        const stops = gradientStops(layer);
+        candidates = deduplicate(candidates.flatMap((background) =>
+          stops.map((stop) => composite(stop, background))));
+      }
+    }
+    if (
+      candidates.length === 0
+      || candidates.some((color) =>
+        color.some((channel) => !Number.isFinite(channel))
+        || color[3] < 0.999)
+    ) {
+      fail();
+    }
+    return candidates;
+  };
+  const measuredText = (
+    element: HTMLElement,
+    index: number,
+    marker: string,
+  ) => {
+    if (!isVisible(element)) fail();
+    const style = getComputedStyle(element);
+    const foreground = parseColor(style.color);
+    const fontSize = Number.parseFloat(style.fontSize);
+    if (!Number.isFinite(fontSize) || fontSize <= 0) fail();
+    const backgrounds = paintedBackgrounds(element);
+    const ratios = backgrounds.map((background) =>
+      ratio(composite(foreground, background), background));
+    if (ratios.length === 0 || ratios.some((value) => !Number.isFinite(value))) fail();
+    const minimumRatio = Math.min(...ratios);
+    const worstBackground = backgrounds[ratios.indexOf(minimumRatio)];
+    return {
+      marker,
+      index,
+      fontSize,
+      foreground: normalizeColor(foreground),
+      worstBackground: normalizeColor(worstBackground),
+      minimumRatio,
+    };
+  };
+
+  const mutedText = [...document.querySelectorAll<HTMLElement>(
+    "[class*='text-[var(--muted)]']",
+  )].filter(isVisible);
+  const mutedMeasurements = mutedText.map((element, index) =>
+    measuredText(element, index, "overview-muted"));
+  if (mutedMeasurements.length === 0) fail();
+  const reconciliationElements = options.reconciliation
+    ? [...document.querySelectorAll<HTMLElement>(
+      '[data-testid="paid-attribution-reconciliation"] '
+      + '[data-contrast-normal-text="paid-attribution-reconciliation"]',
+    )]
+    : [];
+  if (options.reconciliation && reconciliationElements.length !== 3) fail();
+  const reconciliationMeasurements = reconciliationElements.map((element, index) =>
+    measuredText(element, index, "paid-attribution-reconciliation"));
+  if (!options.storefront) {
+    return {
+      mutedTextCount: mutedText.length,
+      chartTickCount: 0,
+      funnelBarStopCount: 0,
+      minimumMutedTextRatio: Math.min(...mutedMeasurements.map((item) => item.minimumRatio)),
+      minimumChartTickRatio: Number.NaN,
+      minimumFunnelBarRatio: Number.NaN,
+      reconciliationMeasurements,
+    };
+  }
+
+  const chart = document.querySelector<HTMLElement>(
+    "[data-testid='storefront-conversion-trend'] [role='group']",
+  ) ?? fail();
+  if (!isVisible(chart)) fail();
+  const chartBackgrounds = paintedBackgrounds(chart);
+  const tickRatios = [...document.querySelectorAll<SVGElement>(
+    "[data-testid='storefront-conversion-trend'] .recharts-cartesian-axis-tick-value",
+  )]
+    .filter(isVisible)
+    .flatMap((tick) => {
+      const foreground = parseColor(getComputedStyle(tick).fill);
+      return chartBackgrounds.map((background) =>
+        ratio(composite(foreground, background), background));
+    });
+  if (tickRatios.length === 0 || tickRatios.some((value) => !Number.isFinite(value))) fail();
+
+  const funnelBar = document.querySelector<HTMLElement>("[data-funnel-bar]") ?? fail();
+  const funnelTrack = funnelBar.parentElement ?? fail();
+  if (!isVisible(funnelBar) || !isVisible(funnelTrack)) fail();
+  const trackBackgrounds = paintedBackgrounds(funnelTrack);
+  const barLayers = splitBackgroundLayers(getComputedStyle(funnelBar).backgroundImage);
+  if (barLayers.length !== 1) fail();
+  const barStops = gradientStops(barLayers[0]);
+  const barRatios = barStops.flatMap((foreground) =>
+    trackBackgrounds.map((background) =>
+      ratio(composite(foreground, background), background)));
+  if (barRatios.length === 0 || barRatios.some((value) => !Number.isFinite(value))) fail();
+
+  return {
+    mutedTextCount: mutedText.length,
+    chartTickCount: tickRatios.length,
+    funnelBarStopCount: barStops.length,
+    minimumMutedTextRatio: Math.min(...mutedMeasurements.map((item) => item.minimumRatio)),
+    minimumChartTickRatio: Math.min(...tickRatios),
+    minimumFunnelBarRatio: Math.min(...barRatios),
+    reconciliationMeasurements,
+  };
+}
+
 test.beforeEach(async ({ page, request }) => {
   await assertDeterministicDemoRuntime(request);
   await loginDashboard(page);
 });
 
-test("MoonArq Overview remains readable without page overflow at every required viewport", async ({ page }) => {
+test("Website analysis remains readable without page overflow at every required viewport", async ({ page }) => {
   for (const viewport of overviewViewports) {
     await test.step(`${viewport.width}px Overview layout`, async () => {
       await page.setViewportSize(viewport);
-      await page.goto("/w/moonarq/dashboard?demo_state=long-values");
-      await expect(page.getByRole("heading", { name: "MoonArq Overview" })).toBeVisible();
+      await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=long-values");
+      await expect(page.getByRole("heading", { name: "Website", level: 1 })).toBeVisible();
       await expect(page.getByTestId("business-pulse")).toBeVisible();
       await expect(page.getByTestId("storefront-funnel")).toBeVisible();
       await expect(page.getByTestId("storefront-conversion-trend")).toBeVisible();
@@ -133,7 +367,6 @@ test("MoonArq Overview remains readable without page overflow at every required 
       for (const value of acquisitionValues) {
         await expect(visibleAcquisition).toContainText(value);
       }
-      await expect(page.getByTestId("commerce-outcomes").locator("dl")).toHaveCount(0);
 
       const acquisitionBounds = await page.getByTestId("acquisition-performance").evaluate((element) => {
         const rect = element.getBoundingClientRect();
@@ -148,7 +381,7 @@ test("MoonArq Overview remains readable without page overflow at every required 
       const requiredTouchTargets = await page.locator(
         "[data-testid='storefront-conversion-trend'] a, "
         + "[data-testid='storefront-trend-table'] > summary, "
-        + "form[action='/w/moonarq/dashboard'] button",
+        + "form[action='/w/moonarq/dashboard/platforms/website'] button",
       ).evaluateAll((elements) => elements
         .filter((element) => {
           const candidate = element as HTMLElement;
@@ -183,7 +416,7 @@ test("MoonArq Overview remains readable without page overflow at every required 
 test("comparison rendering matches available, off, and unavailable states", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
 
-  await page.goto("/w/moonarq/dashboard?demo_state=populated");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=populated");
   const availableTrend = page.getByTestId("storefront-conversion-trend");
   await expect(availableTrend.getByText("Selected period — solid")).toBeVisible();
   await expect(availableTrend.getByText("Previous period — dashed")).toBeVisible();
@@ -191,7 +424,7 @@ test("comparison rendering matches available, off, and unavailable states", asyn
   await availableTrend.getByTestId("storefront-trend-table").locator("summary").click();
   await expect(availableTrend.getByRole("columnheader", { name: "Previous period" })).toBeVisible();
 
-  await page.goto("/w/moonarq/dashboard?compare=off");
+  await page.goto("/w/moonarq/dashboard/platforms/website?compare=off");
   const offTrend = page.getByTestId("storefront-conversion-trend");
   await expect(offTrend.getByText("Selected period — solid")).toBeVisible();
   await expect(offTrend.getByText("Previous period — dashed")).toHaveCount(0);
@@ -199,9 +432,9 @@ test("comparison rendering matches available, off, and unavailable states", asyn
   await expect(offTrend.getByText("Comparison off.", { exact: true })).toBeVisible();
   await offTrend.getByTestId("storefront-trend-table").locator("summary").click();
   await expect(offTrend.getByRole("columnheader", { name: "Previous period" })).toHaveCount(0);
-  await expect(page.getByTestId("dashboard-overview")).not.toContainText("— vs previous");
+  await expect(page.getByTestId("website-overview-controls")).not.toContainText("— vs previous");
 
-  await page.goto("/w/moonarq/dashboard?demo_state=comparison-unavailable");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=comparison-unavailable");
   const unavailableTrend = page.getByTestId("storefront-conversion-trend");
   await expect(unavailableTrend.getByText("Previous period — dashed")).toHaveCount(0);
   await expect(unavailableTrend.locator(".recharts-line-curve")).toHaveCount(1);
@@ -212,13 +445,13 @@ test("comparison rendering matches available, off, and unavailable states", asyn
 });
 
 test("Shopify availability never disguises unavailable data as zero", async ({ page }) => {
-  await page.goto("/w/moonarq/dashboard?demo_state=shopify-awaiting");
+  await page.goto("/w/moonarq/dashboard/platforms/shopify?demo_state=shopify-awaiting");
   const awaiting = page.getByTestId("commerce-outcomes");
   await expect(awaiting.getByText("Shopify is awaiting its first successful sync.", { exact: true })).toBeVisible();
   await expect(awaiting.locator("dl")).toHaveCount(0);
   await expect(awaiting).not.toContainText("$0.00");
 
-  await page.goto("/w/moonarq/dashboard?demo_state=shopify-zero");
+  await page.goto("/w/moonarq/dashboard/platforms/shopify?demo_state=shopify-zero");
   const readyZero = page.getByTestId("commerce-outcomes");
   await expect(readyZero.locator("dl")).toBeVisible();
   await expect(readyZero.getByText("Selected range: Last 30 days", { exact: true })).toBeVisible();
@@ -231,7 +464,7 @@ test("Shopify availability never disguises unavailable data as zero", async ({ p
 
 test("acquisition tables and disclosures retain keyboard access", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/w/moonarq/dashboard?demo_state=long-values");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=long-values");
 
   for (const name of [
     "Scrollable collection performance table",
@@ -253,7 +486,7 @@ test("malformed acquisition query values are not reflected into rendered control
   const rawCanary = "private-person%25ZZ%2540example.invalid";
   const intermediateCanary = "private-person%ZZ%40example.invalid";
   const decodedCanary = "private-person%ZZ@example.invalid";
-  await page.goto(`/w/moonarq/dashboard?range=7d&utm_campaign=${rawCanary}`);
+  await page.goto(`/w/moonarq/dashboard/platforms/website?range=7d&utm_campaign=${rawCanary}`);
 
   const finalUrl = new URL(page.url());
   expect(finalUrl.searchParams.get("range")).toBe("7d");
@@ -270,12 +503,14 @@ test("payment data in a literal acquisition query is not reflected into rendered
   const syntheticPaymentDigits = ["7000", "0000", "0000", "0005"].join("");
   const dottedPaymentCandidate = syntheticPaymentDigits.match(/.{1,4}/gu)!.join(".");
   const percentEncodedCandidate = dottedPaymentCandidate.replaceAll(".", "%2E");
+  // An old Overview link carrying storefront filters is forwarded to the Website page, sanitized on the way.
   const response = await page.goto(
     `/w/moonarq/dashboard?range=7d&utm_campaign=${dottedPaymentCandidate}`,
   );
 
   expect(response?.ok()).toBe(true);
   const finalUrl = new URL(page.url());
+  expect(finalUrl.pathname).toBe("/w/moonarq/dashboard/platforms/website");
   expect(finalUrl.searchParams.get("range")).toBe("7d");
   expect(finalUrl.searchParams.has("utm_campaign")).toBe(false);
   await expect(page.getByLabel("UTM campaign")).toHaveValue("");
@@ -294,20 +529,22 @@ test("payment data in a literal acquisition query is not reflected into rendered
 test("an alternative IPv4 referrer host is not reflected into rendered controls", async ({ page }) => {
   const alternativeIpv4Host = "0xc633642a";
   const normalizedReservedAddress = ["198", "51", "100", "42"].join(".");
-  const response = await page.goto(
-    `/w/moonarq/dashboard?range=7d&referrer_host=${alternativeIpv4Host}&acquisition_page=2`,
-  );
+  // Directly on the Website page, and through an old Overview link forwarded there.
+  for (const path of ["/w/moonarq/dashboard/platforms/website", "/w/moonarq/dashboard"]) {
+    const response = await page.goto(`${path}?range=7d&referrer_host=${alternativeIpv4Host}&acquisition_page=2`);
 
-  expect(response?.ok()).toBe(true);
-  const finalUrl = new URL(page.url());
-  expect(finalUrl.searchParams.get("range")).toBe("7d");
-  expect(finalUrl.searchParams.get("acquisition_page")).toBe("2");
-  expect(finalUrl.searchParams.has("referrer_host")).toBe(false);
-  await expect(page.getByLabel("Referrer host")).toHaveValue("");
-  const markup = await page.evaluate(() => document.documentElement.outerHTML);
-  for (const canary of [alternativeIpv4Host, normalizedReservedAddress]) {
-    expect(finalUrl.href).not.toContain(canary);
-    expect(markup).not.toContain(canary);
+    expect(response?.ok(), path).toBe(true);
+    const finalUrl = new URL(page.url());
+    expect(finalUrl.pathname, path).toBe("/w/moonarq/dashboard/platforms/website");
+    expect(finalUrl.searchParams.get("range"), path).toBe("7d");
+    expect(finalUrl.searchParams.get("acquisition_page"), path).toBe("2");
+    expect(finalUrl.searchParams.has("referrer_host"), path).toBe(false);
+    await expect(page.getByLabel("Referrer host")).toHaveValue("");
+    const markup = await page.evaluate(() => document.documentElement.outerHTML);
+    for (const canary of [alternativeIpv4Host, normalizedReservedAddress]) {
+      expect(finalUrl.href, path).not.toContain(canary);
+      expect(markup, path).not.toContain(canary);
+    }
   }
 });
 
@@ -366,7 +603,7 @@ test("obfuscated privacy metadata is not reflected into acquisition controls", a
 
   for (const { rawQueryValue, decodedValue } of cases) {
     const response = await page.goto(
-      `/w/moonarq/dashboard?range=7d&utm_campaign=${rawQueryValue}&acquisition_page=2`,
+      `/w/moonarq/dashboard/platforms/website?range=7d&utm_campaign=${rawQueryValue}&acquisition_page=2`,
     );
     expect(response?.ok()).toBe(true);
     const finalUrl = new URL(page.url());
@@ -382,19 +619,25 @@ test("obfuscated privacy metadata is not reflected into acquisition controls", a
   }
 });
 
-test("Overview muted text, chart ticks, and funnel bars meet contrast requirements", async ({ page }) => {
+test("Website muted text, chart ticks, and funnel bars meet contrast requirements", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/w/moonarq/dashboard?demo_state=long-values");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=long-values");
   await expect(page.getByTestId("storefront-conversion-trend").locator(".recharts-cartesian-axis-tick-value").first()).toBeVisible();
-  const instagram = page.locator("details.overview-social-card").filter({
-    has: page.getByText("Instagram Graph API", { exact: true }),
-  });
-  await expect(instagram).toHaveCount(1);
-  if (!await instagram.evaluate((element) => (element as HTMLDetailsElement).open)) {
-    await instagram.locator("summary").first().click();
-  }
-  await expect(instagram).toHaveJSProperty("open", true);
-  const paidPanel = instagram.getByTestId("instagram-paid-ads-panel");
+
+  const contrast = await page.evaluate(measureContrast, { storefront: true, reconciliation: false });
+
+  expect(contrast.mutedTextCount).toBeGreaterThan(10);
+  expect(contrast.chartTickCount).toBeGreaterThan(0);
+  expect(contrast.funnelBarStopCount).toBeGreaterThanOrEqual(2);
+  expect(contrast.minimumMutedTextRatio).toBeGreaterThanOrEqual(4.5);
+  expect(contrast.minimumChartTickRatio).toBeGreaterThanOrEqual(4.5);
+  expect(contrast.minimumFunnelBarRatio).toBeGreaterThanOrEqual(3);
+});
+
+test("Ads page muted text and paid reconciliation text meet contrast requirements", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/w/moonarq/dashboard/platforms/ads");
+  const paidPanel = page.getByTestId("instagram-paid-ads-panel");
   await expect(paidPanel).toBeVisible();
   const reconciliation = paidPanel.getByTestId("paid-attribution-reconciliation");
   if (!await reconciliation.evaluate((element) => (element as HTMLDetailsElement).open)) {
@@ -409,232 +652,9 @@ test("Overview muted text, chart ticks, and funnel bars meet contrast requiremen
     await expect(reconciliationTargets.nth(index)).toBeVisible();
   }
 
-  const contrast = await page.evaluate(() => {
-    type Color = [number, number, number, number];
-
-    const fail = (): never => {
-      throw new Error("Required contrast evidence could not be normalized.");
-    };
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) fail();
-    const parseColor = (value: string): Color => {
-      if (!value) fail();
-      context!.clearRect(0, 0, 1, 1);
-      context!.fillStyle = "rgb(1, 2, 3)";
-      const sentinel = context!.fillStyle;
-      context!.fillStyle = value;
-      if (context!.fillStyle === sentinel && value !== sentinel) fail();
-      context!.fillRect(0, 0, 1, 1);
-      const channels = context!.getImageData(0, 0, 1, 1).data;
-      const color: Color = [channels[0], channels[1], channels[2], channels[3] / 255];
-      if (color.some((channel) => !Number.isFinite(channel))) fail();
-      return color;
-    };
-    const composite = (foreground: Color, background: Color): Color => {
-      const alpha = foreground[3] + background[3] * (1 - foreground[3]);
-      if (!Number.isFinite(alpha) || alpha < 0 || alpha > 1) fail();
-      if (alpha === 0) return [0, 0, 0, 0];
-      return [
-        (foreground[0] * foreground[3] + background[0] * background[3] * (1 - foreground[3])) / alpha,
-        (foreground[1] * foreground[3] + background[1] * background[3] * (1 - foreground[3])) / alpha,
-        (foreground[2] * foreground[3] + background[2] * background[3] * (1 - foreground[3])) / alpha,
-        alpha,
-      ];
-    };
-    const luminance = (color: Color) => {
-      const linear = color.slice(0, 3).map((channel) => {
-        const value = channel / 255;
-        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-    };
-    const ratio = (left: Color, right: Color) => {
-      const values = [luminance(left), luminance(right)].sort((a, b) => b - a);
-      return (values[0] + 0.05) / (values[1] + 0.05);
-    };
-    const normalizeColor = (color: Color) =>
-      `rgba(${color[0].toFixed(3)},${color[1].toFixed(3)},${color[2].toFixed(3)},${color[3].toFixed(4)})`;
-    const deduplicate = (colors: Color[]) => {
-      const unique = new Map<string, Color>();
-      for (const color of colors) unique.set(normalizeColor(color), color);
-      const values = [...unique.values()];
-      if (values.length === 0 || values.length > 4_096) fail();
-      return values;
-    };
-    const splitBackgroundLayers = (value: string) => {
-      const layers: string[] = [];
-      let depth = 0;
-      let start = 0;
-      for (let index = 0; index < value.length; index += 1) {
-        if (value[index] === "(") depth += 1;
-        else if (value[index] === ")") depth -= 1;
-        else if (value[index] === "," && depth === 0) {
-          layers.push(value.slice(start, index).trim());
-          start = index + 1;
-        }
-        if (depth < 0) fail();
-      }
-      if (depth !== 0) fail();
-      layers.push(value.slice(start).trim());
-      return layers.filter(Boolean);
-    };
-    const gradientStops = (layer: string) => {
-      if (!/^(?:linear|radial)-gradient\(/u.test(layer)) fail();
-      const tokens = layer.match(
-        /(?:rgba?|hsla?|lab|lch|oklab|oklch|color)\([^)]*\)|\btransparent\b/gu,
-      ) ?? [];
-      if (tokens.length === 0) fail();
-      const stops = tokens.map(parseColor);
-      const candidates = [...stops];
-      for (let index = 1; index < stops.length; index += 1) {
-        const previous = stops[index - 1];
-        const current = stops[index];
-        candidates.push([
-          (previous[0] + current[0]) / 2,
-          (previous[1] + current[1]) / 2,
-          (previous[2] + current[2]) / 2,
-          (previous[3] + current[3]) / 2,
-        ]);
-      }
-      return deduplicate(candidates);
-    };
-    const isVisible = (element: Element) => {
-      const style = getComputedStyle(element);
-      return style.display !== "none"
-        && style.visibility !== "hidden"
-        && style.visibility !== "collapse"
-        && element.getClientRects().length > 0;
-    };
-    const paintedBackgrounds = (element: HTMLElement | SVGElement) => {
-      const ancestors: Element[] = [];
-      for (let current: Element | null = element; current; current = current.parentElement) {
-        ancestors.unshift(current);
-      }
-      if (ancestors[0] !== document.documentElement) fail();
-      let candidates: Color[] = [[0, 0, 0, 0]];
-      for (const ancestor of ancestors) {
-        const style = getComputedStyle(ancestor);
-        const opacity = Number.parseFloat(style.opacity);
-        if (
-          !Number.isFinite(opacity)
-          || opacity !== 1
-          || style.filter !== "none"
-          || style.mixBlendMode !== "normal"
-          || style.backgroundBlendMode.split(",").some((mode) => mode.trim() !== "normal")
-        ) {
-          fail();
-        }
-        const backgroundColor = parseColor(style.backgroundColor);
-        candidates = deduplicate(
-          candidates.map((background) => composite(backgroundColor, background)),
-        );
-        if (style.backgroundImage === "none") continue;
-        const layers = splitBackgroundLayers(style.backgroundImage);
-        for (const layer of [...layers].reverse()) {
-          if (layer === "none") continue;
-          const stops = gradientStops(layer);
-          candidates = deduplicate(candidates.flatMap((background) =>
-            stops.map((stop) => composite(stop, background))));
-        }
-      }
-      if (
-        candidates.length === 0
-        || candidates.some((color) =>
-          color.some((channel) => !Number.isFinite(channel))
-          || color[3] < 0.999)
-      ) {
-        fail();
-      }
-      return candidates;
-    };
-    const measuredText = (
-      element: HTMLElement,
-      index: number,
-      marker: string,
-    ) => {
-      if (!isVisible(element)) fail();
-      const style = getComputedStyle(element);
-      const foreground = parseColor(style.color);
-      const fontSize = Number.parseFloat(style.fontSize);
-      if (!Number.isFinite(fontSize) || fontSize <= 0) fail();
-      const backgrounds = paintedBackgrounds(element);
-      const ratios = backgrounds.map((background) =>
-        ratio(composite(foreground, background), background));
-      if (ratios.length === 0 || ratios.some((value) => !Number.isFinite(value))) fail();
-      const minimumRatio = Math.min(...ratios);
-      const worstBackground = backgrounds[ratios.indexOf(minimumRatio)];
-      return {
-        marker,
-        index,
-        fontSize,
-        foreground: normalizeColor(foreground),
-        worstBackground: normalizeColor(worstBackground),
-        minimumRatio,
-      };
-    };
-
-    const mutedText = [...document.querySelectorAll<HTMLElement>(
-      "[class*='text-[var(--muted)]']",
-    )].filter(isVisible);
-    const mutedMeasurements = mutedText.map((element, index) =>
-      measuredText(element, index, "overview-muted"));
-    if (mutedMeasurements.length === 0) fail();
-    const reconciliationElements = [...document.querySelectorAll<HTMLElement>(
-      '[data-testid="paid-attribution-reconciliation"] '
-      + '[data-contrast-normal-text="paid-attribution-reconciliation"]',
-    )];
-    if (reconciliationElements.length !== 3) fail();
-    const reconciliationMeasurements = reconciliationElements.map((element, index) =>
-      measuredText(element, index, "paid-attribution-reconciliation"));
-
-    const chart = document.querySelector<HTMLElement>(
-      "[data-testid='storefront-conversion-trend'] [role='group']",
-    ) ?? fail();
-    if (!isVisible(chart)) fail();
-    const chartBackgrounds = paintedBackgrounds(chart);
-    const tickRatios = [...document.querySelectorAll<SVGElement>(
-      "[data-testid='storefront-conversion-trend'] .recharts-cartesian-axis-tick-value",
-    )]
-      .filter(isVisible)
-      .flatMap((tick) => {
-        const foreground = parseColor(getComputedStyle(tick).fill);
-        return chartBackgrounds.map((background) =>
-          ratio(composite(foreground, background), background));
-      });
-    if (tickRatios.length === 0 || tickRatios.some((value) => !Number.isFinite(value))) fail();
-
-    const funnelBar = document.querySelector<HTMLElement>("[data-funnel-bar]") ?? fail();
-    const funnelTrack = funnelBar.parentElement ?? fail();
-    if (!isVisible(funnelBar) || !isVisible(funnelTrack)) fail();
-    const trackBackgrounds = paintedBackgrounds(funnelTrack);
-    const barLayers = splitBackgroundLayers(getComputedStyle(funnelBar).backgroundImage);
-    if (barLayers.length !== 1) fail();
-    const barStops = gradientStops(barLayers[0]);
-    const barRatios = barStops.flatMap((foreground) =>
-      trackBackgrounds.map((background) =>
-        ratio(composite(foreground, background), background)));
-    if (barRatios.length === 0 || barRatios.some((value) => !Number.isFinite(value))) fail();
-
-    return {
-      mutedTextCount: mutedText.length,
-      chartTickCount: tickRatios.length,
-      funnelBarStopCount: barStops.length,
-      minimumMutedTextRatio: Math.min(...mutedMeasurements.map((item) => item.minimumRatio)),
-      minimumChartTickRatio: Math.min(...tickRatios),
-      minimumFunnelBarRatio: Math.min(...barRatios),
-      reconciliationMeasurements,
-    };
-  });
-
-  expect(contrast.mutedTextCount).toBeGreaterThan(10);
-  expect(contrast.chartTickCount).toBeGreaterThan(0);
-  expect(contrast.funnelBarStopCount).toBeGreaterThanOrEqual(2);
+  const contrast = await page.evaluate(measureContrast, { storefront: false, reconciliation: true });
+  expect(contrast.mutedTextCount).toBeGreaterThan(0);
   expect(contrast.minimumMutedTextRatio).toBeGreaterThanOrEqual(4.5);
-  expect(contrast.minimumChartTickRatio).toBeGreaterThanOrEqual(4.5);
-  expect(contrast.minimumFunnelBarRatio).toBeGreaterThanOrEqual(3);
   expect(contrast.reconciliationMeasurements).toHaveLength(3);
   expect(contrast.reconciliationMeasurements.every((measurement) =>
     measurement.marker === "paid-attribution-reconciliation"
@@ -642,9 +662,22 @@ test("Overview muted text, chart ticks, and funnel bars meet contrast requiremen
     && measurement.minimumRatio >= 4.5)).toBe(true);
 });
 
-test("Overview controls, filters, and disclosures work from the keyboard with visible focus", async ({ page }) => {
+test("Overview cards and the paid ads monitor meet contrast requirements in light and dark", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.goto("/w/moonarq/dashboard?demo_state=ads-live");
+    await expect(page.getByTestId("paid-ads-overview")).toBeVisible();
+    await expect(page.getByTestId("overview-platform-grid")).toBeVisible();
+    const contrast = await page.evaluate(measureContrast, { storefront: false, reconciliation: false });
+    expect(contrast.mutedTextCount, colorScheme).toBeGreaterThan(10);
+    expect(contrast.minimumMutedTextRatio, colorScheme).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
+test("Website controls, filters, and disclosures work from the keyboard with visible focus", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/w/moonarq/dashboard?demo_state=populated");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=populated");
 
   const sevenDays = page.getByRole("link", { name: "7 days", exact: true });
   await expectVisibleFocus(sevenDays);
@@ -684,18 +717,15 @@ test("Overview controls, filters, and disclosures work from the keyboard with vi
 
   const touchTargets = await page.evaluate(() => {
     const selectors = [
-      "[data-testid='dashboard-overview'] a",
-      "[data-testid='dashboard-overview'] button",
+      "[data-testid='website-header'] a",
+      "[data-testid='website-overview-controls'] a",
+      "[data-testid='website-overview-controls'] button",
       "[data-testid='storefront-conversion-trend'] a",
       "[data-testid='storefront-trend-table'] > summary",
-      "form[action='/w/moonarq/dashboard'] button",
-      "form[action='/w/moonarq/dashboard'] a",
-      "form[action='/w/moonarq/dashboard'] select",
+      "form[action='/w/moonarq/dashboard/platforms/website'] button",
+      "form[action='/w/moonarq/dashboard/platforms/website'] a",
+      "form[action='/w/moonarq/dashboard/platforms/website'] select",
       "[data-testid='storefront-quality'] > summary",
-      "[data-testid='dashboard-data-stage'] a",
-      "[data-testid='dashboard-data-stage'] button",
-      "[data-testid='daily-report-module'] a",
-      "[data-testid='more-integrations'] a",
     ];
     return Array.from(document.querySelectorAll<HTMLElement>(selectors.join(",")))
       .filter((element) => {
@@ -724,7 +754,7 @@ test("Overview controls, filters, and disclosures work from the keyboard with vi
 
 test("funnel and trend values have persistent text equivalents without hover", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/w/moonarq/dashboard?demo_state=populated");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=populated");
 
   const funnel = page.getByTestId("storefront-funnel");
   await expect(funnel.locator("[data-funnel-stage]")).toHaveCount(4);
@@ -747,16 +777,16 @@ test("funnel and trend values have persistent text equivalents without hover", a
 test("empty and low-volume states remain explicit and readable", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
-  await page.goto("/w/moonarq/dashboard?demo_state=empty");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=empty");
   await expect(page.getByText("No tracked Website events in this period.", { exact: true })).toBeVisible();
   await expect(page.getByTestId("storefront-funnel")).not.toContainText("Limited data — rates are directional.");
 
-  await page.goto("/w/moonarq/dashboard?demo_state=low-volume");
+  await page.goto("/w/moonarq/dashboard/platforms/website?demo_state=low-volume");
   await expect(page.getByText("Limited data — rates are directional.", { exact: true })).toBeVisible();
   await expect(page.getByTestId("storefront-funnel").locator("[data-funnel-stage]")).toHaveCount(4);
 
   for (const state of ["empty", "low-volume"]) {
-    await page.goto(`/w/moonarq/dashboard?demo_state=${state}`);
+    await page.goto(`/w/moonarq/dashboard/platforms/website?demo_state=${state}`);
     await settleResponsiveLayout(page);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -765,8 +795,8 @@ test("empty and low-volume states remain explicit and readable", async ({ page }
   }
 });
 
-test("builder commerce remains explicitly unmeasured across the Overview", async ({ page }) => {
-  await page.goto("/w/moonarq/dashboard?segment=builder&trend=checkout");
+test("builder commerce remains explicitly unmeasured across the Website page", async ({ page }) => {
+  await page.goto("/w/moonarq/dashboard/platforms/website?segment=builder&trend=checkout");
 
   await expect(page.getByText("Builder cart and checkout trends are not measured.", { exact: true })).toBeVisible();
   await expect(page.getByTestId("business-pulse-add_to_cart")).toContainText("Not measured");
