@@ -50,7 +50,11 @@ Keep `DEV_AUTH_BYPASS=true` locally. Production ignores dev bypass and requires 
 
 ## Private Access
 
-Production dashboard pages and private APIs are protected by an app-level password session gate. A successful `/login` sets an httpOnly session cookie; `/api/auth/logout` clears it.
+The homepage is a public, interactive preview built exclusively from fictional sample data. `/demo` keeps that preview available even when signed in. Neither page queries private workspaces, repositories, or metrics APIs. Existing signed-in users opening `/` go directly to their dashboard.
+
+Production dashboard pages and private APIs remain protected by the existing session gate. `/login` supports the dashboard password and optional owner-only Google login; either successful method sets the same signed, HttpOnly, 12-hour session cookie. Other Google accounts must use the password. `/api/auth/logout` clears the private session.
+
+See [Google login and public preview](docs/google-login-public-preview.md) for optional OAuth setup, privacy boundaries, and verification. Google sign-in stays unavailable until configured; password access continues to work.
 
 Set these Vercel environment variables before relying on the deployed dashboard:
 

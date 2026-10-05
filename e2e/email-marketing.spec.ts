@@ -221,7 +221,7 @@ test("unauthenticated Email Marketing UI and API expose no protected data", asyn
 
   await page.goto("/w/moonarq/dashboard/supabase/email-marketing");
   await expect(page).toHaveURL(/\/login\?next=%2Fw%2Fmoonarq%2Fdashboard%2Fsupabase%2Femail-marketing/u);
-  await expect(page.getByRole("heading", { name: "MoonArq private login" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to DataHub" })).toBeVisible();
   const html = await page.locator("html").innerHTML();
   expect(html).not.toContain("sent@example.com");
   expect(html).not.toContain("gid://shopify/Customer/101");

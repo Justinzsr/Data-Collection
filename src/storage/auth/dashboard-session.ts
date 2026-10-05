@@ -30,6 +30,7 @@ export function safeDashboardRedirectPath(value: unknown, fallback = DEFAULT_DAS
   try {
     const parsed = new URL(value, SAFE_REDIRECT_ORIGIN);
     if (parsed.origin !== SAFE_REDIRECT_ORIGIN) return fallback;
+    if (!isProtectedUiPath(parsed.pathname)) return fallback;
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch {
     return fallback;
