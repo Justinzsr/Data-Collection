@@ -58,6 +58,11 @@ describe("dashboard session gate", () => {
     expect(safeDashboardRedirectPath("//evil.example/path")).toBe(DEFAULT_DASHBOARD_PATH);
     expect(safeDashboardRedirectPath("/\\evil.example/path")).toBe(DEFAULT_DASHBOARD_PATH);
     expect(safeDashboardRedirectPath("dashboard")).toBe(DEFAULT_DASHBOARD_PATH);
+    expect(safeDashboardRedirectPath("/login")).toBe(DEFAULT_DASHBOARD_PATH);
+    expect(safeDashboardRedirectPath("/api/auth/google/start")).toBe(DEFAULT_DASHBOARD_PATH);
+    expect(safeDashboardRedirectPath("/demo")).toBe(DEFAULT_DASHBOARD_PATH);
+    expect(safeDashboardRedirectPath("/w/auto-lab/dashboard/settings")).toBe("/w/auto-lab/dashboard/settings");
+    expect(safeDashboardRedirectPath("/w/moonarq/dashboard/../../../login")).toBe(DEFAULT_DASHBOARD_PATH);
   });
 
   it("identifies protected UI and private API routes without blocking ingestion routes", () => {
