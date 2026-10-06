@@ -31,7 +31,7 @@ Use Node.js 22 or newer for development and deployment, as required by the pinne
    - `GOOGLE_ALLOWED_EMAIL`: the owner's exact verified Gmail address (one address, not a comma-separated list).
    - `NEXT_PUBLIC_APP_URL`: the canonical origin, e.g. `https://moonarq-data-hub.vercel.app`. Do not use an arbitrary preview hostname or a URL with a path.
 
-4. If the OAuth app uses testing status, add the owner as a test user in Google Cloud.
+4. This flow requests only `openid` and `email`. Google's [basic identity scope exception](https://support.google.com/cloud/answer/15549945) allows sign-in even while the OAuth app is in testing status, without adding test users or publishing the existing Google project. DataHub still enforces its own owner allowlist on the server.
 5. Release the reviewed code only after deployment authorization. Verify owner login, another-account denial/password fallback, logout, and anonymous private-route rejection on the actual production alias.
 
 Do not prefix the Google secret or allowlist variable with `NEXT_PUBLIC_`. The application never places them in client props, HTML, error messages, logs, or URLs. The Google client ID is necessarily included in Google's authorization URL; the client secret is not.
