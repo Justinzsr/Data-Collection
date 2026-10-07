@@ -37,14 +37,19 @@ function base64UrlDecode(value: string) {
   return Buffer.from(value, "base64url").toString("utf8");
 }
 
-function signingSecret(env: NodeJS.ProcessEnv = process.env) {
+/**
+ * A key of its own, derived from the session secret. The state travels in URLs
+ * (Meta's authorize page, the callback), so it must never verify as a
+ * dashboard session, which is signed with the session secret itself.
+ */
+function signingKey(env: NodeJS.ProcessEnv = process.env) {
   const secret = env.DASHBOARD_SESSION_SECRET?.trim();
   if (!secret) throw new InstagramOAuthStateError("DASHBOARD_SESSION_SECRET is required for Instagram OAuth state.");
-  return secret;
+  return createHmac("sha256", secret).update("moonarq:instagram-oauth-state:v1").digest();
 }
 
-function sign(payloadPart: string, secret: string) {
-  return createHmac("sha256", secret).update(payloadPart).digest("base64url");
+function sign(payloadPart: string, key: Buffer) {
+  return createHmac("sha256", key).update(payloadPart).digest("base64url");
 }
 
 function signaturesMatch(provided: string, expected: string) {
@@ -57,7 +62,7 @@ function verifySignedState(state: string | null | undefined, env: NodeJS.Process
   if (!state) throw new InstagramOAuthStateError("Missing Instagram OAuth state.");
   const [payloadPart, signature] = state.split(".");
   if (!payloadPart || !signature) throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
-  if (!signaturesMatch(signature, sign(payloadPart, signingSecret(env)))) {
+  if (!signaturesMatch(signature, sign(payloadPart, signingKey(env)))) {
     throw new InstagramOAuthStateError("Invalid Instagram OAuth state.");
   }
   let payload: Partial<InstagramOAuthStatePayload>;
@@ -106,7 +111,7 @@ export function createInstagramOAuthState(
     exp: issuedAt + INSTAGRAM_OAUTH_STATE_MAX_AGE_SECONDS,
   };
   const payloadPart = base64UrlEncode(JSON.stringify(payload));
-  return `${payloadPart}.${sign(payloadPart, signingSecret(env))}`;
+  return `${payloadPart}.${sign(payloadPart, signingKey(env))}`;
 }
 
 export function validateSignedInstagramOAuthState(state: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {

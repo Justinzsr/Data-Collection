@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const TIKTOK_OAUTH_STATE_COOKIE = "moonarq_tiktok_oauth";
 export const SECURE_TIKTOK_OAUTH_STATE_COOKIE = "__Host-moonarq_tiktok_oauth";
@@ -34,21 +34,32 @@ function base64UrlDecode(value: string) {
   return Buffer.from(value, "base64url").toString("utf8");
 }
 
-function signingSecret(env: NodeJS.ProcessEnv = process.env) {
+/**
+ * A key of its own, derived from the session secret. The state travels in URLs
+ * (TikTok's authorize page, the callback), so it must never verify as a
+ * dashboard session, which is signed with the session secret itself.
+ */
+function signingKey(env: NodeJS.ProcessEnv = process.env) {
   const secret = env.DASHBOARD_SESSION_SECRET?.trim();
   if (!secret) throw new TikTokOAuthStateError("DASHBOARD_SESSION_SECRET is required for TikTok OAuth state.");
-  return secret;
+  return createHmac("sha256", secret).update("moonarq:tiktok-oauth-state:v1").digest();
 }
 
-function sign(payloadPart: string, secret: string) {
-  return createHmac("sha256", secret).update(payloadPart).digest("base64url");
+function sign(payloadPart: string, key: Buffer) {
+  return createHmac("sha256", key).update(payloadPart).digest("base64url");
+}
+
+function signaturesMatch(provided: string, expected: string) {
+  const providedBytes = Buffer.from(provided, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  return providedBytes.length === expectedBytes.length && timingSafeEqual(providedBytes, expectedBytes);
 }
 
 function verifySignedState(state: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
   if (!state) throw new TikTokOAuthStateError("Missing TikTok OAuth state.");
   const [payloadPart, signature] = state.split(".");
   if (!payloadPart || !signature) throw new TikTokOAuthStateError("Invalid TikTok OAuth state.");
-  if (sign(payloadPart, signingSecret(env)) !== signature) throw new TikTokOAuthStateError("Invalid TikTok OAuth state.");
+  if (!signaturesMatch(signature, sign(payloadPart, signingKey(env)))) throw new TikTokOAuthStateError("Invalid TikTok OAuth state.");
   let payload: Partial<TikTokOAuthStatePayload>;
   try {
     payload = JSON.parse(base64UrlDecode(payloadPart)) as Partial<TikTokOAuthStatePayload>;
@@ -92,7 +103,7 @@ export function createTikTokOAuthState(
     exp: issuedAt + TIKTOK_OAUTH_STATE_MAX_AGE_SECONDS,
   };
   const payloadPart = base64UrlEncode(JSON.stringify(payload));
-  return `${payloadPart}.${sign(payloadPart, signingSecret(env))}`;
+  return `${payloadPart}.${sign(payloadPart, signingKey(env))}`;
 }
 
 export function validateSignedTikTokOAuthState(state: string | null | undefined, env: NodeJS.ProcessEnv = process.env, now = Date.now()) {
