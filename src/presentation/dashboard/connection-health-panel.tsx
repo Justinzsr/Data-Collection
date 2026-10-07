@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronRight, KeyRound, PlugZap } from "lucide-react";
+import { isAuthorizationError } from "@/aggregation/services/platform-overview-service";
 import type { Source } from "@/storage/db/schema";
 import { Badge, statusTone, type BadgeTone } from "@/presentation/components/ui/badge";
 import { GlassPanel } from "@/presentation/components/ui/panel";
@@ -26,13 +27,13 @@ function metadataText(source: Source, key: string) {
 
 /**
  * When will this connection need a human to re-authorize it?
- * TikTok access tokens refresh server-side, so only the refresh-token expiry
- * matters there. Instagram and Meta long-lived tokens expire outright.
+ * TikTok and Etsy access tokens refresh server-side, so only the refresh-token
+ * expiry matters there. Instagram and Meta long-lived tokens expire outright.
  * Read-only: this never touches credentials.
  */
 export function authorizationState(source: Source, now = currentTime()): AuthorizationState | null {
-  const isTikTok = source.source_type_key === "tiktok";
-  const oauthPlatform = isTikTok || source.source_type_key === "instagram" || source.source_type_key === "meta_ads";
+  const refreshesItself = source.source_type_key === "tiktok" || source.source_type_key === "etsy";
+  const oauthPlatform = refreshesItself || source.source_type_key === "instagram" || source.source_type_key === "meta_ads";
   if (!oauthPlatform) return null;
   if (source.status === "demo" || source.metadata.demo === true) {
     return { tone: "slate", label: "Demo only", attention: false, renewal: false };
@@ -40,12 +41,16 @@ export function authorizationState(source: Source, now = currentTime()): Authori
   if (source.metadata.oauth_connected !== true) {
     return { tone: "amber", label: "Not authorized", attention: true, renewal: false };
   }
-  const deadline = isTikTok
+  // A refused authorization outranks any expiry date still on record.
+  if (source.status === "error" && isAuthorizationError(source.last_error)) {
+    return { tone: "rose", label: "Reconnect needed", attention: true, renewal: true };
+  }
+  const deadline = refreshesItself
     ? metadataText(source, "refresh_expires_at")
     : metadataText(source, "token_expires_at");
   const days = daysUntil(deadline, now);
   if (days === null) {
-    return isTikTok
+    return refreshesItself
       ? { tone: "green", label: "Auto-refreshing", attention: false, renewal: false }
       : { tone: "slate", label: "Expiry unknown", attention: false, renewal: false };
   }

@@ -107,6 +107,11 @@ export interface NormalizedMetricBundle {
     /** Replace only rows whose dimensions carry this value, such as one report week. */
     dimension?: { key: string; value: string };
   };
+  /**
+   * Levels read at sync time, such as a listing count: upserted for their own
+   * date and never part of `replaceMetricWindow`, so earlier days keep theirs.
+   */
+  snapshotMetrics?: NormalizedMetric[];
 }
 
 export interface CommerceOrderLineFactInput {

@@ -17,6 +17,8 @@ const PLATFORM_SERIES: Record<string, string> = {
   // Whatnot shares Meta Ads' slot: the two never share a chart, and the free
   // slots (green, red) read as "better" and "worse" beside a change chip.
   whatnot: "var(--chart-7)",
+  // Etsy's own orange; it shares Supabase's slot, which never plots sales beside it.
+  etsy: "var(--chart-2)",
 };
 
 export function platformSeriesColor(sourceTypeKey: string) {

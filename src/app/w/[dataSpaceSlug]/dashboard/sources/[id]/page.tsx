@@ -1,4 +1,4 @@
-import { ArrowLeft, Camera, ChevronDown, Clipboard, Megaphone, RadioTower, ShieldAlert, Video, Webhook } from "lucide-react";
+import { ArrowLeft, Camera, CheckCircle2, ChevronDown, Clipboard, Megaphone, RadioTower, ShieldAlert, Video, Webhook } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -6,6 +6,10 @@ import {
   getCredentialSetupBlockReason,
   getSourceOperationBlockReason,
 } from "@/collection/connectors/registry";
+import { detectEtsy } from "@/collection/connectors/etsy/detect";
+import { ETSY_APP_KEYS_MESSAGE } from "@/collection/connectors/etsy/errors";
+import { etsyOAuthErrorMessage, isEtsyOAuthReason } from "@/collection/connectors/etsy/oauth-results";
+import { etsyOAuthStartPath } from "@/collection/connectors/etsy/paths";
 import { getInstagramMetaAppDisplay } from "@/collection/connectors/instagram/graph-api";
 import { expectedInstagramCopy } from "@/collection/connectors/instagram/source-policy";
 import { MOONARQ_FIRST_STORY_UTM_TAGS } from "@/collection/connectors/meta-ads/constants";
@@ -23,11 +27,13 @@ import { LinkButton } from "@/presentation/components/ui/button";
 import { Callout, GlassPanel, SectionHeader } from "@/presentation/components/ui/panel";
 import { PlatformIcon } from "@/presentation/components/ui/platform-icon";
 import { formatRelativeTime } from "@/presentation/components/ui/relative-time";
+import { isAuthorizationError } from "@/aggregation/services/platform-overview-service";
 import { authorizationState } from "@/presentation/dashboard/connection-health-panel";
 import { SnippetCard } from "@/presentation/dashboard/snippet-card";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
 import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
+import { EtsyConnectSteps } from "@/presentation/source-onboarding/etsy-connect-steps";
 import { WhatnotImportPanel } from "@/presentation/platforms/whatnot-import-panel";
 import {
   MetaAdsAccountSelector,
@@ -80,8 +86,19 @@ function metaAdsAccountCandidates(metadata: JsonRecord): MetaAdsAccountCandidate
   });
 }
 
-export default async function SourceDetailPage({ params }: { params: Promise<{ dataSpaceSlug: string; id: string }> }) {
-  const { dataSpaceSlug, id } = await params;
+function queryText(query: Record<string, string | string[] | undefined>, key: string) {
+  const value = query[key];
+  return typeof value === "string" ? value : null;
+}
+
+export default async function SourceDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ dataSpaceSlug: string; id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [{ dataSpaceSlug, id }, query = {}] = await Promise.all([params, searchParams]);
   const dataSpace = await getDataSpaceBySlug(dataSpaceSlug);
   if (!dataSpace) notFound();
   const basePath = dashboardPath(dataSpace.slug);
@@ -166,6 +183,23 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   const canTest = !actionBlockReason && connector.capabilities.canTestConnection;
   const canSync = !actionBlockReason && connector.capabilities.supportsManualSync;
   const authorization = authorizationState(source);
+  const showEtsy = source.source_type_key === "etsy";
+  const etsyConnected = showEtsy && source.metadata.oauth_connected === true;
+  // A sync that Etsy refused for want of authorization (or valid app keys) needs the seller, not another retry.
+  const etsyNeedsReconnect = etsyConnected && source.status === "error" && isAuthorizationError(source.last_error);
+  // Rejected app keys are fixed in the key fields, so those open instead of asking for a reconnect.
+  const etsyKeysRejected = etsyConnected && source.status === "error" && source.last_error === ETSY_APP_KEYS_MESSAGE;
+  const etsyShopName = showEtsy
+    ? metadataString(source.metadata, "etsy_shop_name") ?? source.account_name ?? detectEtsy(source.normalized_url ?? source.input_url ?? "")?.accountName ?? null
+    : null;
+  // The OAuth routes send back only a result and a reason code; the words come from here.
+  const etsyResultParam = showEtsy ? queryText(query, "etsy_oauth") : null;
+  const etsyReason = queryText(query, "reason");
+  const etsyResult = etsyResultParam === "connected"
+    ? { ok: true as const }
+    : etsyResultParam === "error"
+      ? { ok: false as const, message: etsyOAuthErrorMessage(isEtsyOAuthReason(etsyReason) ? etsyReason : "failed", etsyShopName) }
+      : null;
 
   return (
     <div className="mx-auto grid max-w-7xl gap-5">
@@ -225,6 +259,14 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
                 <StateRow label="TikTok account">{typeof source.metadata.tiktok_username === "string" ? source.metadata.tiktok_username : typeof source.metadata.tiktok_display_name === "string" ? source.metadata.tiktok_display_name : source.account_name ?? "not resolved"}</StateRow>
                 <StateRow label="Open ID"><span className="font-mono text-xs">{typeof source.metadata.tiktok_open_id === "string" ? source.metadata.tiktok_open_id : source.external_account_id ?? "not resolved"}</span></StateRow>
                 <StateRow label="Token expiry">{tokenStatus(source)}</StateRow>
+              </>
+            ) : null}
+            {showEtsy ? (
+              <>
+                <StateRow label="OAuth">{etsyConnected ? "connected" : "not connected"}</StateRow>
+                <StateRow label="Etsy shop">{etsyShopName ?? "not resolved"}</StateRow>
+                <StateRow label="Shop ID"><span className="font-mono text-xs">{source.external_account_id ?? "not resolved"}</span></StateRow>
+                <StateRow label="Access">{etsyConnected ? "Read-only: shop, listings, and orders" : "not granted"}</StateRow>
               </>
             ) : null}
             {authorization ? (
@@ -483,6 +525,91 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
             {canTest ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
             {canSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
           </div>
+        </GlassPanel>
+      ) : null}
+
+      {showEtsy ? (
+        <GlassPanel className="p-4 sm:p-5" data-testid="etsy-connection">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="mb-2 flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.018em] text-label">
+                <PlatformIcon sourceTypeKey="etsy" size="sm" />
+                Etsy connection
+              </h2>
+              <p className="text-sm leading-6 text-label-secondary">
+                {etsyConnected
+                  ? `Connected to ${etsyShopName ?? "your shop"} through the official Etsy Open API. Access renews itself while syncs run.`
+                  : "Connects your shop through the official Etsy Open API with an app you create on Etsy. Keys and tokens stay encrypted on the server."}
+              </p>
+            </div>
+            <Badge tone={etsyNeedsReconnect ? "rose" : etsyConnected ? "green" : "amber"} dot>
+              {etsyNeedsReconnect ? "Reconnect needed" : etsyConnected ? "Connected" : "Not connected"}
+            </Badge>
+          </div>
+          {etsyResult ? (
+            etsyResult.ok ? (
+              <Callout tone="success" className="mb-4" title="Etsy is connected" icon={<CheckCircle2 className="h-4 w-4" />} role="status">
+                {source.last_success_at
+                  ? "Syncing continues every hour."
+                  : "The first sync reads the past year of orders. It runs within the hour, or choose Sync now."}
+              </Callout>
+            ) : (
+              <Callout tone="danger" className="mb-4" title="Etsy isn't connected" icon={<ShieldAlert className="h-4 w-4" />} role="alert">
+                {etsyResult.message}
+              </Callout>
+            )
+          ) : null}
+          {etsyNeedsReconnect && !etsyResult ? (
+            <Callout tone="danger" className="mb-4" title="Etsy stopped accepting this connection" icon={<ShieldAlert className="h-4 w-4" />} role="status">
+              {source.last_error} Syncing resumes once you reconnect.
+            </Callout>
+          ) : null}
+          {etsyKeysRejected && !etsyResult ? (
+            <Callout tone="danger" className="mb-4" title="Etsy rejected the app keys" icon={<ShieldAlert className="h-4 w-4" />} role="status">
+              Check the keystring and shared secret against your app on Etsy and save them again below. The next sync uses the corrected keys.
+            </Callout>
+          ) : null}
+          {etsyConnected ? (
+            <>
+              {etsyNeedsReconnect || canTest || canSync ? (
+                <div className="flex flex-wrap gap-2">
+                  {etsyNeedsReconnect && !operationBlockReason ? (
+                    <LinkButton href={etsyOAuthStartPath({ sourceId: source.id, dataSpaceSlug: dataSpace.slug, returnPath: `${basePath}/sources/${source.id}` })} variant="primary">
+                      Reconnect Etsy
+                    </LinkButton>
+                  ) : null}
+                  {canTest ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
+                  {canSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
+                </div>
+              ) : null}
+              <details className="group mt-4 rounded-[16px] border border-separator" open={etsyKeysRejected}>
+                <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-[16px] px-3.5 text-sm font-semibold text-label transition hover:bg-fill">
+                  App keys, callback URL, and reconnecting
+                  <ChevronDown className="h-4 w-4 text-muted transition group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="border-t border-separator p-3.5 sm:p-4">
+                  <EtsyConnectSteps
+                    sourceId={source.id}
+                    dataSpaceSlug={dataSpace.slug}
+                    returnPath={`${basePath}/sources/${source.id}`}
+                    connected
+                    initialKeysSaved={!credentialBlockReason}
+                  />
+                </div>
+              </details>
+            </>
+          ) : operationBlockReason ? null : (
+            <EtsyConnectSteps
+              sourceId={source.id}
+              dataSpaceSlug={dataSpace.slug}
+              returnPath={`${basePath}/sources/${source.id}`}
+              connected={false}
+              initialKeysSaved={!credentialBlockReason}
+            />
+          )}
+          <Callout tone="neutral" className="mt-4" icon={<ShieldAlert className="h-4 w-4" />}>
+            Approve access only on etsy.com. The dashboard never asks for your Etsy password, and app keys belong in the fields above, not in chat.
+          </Callout>
         </GlassPanel>
       ) : null}
 
