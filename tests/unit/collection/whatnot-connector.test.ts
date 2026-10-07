@@ -1,3 +1,5 @@
+// @vitest-environment node
+// The import route reads multipart uploads with Node's Request, File, and FormData, which jsdom replaces.
 import { beforeEach, describe, expect, it } from "vitest";
 import { getWhatnotDetail } from "@/aggregation/services/platform-overview-service";
 import { POST as importRoute } from "@/app/api/sources/[id]/import/route";

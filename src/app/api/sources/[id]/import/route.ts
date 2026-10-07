@@ -37,6 +37,15 @@ function serializeRun(run: SyncRun) {
   };
 }
 
+/** An uploaded file, recognized by shape: `instanceof File` breaks when another runtime supplies the File class. */
+function isUploadedFile(value: FormDataEntryValue | null | undefined): value is File {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as File).text === "function"
+    && typeof (value as File).name === "string"
+    && typeof (value as File).size === "number";
+}
+
 function runStatus(run: SyncRun) {
   return run.status === "error" ? 500 : run.status === "skipped" ? 409 : 200;
 }
@@ -130,7 +139,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const form = await request.formData().catch(() => null);
     const file = form?.get("file");
-    if (!(file instanceof File)) {
+    if (!isUploadedFile(file)) {
       return Response.json({ ok: false, error: "Choose the Weekly Orders Report CSV to upload." }, { status: 400 });
     }
     if (file.size === 0) return Response.json({ ok: false, error: "The file is empty." }, { status: 400 });
