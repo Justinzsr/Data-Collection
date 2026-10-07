@@ -191,6 +191,43 @@ because the seller pays the shipping. They are not sales or orders.
   then shows up as imported and can be removed. Removing a week deletes its numbers but keeps its
   raw snapshot (order IDs, amounts, show titles; never buyer details) in the import history.
 
+## Etsy
+
+Etsy data comes from the official Open API v3 through the seller's own app (see
+`docs/connector-roadmap.md`). The card appears once an Etsy source exists. Sales are gross, as in
+Etsy's payments: an order counts on the Pacific day it was placed whenever money changed hands, and
+every refund, a cancellation's included, counts on the day Etsy issued it. A refunded order keeps
+its sale, so a day's numbers are the same whether it was recomputed today or kept from an earlier
+sync.
+
+| Value | Definition |
+| --- | --- |
+| Sales | Receipt subtotals (item prices times quantities, minus shop coupons; no shipping or tax) of orders that were paid and not canceled, or that Etsy refunded |
+| Orders | Those receipts |
+| Units sold | Quantities on those receipts' transactions |
+| Avg. order value | Sales ÷ orders |
+| Refunds | Refund amounts on receipts, cancellations included, by the day each was issued; lower is better |
+| Active listings | The shop's active listing count, kept for each day it was synced; the card shows the latest, a level, so it shows no change |
+
+- **Freshness.** Syncs run hourly. The first sync reads the past year; every later one rereads from
+  35 days before the last successful sync (the last five weeks, normally; more after an outage) and
+  replaces those days. Older orders that changed since then are read too, so a refund issued today on
+  a two-month-old order counts today. A stretch with more orders than Etsy's API pages through at once
+  is read in smaller windows.
+- **Currency.** Values are in the shop's currency (the currency of its newest sale, else the shop's
+  setting). A receipt in another currency is left out rather than mixed in.
+- **States.** Before the app keys are saved and access is approved, the card and page say what is
+  missing; after connecting, they wait for the first sync. Authorization renews itself while syncs
+  run; a refresh token Etsy stops accepting turns the card to Reconnect needed, and the source and
+  Etsy pages offer Reconnect Etsy. App keys Etsy rejects show as a sync error with the key fields
+  opened on the source page.
+- **Privacy.** Only order dates, statuses, totals, quantities, and refunds are stored. Buyer names,
+  addresses, emails, messages, gift notes, and listing titles never are.
+- **Known limits.** Shop visits are not part of the sync; storefront traffic comes from the Website
+  tracker. An order canceled without a refund (one that was never charged) is left out of days still
+  being recomputed; if Etsy records that cancellation more than five weeks after the order, the
+  order's earlier count stays.
+
 ## Other derived values
 
 | Value | Definition |

@@ -27,6 +27,7 @@ import { Button, LinkButton } from "@/presentation/components/ui/button";
 import { GlassPanel } from "@/presentation/components/ui/panel";
 import { IconTile, PlatformIcon } from "@/presentation/components/ui/platform-icon";
 import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
+import { EtsyConnectSteps } from "@/presentation/source-onboarding/etsy-connect-steps";
 
 type ConnectorAvailability = "live" | "planned";
 type SetupKind = "oauth" | "credentials" | "webhook" | "tracker" | "hybrid" | "upload" | "planned";
@@ -169,6 +170,7 @@ function inputPlaceholderFor(sourceTypeKey: string) {
   if (sourceTypeKey === "supabase") return "https://your-project.supabase.co";
   if (sourceTypeKey === "website") return "https://your-site.com";
   if (sourceTypeKey === "whatnot") return "https://www.whatnot.com/user/your-shop";
+  if (sourceTypeKey === "etsy") return "https://www.etsy.com/shop/YourShop";
   return "Paste the official account, project, or source URL";
 }
 
@@ -288,7 +290,7 @@ export function AddSourceWizard({
         if (!cancelled) {
           const loadedSourceTypes: SourceTypeDefinition[] = body.sourceTypes ?? [];
           setSourceTypes(loadedSourceTypes);
-          if (!templateApplied.current && (template === "instagram" || template === "tiktok" || template === "shopify" || template === "whatnot")) {
+          if (!templateApplied.current && (template === "instagram" || template === "tiktok" || template === "shopify" || template === "etsy" || template === "whatnot")) {
             const templateType = loadedSourceTypes.find((item) => item.key === template);
             if (isConnectable(templateType)) {
               templateApplied.current = true;
@@ -697,7 +699,11 @@ export function AddSourceWizard({
                       <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-tint" />
                       <div>
                         <p className="text-sm font-semibold text-label">No token fields in this form</p>
-                        <p className="mt-1 text-sm leading-6 text-label-secondary">Save the source, then use the official {selectedType.display_name} OAuth screen.</p>
+                        <p className="mt-1 text-sm leading-6 text-label-secondary">
+                          {effectiveType.key === "etsy"
+                            ? "Save the source, then add your Etsy app's keys and approve read-only access on Etsy."
+                            : `Save the source, then use the official ${selectedType.display_name} OAuth screen.`}
+                        </p>
                       </div>
                     </div>
                   ) : null}
@@ -823,7 +829,17 @@ export function AddSourceWizard({
                     </div>
                   </div>
 
-                  {savedType.setup_kind === "oauth" ? (
+                  {savedType.key === "etsy" ? (
+                    <div className="rounded-[22px] bg-fill p-4 sm:p-5" data-testid="etsy-setup-steps">
+                      <EtsyConnectSteps
+                        sourceId={savedSource.id}
+                        dataSpaceSlug={dataSpaceSlug}
+                        returnPath={`${basePath}/sources/${savedSource.id}`}
+                        connected={false}
+                        initialKeysSaved={false}
+                      />
+                    </div>
+                  ) : savedType.setup_kind === "oauth" ? (
                     <div className="rounded-[22px] bg-tint/8 p-5 sm:p-6">
                       <div className="flex gap-3">
                         <PlatformIcon sourceTypeKey={savedType.key} size="lg" />

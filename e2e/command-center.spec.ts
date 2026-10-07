@@ -270,6 +270,80 @@ test("Whatnot explains how to start before it is added", async ({ page }) => {
   await expect(page.getByTestId("platform-card-whatnot")).toHaveCount(0);
 });
 
+test("Etsy is added from Add Source and walks through each connection step", async ({ page, request }) => {
+  const cookie = await dashboardAuthCookie(request);
+  await loginDashboard(page);
+  const createdSourceIds: string[] = [];
+  try {
+    await page.goto("/w/moonarq/dashboard/sources/new?template=etsy");
+    await expect(page.getByRole("heading", { name: "Configure Etsy" })).toBeVisible();
+    await page.getByLabel("Public source URL").fill("https://www.etsy.com/shop/MoonArqE2E");
+    await page.getByRole("button", { name: "Check URL" }).click();
+    await expect(page.getByText("URL matches Etsy", { exact: true })).toBeVisible();
+    await expect(page.getByText("Save the source, then add your Etsy app's keys and approve read-only access on Etsy.")).toBeVisible();
+    await page.getByRole("button", { name: "Review connection" }).click();
+    await expect(page.getByText("Secure OAuth", { exact: true })).toBeVisible();
+    const sourceId = await saveSourceAndCaptureId(page);
+    createdSourceIds.push(sourceId);
+
+    const steps = page.getByTestId("etsy-setup-steps");
+    await expect(steps.getByTestId("etsy-callback-url")).toHaveText("http://localhost:4000/api/oauth/etsy/callback");
+    await expect(steps.getByRole("button", { name: "Connect Etsy" })).toBeDisabled();
+    await expect(steps.getByText("Save both keys first.")).toBeVisible();
+    await steps.getByLabel("Etsy app keystring").fill("e2e-test-keystring-0001");
+    await steps.getByLabel("Etsy app shared secret").fill("e2e-test-shared-secret-0001");
+    await steps.getByRole("button", { name: "Save Credentials" }).click();
+    const connect = steps.getByRole("link", { name: "Connect Etsy" });
+    await expect(connect).toBeVisible();
+    const startHref = await connect.getAttribute("href");
+    expect(startHref).toContain(`/api/oauth/etsy/start?sourceId=${sourceId}&dataSpaceSlug=moonarq`);
+    await expect(page.locator("body")).not.toContainText("e2e-test-shared-secret-0001");
+
+    // The start route hands the seller to Etsy without the secret ever leaving the server.
+    const start = await request.get(startHref!, { headers: { cookie }, maxRedirects: 0 });
+    expect(start.status()).toBe(307);
+    const authorize = new URL(start.headers().location);
+    expect(`${authorize.origin}${authorize.pathname}`).toBe("https://www.etsy.com/oauth/connect");
+    expect(authorize.searchParams.get("client_id")).toBe("e2e-test-keystring-0001");
+    expect(authorize.searchParams.get("redirect_uri")).toBe("http://localhost:4000/api/oauth/etsy/callback");
+    expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(start.headers().location).not.toContain("e2e-test-shared-secret-0001");
+
+    // Results come back as codes; the page supplies the words, so a link can't put its own text there.
+    await page.goto(`/w/moonarq/dashboard/sources/${sourceId}?etsy_oauth=error&reason=different_shop`);
+    const panel = page.getByTestId("etsy-connection");
+    await expect(panel.getByRole("alert")).toContainText("doesn't own MoonArqE2E");
+    await page.goto(`/w/moonarq/dashboard/sources/${sourceId}?etsy_oauth=error&reason=${encodeURIComponent("Call 555-0100 to verify")}`);
+    await expect(panel.getByRole("alert")).toContainText("Connecting to Etsy didn't finish.");
+    await expect(page.locator("body")).not.toContainText("555-0100");
+    await expect(panel.getByRole("link", { name: "Connect Etsy" })).toBeVisible();
+    await settleResponsiveLayout(page);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+
+    await page.goto("/w/moonarq/dashboard/platforms/etsy");
+    await expect(page.getByRole("heading", { name: "Etsy", level: 1 })).toBeVisible();
+    await expect(page.getByText("Finish connecting Etsy", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("etsy-header").getByRole("link", { name: "Finish connecting" })).toHaveAttribute("href", `/w/moonarq/dashboard/sources/${sourceId}`);
+    await settleResponsiveLayout(page);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+
+    await page.goto("/w/moonarq/dashboard");
+    const card = page.getByTestId("platform-card-etsy");
+    await expect(card.getByRole("link", { name: "Etsy", exact: true })).toHaveAttribute("href", "/w/moonarq/dashboard/platforms/etsy");
+  } finally {
+    await deleteCreatedSources(request, cookie, createdSourceIds);
+  }
+});
+
+test("Etsy explains how to start before it is added", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard/platforms/etsy");
+  await expect(page.getByRole("heading", { name: "Etsy", level: 1 })).toBeVisible();
+  await expect(page.getByTestId("etsy-setup").getByRole("link", { name: "Add Etsy" })).toHaveAttribute("href", "/w/moonarq/dashboard/sources/new?template=etsy");
+  await page.goto("/w/moonarq/dashboard");
+  await expect(page.getByTestId("platform-card-etsy")).toHaveCount(0);
+});
+
 test("old Commerce links open the Shopify page", async ({ page }) => {
   await loginDashboard(page);
   for (const path of ["/w/moonarq/dashboard/commerce", "/dashboard/commerce"]) {
@@ -392,7 +466,7 @@ test("add source wizard detects Supabase and Website and shows credentials after
     await expect(page.getByLabel("Anon key")).toHaveCount(0);
     await page.getByLabel("Service role key").fill("fake-service-role-value");
     await page.getByRole("button", { name: "Save Credentials" }).click();
-    await expect(page.getByText("fake••••alue")).toBeVisible();
+    await expect(page.getByText("fa••••ue")).toBeVisible();
 
     await page.goto("/w/moonarq/dashboard/sources/new");
     await expect(page.getByTestId("add-source-wizard")).toHaveAttribute("data-onboarding-ready", "true");
@@ -474,7 +548,7 @@ test("credential API routes save masked hints and delete credentials", async ({ 
     expect(saveResponse.ok()).toBeTruthy();
     const saveBody = await saveResponse.json();
     expect(JSON.stringify(saveBody)).not.toContain("fake-service-role-value");
-    expect(saveBody.saved.find((item: { field_key: string }) => item.field_key === "service_role_key").value_hint).toBe("fake••••alue");
+    expect(saveBody.saved.find((item: { field_key: string }) => item.field_key === "service_role_key").value_hint).toBe("fa••••ue");
 
     const deleteResponse = await request.delete(`/api/sources/${source.id}/credentials/service_role_key`, { headers: { cookie } });
     expect(deleteResponse.ok()).toBeTruthy();

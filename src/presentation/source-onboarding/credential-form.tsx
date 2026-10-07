@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, KeyRound, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/presentation/components/ui/badge";
@@ -23,14 +23,34 @@ type SavedCredential = {
   updated_at: string;
 };
 
-export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug }: { sourceId: string; title?: string; dataSpaceSlug?: string }) {
+export function CredentialForm({
+  sourceId,
+  title = "Credentials",
+  dataSpaceSlug,
+  onSavedChange,
+}: {
+  sourceId: string;
+  title?: string;
+  dataSpaceSlug?: string;
+  /** Called with the keys of the fields that hold a saved value, after loading and after every change. */
+  onSavedChange?: (fieldKeys: string[]) => void;
+}) {
   const [fields, setFields] = useState<CredentialField[]>([]);
-  const [saved, setSaved] = useState<SavedCredential[]>([]);
+  const [saved, setSavedState] = useState<SavedCredential[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const onSavedChangeRef = useRef(onSavedChange);
+  useEffect(() => {
+    onSavedChangeRef.current = onSavedChange;
+  });
 
   const savedByKey = useMemo(() => new Map(saved.map((item) => [item.field_key, item])), [saved]);
+
+  const setSaved = useCallback((next: SavedCredential[]) => {
+    setSavedState(next);
+    onSavedChangeRef.current?.(next.map((item) => item.field_key));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,7 +66,7 @@ export function CredentialForm({ sourceId, title = "Credentials", dataSpaceSlug 
     } finally {
       setLoading(false);
     }
-  }, [sourceId, dataSpaceSlug]);
+  }, [sourceId, dataSpaceSlug, setSaved]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {

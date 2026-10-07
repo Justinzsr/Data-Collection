@@ -188,10 +188,19 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
     const validateMetricWindowOwnership = (
       normalized: Awaited<ReturnType<typeof connector.normalize>>,
     ) => {
-      if (!normalized.replaceMetricWindow) return;
+      const snapshotMetrics = normalized.snapshotMetrics ?? [];
+      if (!normalized.replaceMetricWindow && snapshotMetrics.length === 0) return;
       const connectorMetricKeys = new Set(connector.getMetricDefinitions().map((definition) => definition.key));
-      if (normalized.replaceMetricWindow.metricKeys.some((metricKey) => !connectorMetricKeys.has(metricKey))) {
+      if (normalized.replaceMetricWindow?.metricKeys.some((metricKey) => !connectorMetricKeys.has(metricKey))) {
         throw new Error("Connector requested replacement of a metric it does not own.");
+      }
+      const windowKeys = new Set(normalized.replaceMetricWindow?.metricKeys ?? []);
+      if (snapshotMetrics.some((metric) =>
+        metric.sourceId !== source.id
+        || metric.sourceTypeKey !== source.source_type_key
+        || !connectorMetricKeys.has(metric.metricKey)
+        || windowKeys.has(metric.metricKey))) {
+        throw new Error("Connector snapshot metrics must be its own and outside its replacement window.");
       }
     };
 
@@ -256,6 +265,8 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
         )
         : await upsertMetrics(normalized.metrics, executor);
       assertLockLease();
+      const snapshots = await upsertMetrics(normalized.snapshotMetrics ?? [], executor);
+      assertLockLease();
       const content = await upsertContentMetrics(normalized.contentMetrics ?? [], executor);
       assertLockLease();
       const commerce = hasCommerceFacts && syncResult.replaceCommerceOrderWindow
@@ -272,7 +283,7 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
           executor,
         )
         : { ordersInserted: 0, linesInserted: 0 };
-      return { metrics, content, commerce };
+      return { metrics: { upserted: metrics.upserted + snapshots.upserted }, content, commerce };
     };
 
     let persistedRaw: Awaited<ReturnType<typeof persistRawAndWebEvents>>;

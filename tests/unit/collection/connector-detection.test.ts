@@ -55,11 +55,24 @@ describe("connector detection", () => {
     }
   });
 
-  it("detects Facebook Pages, Etsy shops, and GA4 properties as planned, credential-free connectors", () => {
+  it("detects Etsy shops as the live Etsy connector, named after the shop", () => {
+    const [result] = detectSource("https://www.etsy.com/uk/shop/MoonArqStudio?ref=shop_sugg");
+    expect(result).toMatchObject({
+      sourceTypeKey: "etsy",
+      availability: "live",
+      setupKind: "oauth",
+      normalizedUrl: "https://www.etsy.com/shop/MoonArqStudio",
+      accountName: "MoonArqStudio",
+      demoAvailable: false,
+    });
+    expect(result.possibleMetrics).toEqual(expect.arrayContaining(["etsy_orders", "etsy_sales", "etsy_refunds", "etsy_active_listings"]));
+    expect(result.requiredSetup.join(" ")).toContain("callback URL");
+  });
+
+  it("detects Facebook Pages and GA4 properties as planned, credential-free connectors", () => {
     const cases = [
       { input: "https://www.facebook.com/moonarqstudio/about", key: "facebook_page", normalizedUrl: "https://www.facebook.com/moonarqstudio", accountName: "moonarqstudio" },
       { input: "https://m.facebook.com/profile.php?id=61550000000000", key: "facebook_page", normalizedUrl: "https://www.facebook.com/profile.php?id=61550000000000", accountName: "61550000000000" },
-      { input: "https://www.etsy.com/uk/shop/MoonArqStudio?ref=shop_sugg", key: "etsy", normalizedUrl: "https://www.etsy.com/shop/MoonArqStudio", accountName: "MoonArqStudio" },
       { input: "https://analytics.google.com/analytics/web/#/p123456789/reports/intelligenthome", key: "google_analytics", normalizedUrl: "https://analytics.google.com/analytics/web/#/p123456789/", accountName: "GA4 property 123456789" },
     ] as const;
     for (const { input, key, normalizedUrl, accountName } of cases) {

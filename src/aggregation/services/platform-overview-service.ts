@@ -7,6 +7,7 @@ import { isLocalOverviewFixtureEnabled, paidAdsFixture } from "@/aggregation/ser
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
 import { getWebsiteFunnelOverview, type WebsiteFunnelDemoState } from "@/aggregation/services/website-funnel-service";
 import type { WebsiteFunnelOverview } from "@/aggregation/services/website-funnel-types";
+import { ETSY_METRIC_KEYS } from "@/collection/connectors/etsy/constants";
 import {
   coveredDateRuns,
   isReportWeek,
@@ -72,7 +73,7 @@ export type OverviewRange = {
   sparkline: { startDate: string; endDate: string; label: string };
 };
 
-export type OverviewPlatformKey = "website" | "shopify" | "whatnot" | "instagram" | "tiktok" | "supabase";
+export type OverviewPlatformKey = "website" | "shopify" | "etsy" | "whatnot" | "instagram" | "tiktok" | "supabase";
 
 /** For platforms whose data arrives as periodic reports rather than live syncs. */
 export type ReportCoverage = {
@@ -1329,7 +1330,139 @@ export async function getWhatnotDetail(input: {
   };
 }
 
-const SUMMED_KEYS = ["orders", "net_payment", "signups", "page_views", "sessions", "custom_events"];
+// ---------------------------------------------------------------------------
+// Etsy (Open API v3 receipts)
+
+function etsyUnavailableReason(source: Source | null) {
+  if (!source) return "Add Etsy, then connect your shop.";
+  if (source.metadata.oauth_connected !== true) return "Connect Etsy to see orders and sales.";
+  if (!source.last_success_at) return "Waiting for the first Etsy sync.";
+  return null;
+}
+
+/** The currency of the newest real sale, else the shop's, so zero days never decide it. */
+function etsyCurrency(rows: MetricDaily[], source: Source | null) {
+  const sales = rows
+    .filter((row) => row.source_id === source?.id && row.metric_key === "etsy_sales" && row.metric_value !== 0)
+    .sort((left, right) => right.date.localeCompare(left.date));
+  const unit = sales[0]?.unit.toLowerCase() ?? textValue(source?.metadata.etsy_currency)?.toLowerCase() ?? null;
+  return unit && /^[a-z]{3}$/u.test(unit) ? unit : "usd";
+}
+
+/** The shop's active listings at the latest sync; a level, so it shows no period change. */
+function etsyActiveListings(rows: MetricDaily[], sourceId: string): OverviewMetric {
+  const latest = rows
+    .filter((row) => row.source_id === sourceId && row.metric_key === "etsy_active_listings")
+    .sort(newestFirst)[0];
+  return {
+    key: "active_listings",
+    label: "Active listings",
+    value: latest?.metric_value ?? null,
+    unit: "count",
+    delta: { kind: "none", reason: "unavailable" },
+    higherIsBetter: true,
+  };
+}
+
+function etsySums(rows: MetricDaily[], sourceId: string) {
+  return {
+    sales: dailySums(rows, "etsy_sales", sourceId, "daily"),
+    orders: dailySums(rows, "etsy_orders", sourceId, "daily"),
+    units: dailySums(rows, "etsy_units_sold", sourceId, "daily"),
+    refunds: dailySums(rows, "etsy_refunds", sourceId, "daily"),
+  };
+}
+
+export function etsyCard(source: Source | null, rows: MetricDaily[], range: OverviewRange): OverviewPlatformCard {
+  const sourceId = source?.id ?? "";
+  const unavailableReason = etsyUnavailableReason(source);
+  const ready = unavailableReason === null;
+  const sums = etsySums(rows, sourceId);
+  const currency = etsyCurrency(rows, source);
+  return {
+    key: "etsy",
+    iconKey: "etsy",
+    title: "Etsy",
+    account: source?.account_name ?? null,
+    source,
+    primary: ready
+      ? summedMetric({ key: "sales", label: "Sales", unit: currency, sums: sums.sales, range, hasData: true, higherIsBetter: true })
+      : unavailableMetric("sales", "Sales", currency, true),
+    secondary: [
+      ready
+        ? summedMetric({ key: "orders", label: "Orders", unit: "count", sums: sums.orders, range, hasData: true, higherIsBetter: true })
+        : unavailableMetric("orders", "Orders", "count", true),
+      ready ? etsyActiveListings(rows, sourceId) : unavailableMetric("active_listings", "Active listings", "count", true),
+    ],
+    sparkline: { label: `Daily sales, ${range.sparkline.label.toLowerCase()}`, points: ready ? zeroFilled(sums.sales, range.sparkline.startDate, range.sparkline.endDate) : [] },
+    updatedAt: lastSyncedAt(source),
+    unavailableReason,
+  };
+}
+
+export type EtsyDetail = {
+  range: OverviewRange;
+  source: Source | null;
+  card: OverviewPlatformCard;
+  currency: string;
+  metrics: OverviewMetric[];
+  dailySales: OverviewPoint[];
+  dailyOrders: OverviewPoint[];
+};
+
+export async function getEtsyDetail(input: {
+  dataSpace: Pick<DataSpace, "id" | "slug">;
+  rangeKey: DateRangeKey;
+  now?: Date;
+}): Promise<EtsyDetail> {
+  const now = input.now ?? getDemoNow();
+  const range = overviewRange(input.rangeKey, now);
+  const sources = await listSources({ dataSpaceId: input.dataSpace.id });
+  const source = primarySource(sources, "etsy");
+  const queryStart = [range.comparison?.previousStart, range.sparkline.startDate].filter((value): value is string => Boolean(value)).sort()[0];
+  const rows = source
+    ? await listMetrics({ sourceId: source.id, metricKeys: ETSY_METRIC_KEYS, startDate: queryStart, endDate: range.endDate, dataSpaceId: input.dataSpace.id })
+    : [];
+  const sourceId = source?.id ?? "";
+  const card = etsyCard(source, rows, range);
+  const ready = card.unavailableReason === null;
+  const sums = etsySums(rows, sourceId);
+  const currency = etsyCurrency(rows, source);
+  const summed = (key: string, label: string, unit: string, values: Map<string, number>, higherIsBetter: boolean | null) => ready
+    ? summedMetric({ key, label, unit, sums: values, range, hasData: true, higherIsBetter })
+    : unavailableMetric(key, label, unit, higherIsBetter);
+  const aov = (start: string, end: string) => ratio(windowSum(sums.sales, start, end), windowSum(sums.orders, start, end));
+  const aovMetric: OverviewMetric = ready
+    ? {
+        key: "average_order_value",
+        label: "Avg. order value",
+        value: aov(range.startDate, range.endDate),
+        unit: currency,
+        delta: range.comparison
+          ? nullableChange(aov(range.comparison.currentStart, range.comparison.currentEnd), aov(range.comparison.previousStart, range.comparison.previousEnd), "percent", range.comparison.basis)
+          : { kind: "none", reason: "partial_day" },
+        higherIsBetter: true,
+      }
+    : unavailableMetric("average_order_value", "Avg. order value", currency, true);
+  return {
+    range,
+    source,
+    card,
+    currency,
+    metrics: [
+      summed("sales", "Sales", currency, sums.sales, true),
+      summed("orders", "Orders", "count", sums.orders, true),
+      summed("units_sold", "Units sold", "count", sums.units, true),
+      aovMetric,
+      summed("refunds", "Refunds", currency, sums.refunds, false),
+      ready ? etsyActiveListings(rows, sourceId) : unavailableMetric("active_listings", "Active listings", "count", true),
+    ],
+    dailySales: ready ? zeroFilled(sums.sales, range.sparkline.startDate, range.sparkline.endDate) : [],
+    dailyOrders: ready ? zeroFilled(sums.orders, range.sparkline.startDate, range.sparkline.endDate) : [],
+  };
+}
+
+const SUMMED_KEYS = ["orders", "net_payment", "signups", "page_views", "sessions", "custom_events", ...ETSY_METRIC_KEYS];
 const SNAPSHOT_KEYS = [
   "instagram_followers",
   "instagram_media_reach",
@@ -1342,9 +1475,9 @@ const SNAPSHOT_KEYS = [
 ];
 
 /** MoonArq always shows its core platforms (with a setup prompt when missing); other spaces show what they have. */
-const PLATFORM_ORDER: OverviewPlatformKey[] = ["website", "shopify", "whatnot", "instagram", "tiktok", "supabase"];
+const PLATFORM_ORDER: OverviewPlatformKey[] = ["website", "shopify", "etsy", "whatnot", "instagram", "tiktok", "supabase"];
 /** Shown only once a source exists, even in MoonArq. */
-const OPTIONAL_PLATFORMS = new Set<OverviewPlatformKey>(["whatnot"]);
+const OPTIONAL_PLATFORMS = new Set<OverviewPlatformKey>(["etsy", "whatnot"]);
 
 export function buildPlatformCards(input: {
   dataSpaceSlug: string;
@@ -1371,6 +1504,7 @@ export function buildPlatformCards(input: {
     const source = primarySource(sources, key);
     if (!source && (!isMoonArq || OPTIONAL_PLATFORMS.has(key))) continue;
     if (key === "shopify") cards.push(shopifyCard(source, sumRows, range));
+    else if (key === "etsy") cards.push(etsyCard(source, sumRows, range));
     else if (key === "whatnot") {
       cards.push(whatnotCard({
         source,
@@ -1519,8 +1653,8 @@ export function rankedTotals(rows: MetricDaily[], metricKey: string, sourceId: s
 export async function getPlatformDetail(input: {
   dataSpace: Pick<DataSpace, "id" | "slug">;
   rangeKey: DateRangeKey;
-  /** Website and Whatnot have their own detail services. */
-  key: Exclude<OverviewPlatformKey, "website" | "whatnot">;
+  /** Website, Etsy, and Whatnot have their own detail services. */
+  key: Exclude<OverviewPlatformKey, "website" | "etsy" | "whatnot">;
   now?: Date;
 }): Promise<PlatformDetail> {
   const now = input.now ?? getDemoNow();

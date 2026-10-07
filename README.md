@@ -236,6 +236,23 @@ data states.
 
 Source roles are explicit: the first-party tracker is authoritative for funnel/session/identity/attribution; Vercel Drain is auxiliary; Shopify is authoritative for commerce; and Meta is authoritative for paid media delivery and spend.
 
+## Etsy
+
+Etsy connects through the official Open API v3 with an app you create for your own shop:
+
+1. At etsy.com/developers/your-apps, create an app and add the callback URL the source page shows
+   (`https://<your data hub>/api/oauth/etsy/callback`), exactly as written.
+2. Paste the app's keystring and shared secret into the Etsy source's encrypted fields.
+3. Choose **Connect Etsy** and approve read-only access on etsy.com.
+
+No Etsy password is ever entered here, and keys never belong in chat or in this repository. Access
+renews itself while the hourly sync runs. The first sync reads a year of orders; later syncs reread
+the last five weeks. Sales are gross: every order where money changed hands counts on the day it was
+placed, and refunds, cancellations included, count on the day Etsy issued them. Only order dates,
+statuses, totals, quantities, and refunds are stored, never buyer details. See
+[docs/connector-roadmap.md](docs/connector-roadmap.md) and
+[docs/platform-overview.md](docs/platform-overview.md#etsy).
+
 ## Whatnot
 
 Whatnot's Seller API is a closed preview, so the Whatnot source imports the Seller Weekly Orders

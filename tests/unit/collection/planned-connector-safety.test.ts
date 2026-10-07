@@ -71,7 +71,7 @@ describe("planned connector safety", () => {
   });
 
   it("keeps every future connector planned and credential-free", () => {
-    for (const key of ["vercel_project", "custom_api", "custom_csv", "facebook_page", "etsy", "google_analytics"] as const) {
+    for (const key of ["vercel_project", "custom_api", "custom_csv", "facebook_page", "google_analytics"] as const) {
       const connector = getConnector(key);
       expect(connector.availability).toBe("planned");
       expect(connector.requiredFields).toEqual([]);
@@ -87,7 +87,6 @@ describe("planned connector safety", () => {
 
   it.each([
     { key: "facebook_page", url: "https://www.facebook.com/moonarqstudio" },
-    { key: "etsy", url: "https://www.etsy.com/shop/MoonArqStudio" },
     { key: "google_analytics", url: "https://analytics.google.com/analytics/web/#/p123456789/reports/intelligenthome" },
   ] as const)("rejects source creation for planned $key without saving a source", async ({ key, url }) => {
     const before = getDemoStore().sources.length;
