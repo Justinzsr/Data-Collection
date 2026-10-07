@@ -19,6 +19,8 @@ export type ConnectorSetupKind =
   | "webhook"
   | "tracker"
   | "hybrid"
+  /** Data arrives as a report the person downloads from the platform and uploads. */
+  | "upload"
   | "planned";
 
 export interface DetectionResult {
@@ -55,6 +57,8 @@ export interface SyncContext extends ConnectorContext {
   trigger: SyncTrigger;
   cursor?: JsonRecord | null;
   webhookPayload?: JsonRecord | null;
+  /** A validated, uploaded report for connectors whose setup kind is "upload". */
+  importPayload?: JsonRecord | null;
 }
 
 export interface RawPayload {
@@ -100,6 +104,8 @@ export interface NormalizedMetricBundle {
     metricKeys: string[];
     startDate: string;
     endDate: string;
+    /** Replace only rows whose dimensions carry this value, such as one report week. */
+    dimension?: { key: string; value: string };
   };
 }
 

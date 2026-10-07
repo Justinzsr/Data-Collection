@@ -17,12 +17,13 @@ locked, idempotent engine.
 | Meta Ads monitor | Spend so far today, delivery status, the selected period with direction of change, daily spend, freshness | `platforms/ads` |
 | Website card | Sessions, visitors, checkout starts (first-party tracker) | `platforms/website` (the storefront funnel analysis) |
 | Shopify card | Net payment, orders, average order value | `platforms/shopify` |
+| Whatnot card (once Whatnot is added) | Completed sales, orders, net earnings, through the last day the imported reports cover | `platforms/whatnot` |
 | Instagram card | Followers, post reach, engagement | `platforms/instagram` |
 | TikTok card | Followers, video views, engagement | `platforms/tiktok` |
 | Supabase card | New signups, total users, confirmed users | `platforms/supabase` |
 
-MoonArq always shows these five cards, with a setup prompt when a platform is not
-connected. Other spaces (Auto Lab) show only the platforms they have. A connection
+MoonArq always shows the five core cards, with a setup prompt when a platform is not
+connected, and adds Whatnot once a Whatnot source exists. Other spaces (Auto Lab) show only the platforms they have. A connection
 that needs attention (expired, expiring, or revoked authorization, failed or
 overdue sync, unfinished setup) is listed in one line under the header. Only
 scheduled sources can be overdue: the website tracker and webhook or manual
@@ -125,6 +126,70 @@ The monitor shows when Meta Ads last synced and how it stays fresh. Meta can tak
 a short while to report the latest delivery, and conversion values can be revised
 for days; every sync recomputes an overlapping window, so revised values replace
 older ones.
+
+## Whatnot
+
+Whatnot data comes from the Seller Weekly Orders Report the seller uploads each week (see
+`docs/connector-roadmap.md`). Each report holds the transactions that completed from Monday 00:00
+to Sunday 23:59 UTC. An order completes about four hours after delivery is confirmed (or when its
+label is created with Early Payout), so it lands in the report of the week it completed, often days
+after it was placed. Every Whatnot value is therefore dated by the Pacific day the transaction
+completed, the same clock the reports are cut on.
+
+| Value | Definition |
+| --- | --- |
+| Completed sales | Post Coupon Price (item price after seller coupons, the amount Whatnot charges commission on) on Order Earnings rows, giveaways excluded |
+| Orders | Distinct Order IDs on Order Earnings rows, per day, giveaways excluded |
+| Items sold | Quantity Sold on Order Earnings rows (one when blank), giveaways excluded |
+| Avg. order value | Completed sales ÷ orders |
+| Net earnings | Signed Transaction Amount on every row: what reached the Whatnot balance after fees, refunds, tips, shipping charges, and the shipping the seller paid for giveaways |
+| Fees | Commission, payment processing, and the taxes on both, on Order Earnings rows |
+| Refunds | Amounts returned to buyers on Order Refund rows |
+| Tips | Tips rows |
+| Completed sales by show | Sales, orders, and items per Livestream ID that completed in the period, labelled with the day the show ran (its earliest order); sales outside a show are one marketplace row |
+
+Giveaways are Order Earnings rows with Buy Format "Giveaway": a $0 price and a negative amount,
+because the seller pays the shipping. They are not sales or orders.
+
+- **Covered days.** A report covers Monday through Saturday on Pacific dates completely; its Sunday
+  is split with the next report, so a Sunday counts once the reports on both sides of it are
+  imported. Totals add up covered days only. Days inside a week that was never imported are unknown
+  rather than zero: the daily chart leaves them empty and its table reads "Not imported". The chart
+  ends at the last covered day. The Today range has no Whatnot data, because reports arrive weekly,
+  and a 7-day range only reaches as far as the latest report.
+- **Changes.** The covered part of the range is compared with the same days one period earlier.
+  When that earlier window is not fully covered, the change reads "No earlier data"; when the range
+  itself has a missing week inside it, the value reads "Incomplete" and is not compared.
+- **Report weeks.** The page lists every week from the newest one Whatnot has published back to the
+  first one imported: imported, recorded as having no sales, missing between imports, or ready to
+  import. Missing weeks turn the card amber ("1 week missing"); a newer published report turns it
+  amber too ("New report ready"). A week the seller sold nothing in has no rows for a report, so it
+  can be recorded as **No sales that week** (from the first imported week onward), which stores zeros
+  marked as such. An imported week can be removed when it was imported by mistake. Both ask for
+  confirmation, and both check the week again while holding the source's sync lock, so neither can
+  overwrite an import of the same week that finished a moment earlier.
+- **One week per file.** An upload must be one Weekly Orders Report, as downloaded: a file whose
+  transactions span two report weeks, or a week that has not ended, is refused. The report week
+  comes from the completion times; Report Start Date (the week's Monday in UTC) must agree with them.
+- **Re-imports.** Importing a week again, recording it as having no sales, or removing it first
+  deletes everything stored for that week (in one transaction, while the source's sync lock is
+  held), then writes the new rows. A corrected report therefore replaces the old one completely,
+  renamed and dropped shows included, and never touches the neighbouring week that shares its Sunday.
+- **Files that would import wrong numbers are refused.** The importer rejects the whole file, with
+  the row number, when a completion time or a value a metric reads (amount, price, fees, quantity)
+  cannot be read, when amounts use decimal commas (`48,00`), when dates are written day first
+  (`28/09/2026`) or do not match Report Start Date, when an ID was rewritten in scientific notation
+  (`1.23E+17`), when a row has a different number of columns than the header (an unquoted comma
+  shifts the columns), when a quoted value is never closed, and when two sales share a Ledger
+  Transaction ID but differ. Exact repeats of a row count once, and so does a charge or tip listed
+  once per order it covers. Lines without a Ledger Transaction ID (totals, notes, rows without a
+  completion time or amount) are left out and counted in the import message; more than one such
+  line, and more than 10% of the file, rejects it. Columns no metric reads, such as Cost of Goods,
+  are never parsed, so they cannot reject a file. Error messages never repeat the file's contents.
+- **Known limits.** A file re-saved with day-first dates still imports misdated if every day number
+  is 12 or less, all transactions completed on one day, and Report Start Date is blank; that week
+  then shows up as imported and can be removed. Removing a week deletes its numbers but keeps its
+  raw snapshot (order IDs, amounts, show titles; never buyer details) in the import history.
 
 ## Other derived values
 

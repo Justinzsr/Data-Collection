@@ -14,6 +14,7 @@ export type SourceTypeKey =
   | "xiaohongshu"
   | "facebook_page"
   | "etsy"
+  | "whatnot"
   | "google_analytics"
   | "custom_api"
   | "custom_csv";

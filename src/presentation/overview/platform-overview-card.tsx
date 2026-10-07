@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import type { OverviewMetric, OverviewPlatformCard } from "@/aggregation/services/platform-overview-service";
+import { shortDateLabel, type OverviewMetric, type OverviewPlatformCard } from "@/aggregation/services/platform-overview-service";
 import { platformSeriesColor } from "@/presentation/charts/chart-theme";
 import { SparklineChart } from "@/presentation/charts/sparkline-chart";
 import { Badge } from "@/presentation/components/ui/badge";
@@ -8,10 +8,34 @@ import { formatMetricValue } from "@/presentation/components/ui/format";
 import { PlatformIcon } from "@/presentation/components/ui/platform-icon";
 import { formatRelativeTime } from "@/presentation/components/ui/relative-time";
 import { MetricDelta } from "@/presentation/overview/metric-delta";
-import { platformHealth } from "@/presentation/overview/platform-health";
+import { platformHealth, type PlatformHealth } from "@/presentation/overview/platform-health";
 
 function deltaBasis(metric: OverviewMetric) {
   return metric.delta.kind === "none" ? null : metric.delta.basis;
+}
+
+/**
+ * Connection health. A report-based platform also says when a week between its
+ * imports is missing or a newer report is ready, and reads "Up to date" rather
+ * than "Live", because its data arrives once a week.
+ */
+export function cardHealth(card: OverviewPlatformCard, now: number): PlatformHealth {
+  const health = platformHealth(card.source, now);
+  const coverage = card.coverage;
+  if (!coverage || health.needsAttention) return health;
+  const missing = coverage.missingWeeks.length;
+  if (missing > 0) return { tone: "amber", label: missing === 1 ? "1 week missing" : `${missing} weeks missing`, needsAttention: false };
+  if (coverage.newReportAvailable) return { tone: "amber", label: "New report ready", needsAttention: false };
+  if (health.tone === "green") return { ...health, label: "Up to date" };
+  return health;
+}
+
+/** "Updated 5 min ago" for synced platforms; the covered days for report-based ones. */
+export function cardFreshness(card: OverviewPlatformCard, now: number) {
+  if (card.coverage) {
+    return card.coverage.coveredThrough ? `Data through ${shortDateLabel(card.coverage.coveredThrough)}` : "No report imported yet";
+  }
+  return card.updatedAt ? `Updated ${formatRelativeTime(card.updatedAt, { now })}` : "No data received yet";
 }
 
 /**
@@ -28,7 +52,7 @@ export function PlatformOverviewCard({
   href: string;
   now: number;
 }) {
-  const health = platformHealth(card.source, now);
+  const health = cardHealth(card, now);
   const unavailable = card.unavailableReason !== null;
   const basis = deltaBasis(card.primary);
   const primaryId = `platform-card-${card.key}-primary`;
@@ -68,6 +92,10 @@ export function PlatformOverviewCard({
           {unavailable ? null : <MetricDelta delta={card.primary.delta} higherIsBetter={card.primary.higherIsBetter} />}
         </div>
         {basis && !unavailable ? <p className="mt-0.5 hidden text-xs text-[var(--muted)] sm:block">{basis}</p> : null}
+        {/* Phones hide the freshness line, so report-based cards say here how far their numbers reach. */}
+        {card.coverage?.coveredThrough && !unavailable ? (
+          <p className="mt-0.5 text-[11px] text-[var(--muted)] sm:hidden">Through {shortDateLabel(card.coverage.coveredThrough)}</p>
+        ) : null}
       </div>
 
       <div className="hidden sm:contents">
@@ -104,9 +132,7 @@ export function PlatformOverviewCard({
         )}
 
         <div className="mt-4 flex items-center justify-between gap-2 text-xs">
-          <span className="truncate text-[var(--muted)]">
-            {card.updatedAt ? `Updated ${formatRelativeTime(card.updatedAt, { now })}` : "No data received yet"}
-          </span>
+          <span className="truncate text-[var(--muted)]">{cardFreshness(card, now)}</span>
           <span className="inline-flex shrink-0 items-center gap-0.5 font-medium text-tint-text" aria-hidden="true">
             Details
             <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />

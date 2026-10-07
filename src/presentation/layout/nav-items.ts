@@ -4,6 +4,7 @@ import {
   Camera,
   DatabaseZap,
   FileText,
+  Gavel,
   Gauge,
   Globe2,
   HeartPulse,
@@ -42,6 +43,7 @@ export function getPlatformNavItems(dataSpaceSlug = "moonarq"): DashboardNavItem
     { href: dashboardPath(dataSpaceSlug, "/platforms/ads"), label: "Meta Ads", icon: Megaphone },
     { href: dashboardPath(dataSpaceSlug, "/platforms/website"), label: "Website", icon: Globe2 },
     { href: dashboardPath(dataSpaceSlug, "/platforms/shopify"), label: "Shopify", icon: ShoppingBag },
+    { href: dashboardPath(dataSpaceSlug, "/platforms/whatnot"), label: "Whatnot", icon: Gavel },
     ...social,
     { href: dashboardPath(dataSpaceSlug, "/platforms/supabase"), label: "Supabase", icon: Users },
   ];

@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clipboard,
+  FileUp,
   Globe2,
   KeyRound,
   LinkIcon,
@@ -28,7 +29,7 @@ import { IconTile, PlatformIcon } from "@/presentation/components/ui/platform-ic
 import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
 
 type ConnectorAvailability = "live" | "planned";
-type SetupKind = "oauth" | "credentials" | "webhook" | "tracker" | "hybrid" | "planned";
+type SetupKind = "oauth" | "credentials" | "webhook" | "tracker" | "hybrid" | "upload" | "planned";
 type SyncMode = "webhook" | "hourly" | "manual" | "hybrid";
 type WizardStage = "platform" | "configure" | "review" | "complete";
 
@@ -86,6 +87,7 @@ const PLATFORM_PRIORITY = [
   "supabase",
   "xiaohongshu",
   "shopify",
+  "whatnot",
   "facebook_page",
   "etsy",
   "google_analytics",
@@ -130,6 +132,7 @@ function setupKindLabel(kind: SetupKind) {
   if (kind === "webhook") return "Webhook endpoint";
   if (kind === "tracker") return "First-party tracker";
   if (kind === "credentials") return "Encrypted server credentials";
+  if (kind === "upload") return "Weekly report upload";
   return "Planned integration";
 }
 
@@ -165,6 +168,7 @@ function inputPlaceholderFor(sourceTypeKey: string) {
   if (sourceTypeKey === "shopify") return "https://your-store.myshopify.com";
   if (sourceTypeKey === "supabase") return "https://your-project.supabase.co";
   if (sourceTypeKey === "website") return "https://your-site.com";
+  if (sourceTypeKey === "whatnot") return "https://www.whatnot.com/user/your-shop";
   return "Paste the official account, project, or source URL";
 }
 
@@ -284,7 +288,7 @@ export function AddSourceWizard({
         if (!cancelled) {
           const loadedSourceTypes: SourceTypeDefinition[] = body.sourceTypes ?? [];
           setSourceTypes(loadedSourceTypes);
-          if (!templateApplied.current && (template === "instagram" || template === "tiktok" || template === "shopify")) {
+          if (!templateApplied.current && (template === "instagram" || template === "tiktok" || template === "shopify" || template === "whatnot")) {
             const templateType = loadedSourceTypes.find((item) => item.key === template);
             if (isConnectable(templateType)) {
               templateApplied.current = true;
@@ -837,6 +841,22 @@ export function AddSourceWizard({
                         Connect {savedType.display_name}
                       </LinkButton>
                     </div>
+                  ) : savedType.setup_kind === "upload" ? (
+                    <div className="rounded-[22px] bg-tint/8 p-5 sm:p-6" data-testid="upload-setup">
+                      <div className="flex gap-3">
+                        <PlatformIcon sourceTypeKey={savedType.key} size="lg" />
+                        <div>
+                          <h3 className="font-semibold text-label">Import your first {savedType.display_name} report</h3>
+                          <div className="mt-1 grid gap-2 text-sm leading-6 text-label-secondary">
+                            {savedType.setup_instructions.slice(1).map((instruction) => <p key={instruction}>{instruction}</p>)}
+                          </div>
+                        </div>
+                      </div>
+                      <LinkButton href={`${basePath}/platforms/${savedType.key}#import`} variant="primary" className="mt-5 w-full sm:w-fit">
+                        <FileUp className="h-4 w-4" />
+                        Import a report
+                      </LinkButton>
+                    </div>
                   ) : savedSource.source_type_key === "website" || savedSource.source_type_key === "vercel_web_analytics_drain" ? (
                     <div className="rounded-[22px] bg-fill p-4 sm:p-5">
                       <WebsiteSourceSetup source={savedSource} basePath={basePath} />
@@ -872,7 +892,7 @@ export function AddSourceWizard({
                       <LinkIcon className="h-4 w-4" />
                       Open source detail
                     </LinkButton>
-                    {savedType.setup_kind !== "oauth" && savedType.capabilities.supportsManualSync && savedType.required_fields.length === 0 ? (
+                    {savedType.setup_kind !== "oauth" && savedType.setup_kind !== "upload" && savedType.capabilities.supportsManualSync && savedType.required_fields.length === 0 ? (
                       <Button type="button" onClick={runInitialSync} disabled={syncing} variant="secondary">
                         <Play className="h-4 w-4" />
                         {syncing ? "Queuing..." : "Run initial sync"}

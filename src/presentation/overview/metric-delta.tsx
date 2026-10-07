@@ -26,6 +26,7 @@ export function deltaLabel(delta: OverviewDelta): string | null {
     if (delta.reason === "partial_day") return "So far today";
     if (delta.reason === "from_zero") return "New";
     if (delta.reason === "no_baseline") return "No earlier data";
+    if (delta.reason === "incomplete") return "Incomplete";
     return null;
   }
   const dir = direction(delta);
@@ -45,6 +46,7 @@ export function deltaDescription(delta: OverviewDelta, higherIsBetter: boolean |
   if (!label) return null;
   if (delta.kind === "none") {
     if (delta.reason === "from_zero") return `New activity ${delta.basis ?? ""}`.trim();
+    if (delta.reason === "incomplete" && delta.basis) return `${label}: ${delta.basis}`;
     return label;
   }
   const dir = direction(delta);
@@ -96,6 +98,7 @@ export function MetricDelta({
         data-delta="none"
       >
         {label}
+        {delta.reason === "incomplete" && delta.basis ? <span className="sr-only">: {delta.basis}</span> : null}
       </span>
     );
   }

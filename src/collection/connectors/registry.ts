@@ -20,6 +20,7 @@ import { xiaohongshuConnector } from "@/collection/connectors/xiaohongshu/connec
 import { facebookPageConnector } from "@/collection/connectors/facebook-page/connector";
 import { etsyConnector } from "@/collection/connectors/etsy/connector";
 import { googleAnalyticsConnector } from "@/collection/connectors/google-analytics/connector";
+import { whatnotConnector } from "@/collection/connectors/whatnot/connector";
 
 export const connectorRegistry: ConnectorDefinition[] = [
   vercelWebAnalyticsDrainConnector,
@@ -34,6 +35,7 @@ export const connectorRegistry: ConnectorDefinition[] = [
   xiaohongshuConnector,
   facebookPageConnector,
   etsyConnector,
+  whatnotConnector,
   googleAnalyticsConnector,
   websiteConnector,
 ];
@@ -60,6 +62,8 @@ export function getInitialSourceStatus(
 
   if (needsCredentials) return "needs_credentials";
   if (connector.key === "website" && databaseConfigured) return "healthy";
+  // Upload sources have nothing to authorize; they are ready for their first report.
+  if (connector.setupKind === "upload" && databaseConfigured) return "healthy";
   return "demo";
 }
 

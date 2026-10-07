@@ -236,6 +236,18 @@ data states.
 
 Source roles are explicit: the first-party tracker is authoritative for funnel/session/identity/attribution; Vercel Drain is auxiliary; Shopify is authoritative for commerce; and Meta is authoritative for paid media delivery and spend.
 
+## Whatnot
+
+Whatnot's Seller API is a closed preview, so the Whatnot source imports the Seller Weekly Orders
+Report instead: download it every Monday from Whatnot Seller Hub → Financials → Statements and
+upload it on **Platforms → Whatnot**. There is nothing to authorize and no Whatnot password is
+used. Upload each week's file as downloaded, one week at a time. The import drops buyer names and
+locations before anything is stored, runs through the shared sync engine, dates every value by the
+day the order completed (which is when Whatnot reports it), and replaces a week completely when it
+is uploaded again. See
+[docs/connector-roadmap.md](docs/connector-roadmap.md) and
+[docs/platform-overview.md](docs/platform-overview.md#whatnot).
+
 ## Manual Sync
 
 Every source card has “Run Sync Now”. The dashboard also has “Run All Due Sources”. Manual sync uses the same engine as cron and webhooks.

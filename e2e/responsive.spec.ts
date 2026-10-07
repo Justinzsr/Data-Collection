@@ -141,6 +141,7 @@ for (const path of [
   "/w/moonarq/dashboard/platforms/ads?demo_state=ads-live",
   "/w/moonarq/dashboard/platforms/website",
   "/w/moonarq/dashboard/platforms/shopify",
+  "/w/moonarq/dashboard/platforms/whatnot",
   "/w/moonarq/dashboard/platforms/instagram",
   "/w/moonarq/dashboard/platforms/tiktok",
   "/w/moonarq/dashboard/platforms/supabase",
