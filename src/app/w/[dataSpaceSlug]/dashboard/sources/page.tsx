@@ -144,12 +144,21 @@ export default async function SourcesPage({ params }: { params: Promise<{ dataSp
                         : <p className="text-label" title={formatAppDateTime(source.last_success_at)}>{formatRelativeTime(source.last_success_at, { now })}</p>}
                     </td>
                     <td className="px-4 py-4">
-                      <p className="whitespace-nowrap text-label-secondary">{humanize(source.sync_mode)} · every {source.sync_frequency_minutes}m</p>
-                      <p className="mt-0.5 text-xs text-muted">{source.next_sync_at ? `Next ${formatAppDateTime(source.next_sync_at)}` : "Manual only"}</p>
+                      {connector.setupKind === "upload" ? (
+                        <>
+                          <p className="whitespace-nowrap text-label-secondary">Report upload</p>
+                          <p className="mt-0.5 text-xs text-muted">Imported from files</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="whitespace-nowrap text-label-secondary">{humanize(source.sync_mode)} · every {source.sync_frequency_minutes}m</p>
+                          <p className="mt-0.5 text-xs text-muted">{source.next_sync_at ? `Next ${formatAppDateTime(source.next_sync_at)}` : "Manual only"}</p>
+                        </>
+                      )}
                     </td>
                     <td className="py-4 pl-4 pr-5">
                       <div className="flex flex-wrap gap-2">
-                        {!blockReason && connector.capabilities.supportsManualSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
+                        {!blockReason && connector.capabilities.supportsManualSync && connector.setupKind !== "upload" ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
                         {!blockReason && connector.capabilities.canTestConnection ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
                         <LinkButton href={`${basePath}/sources/${source.id}`} variant="secondary" className="px-3.5">Manage</LinkButton>
                       </div>
@@ -174,16 +183,16 @@ export default async function SourcesPage({ params }: { params: Promise<{ dataSp
                   <Badge tone={statusTone(source.status)} dot className="shrink-0">{humanize(source.status)}</Badge>
                 </div>
                 <dl className="inset-surface mt-4 grid gap-2 p-3 text-[13px]">
-                  <div className="flex justify-between gap-3"><dt className="text-muted">Sync mode</dt><dd className="text-right text-label">{humanize(source.sync_mode)} · {source.sync_frequency_minutes}m</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-muted">Sync mode</dt><dd className="text-right text-label">{connector.setupKind === "upload" ? "Report upload" : `${humanize(source.sync_mode)} · ${source.sync_frequency_minutes}m`}</dd></div>
                   <div className="flex justify-between gap-3"><dt className="text-muted">Last success</dt><dd className="text-right text-label">{source.source_type_key === "website" ? "Live tracker" : formatRelativeTime(source.last_success_at, { now })}</dd></div>
-                  <div className="flex justify-between gap-3"><dt className="text-muted">Next</dt><dd className="text-right text-label">{formatAppDateTime(source.next_sync_at, "manual only")}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-muted">Next</dt><dd className="text-right text-label">{connector.setupKind === "upload" ? "When you upload a report" : formatAppDateTime(source.next_sync_at, "manual only")}</dd></div>
                   {authorization ? (
                     <div className="flex items-center justify-between gap-3"><dt className="text-muted">Authorization</dt><dd><Badge tone={authorization.tone}>{authorization.label}</Badge></dd></div>
                   ) : null}
                   <div className="flex justify-between gap-3"><dt className="text-muted">Last error</dt><dd className="min-w-0 break-words text-right text-label">{source.last_error ?? "none"}</dd></div>
                 </dl>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {!blockReason && connector.capabilities.supportsManualSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
+                  {!blockReason && connector.capabilities.supportsManualSync && connector.setupKind !== "upload" ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
                   {!blockReason && connector.capabilities.canTestConnection ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} compact /> : null}
                   <LinkButton href={`${basePath}/sources/${source.id}`} variant="secondary">Manage</LinkButton>
                 </div>

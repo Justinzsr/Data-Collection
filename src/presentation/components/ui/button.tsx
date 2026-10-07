@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "react";
+import type { AnchorHTMLAttributes, ComponentPropsWithRef, ReactNode } from "react";
 import { cn } from "@/presentation/components/ui/utils";
 
 type Variant = "primary" | "secondary" | "tinted" | "ghost" | "danger";
@@ -20,7 +20,7 @@ export function Button({
   className,
   variant = "secondary",
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
+}: ComponentPropsWithRef<"button"> & { variant?: Variant }) {
   return (
     <button
       className={cn(

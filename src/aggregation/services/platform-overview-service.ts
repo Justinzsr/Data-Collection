@@ -7,11 +7,18 @@ import { isLocalOverviewFixtureEnabled, paidAdsFixture } from "@/aggregation/ser
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
 import { getWebsiteFunnelOverview, type WebsiteFunnelDemoState } from "@/aggregation/services/website-funnel-service";
 import type { WebsiteFunnelOverview } from "@/aggregation/services/website-funnel-types";
+import {
+  coveredDateRuns,
+  isReportWeek,
+  latestPublishedReportWeek,
+  WHATNOT_DAILY_METRIC_KEYS,
+  WHATNOT_SHOW_METRIC_KEYS,
+} from "@/collection/connectors/whatnot/weekly-report";
 import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sources";
 import type { DataSpace, MetricDaily, Source, SourceTypeKey } from "@/storage/db/schema";
 import { listMetrics } from "@/storage/repositories/metrics-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
-import { addDaysToDateKey, APP_TIME_ZONE, getAppDateRange } from "@/storage/runtime/app-time";
+import { addDaysToDateKey, APP_TIME_ZONE, getAppDateRange, isAppDateKey } from "@/storage/runtime/app-time";
 import { getDemoNow } from "@/storage/seed/demo-data";
 
 /*
@@ -25,7 +32,8 @@ export type OverviewDelta =
   | { kind: "percent" | "absolute" | "points"; value: number; basis: string }
   | {
       kind: "none";
-      reason: "partial_day" | "no_baseline" | "from_zero" | "unavailable";
+      /** "incomplete": the period has days without data (a report not imported), so it is not compared. */
+      reason: "partial_day" | "no_baseline" | "from_zero" | "unavailable" | "incomplete";
       basis?: string;
     };
 
@@ -64,7 +72,22 @@ export type OverviewRange = {
   sparkline: { startDate: string; endDate: string; label: string };
 };
 
-export type OverviewPlatformKey = "website" | "shopify" | "instagram" | "tiktok" | "supabase";
+export type OverviewPlatformKey = "website" | "shopify" | "whatnot" | "instagram" | "tiktok" | "supabase";
+
+/** For platforms whose data arrives as periodic reports rather than live syncs. */
+export type ReportCoverage = {
+  /** Pacific dates fully covered by imported reports, as runs of consecutive dates. */
+  coveredRuns: Array<{ from: string; through: string }>;
+  /** First and last Pacific dates fully covered by imported reports. */
+  coveredFrom: string | null;
+  coveredThrough: string | null;
+  /** Reports between the first and latest import that were never imported, oldest first. */
+  missingWeeks: string[];
+  /** Reports the platform has published since the latest import, oldest first. */
+  pendingWeeks: string[];
+  /** The platform has published a newer report than the latest one imported. */
+  newReportAvailable: boolean;
+};
 
 export type OverviewPlatformCard = {
   key: OverviewPlatformKey;
@@ -79,6 +102,8 @@ export type OverviewPlatformCard = {
   updatedAt: string | null;
   /** When set, the values are withheld and this explains why. */
   unavailableReason: string | null;
+  /** Report-based platforms: which days the imported reports cover. */
+  coverage?: ReportCoverage | null;
 };
 
 export type PaidAdsTotals = {
@@ -869,6 +894,441 @@ function supabaseCard(source: Source | null, sumRows: MetricDaily[], snapshotRow
   };
 }
 
+// ---------------------------------------------------------------------------
+// Whatnot (weekly report imports)
+
+const WHATNOT_ROLLUP = "weekly_report";
+
+type CoveredRun = ReportCoverage["coveredRuns"][number];
+
+/** Mondays (UTC) of the report weeks imported for a source. */
+export function whatnotReportWeeks(rows: MetricDaily[], sourceId: string) {
+  const weeks = new Set<string>();
+  for (const row of rows) {
+    if (row.source_id !== sourceId || row.dimensions.rollup !== WHATNOT_ROLLUP) continue;
+    if (isReportWeek(row.dimensions.report_week)) weeks.add(row.dimensions.report_week);
+  }
+  return [...weeks].sort();
+}
+
+/**
+ * Which Pacific days the imported weekly reports cover completely, which weeks
+ * between the first and latest import are missing, and which newer reports
+ * Whatnot has published since. A report runs Monday 00:00 to Sunday 23:59 UTC, so
+ * on its own it completes Monday through Saturday in Los Angeles, and a Sunday
+ * counts once the reports on both sides of it are imported.
+ */
+export function whatnotCoverage(reportWeeks: string[], now: Date): ReportCoverage {
+  const weeks = [...new Set(reportWeeks.filter(isReportWeek))].sort();
+  const coveredRuns = coveredDateRuns(weeks);
+  const imported = new Set(weeks);
+  const first = weeks[0] ?? null;
+  const latest = weeks.at(-1) ?? null;
+  const missingWeeks: string[] = [];
+  if (first && latest) {
+    for (let week = addDaysToDateKey(first, 7); week < latest; week = addDaysToDateKey(week, 7)) {
+      if (!imported.has(week)) missingWeeks.push(week);
+    }
+  }
+  const pendingWeeks: string[] = [];
+  if (latest) {
+    const published = latestPublishedReportWeek(now);
+    for (let week = addDaysToDateKey(latest, 7); week <= published; week = addDaysToDateKey(week, 7)) pendingWeeks.push(week);
+  }
+  return {
+    coveredRuns,
+    coveredFrom: coveredRuns[0]?.from ?? null,
+    coveredThrough: coveredRuns.at(-1)?.through ?? null,
+    missingWeeks,
+    pendingWeeks,
+    newReportAvailable: pendingWeeks.length > 0,
+  };
+}
+
+export function isCoveredDate(runs: CoveredRun[], date: string) {
+  return runs.some((run) => date >= run.from && date <= run.through);
+}
+
+function fullyCovered(runs: CoveredRun[], startDate: string, endDate: string) {
+  for (let date = startDate; date <= endDate; date = addDaysToDateKey(date, 1)) {
+    if (!isCoveredDate(runs, date)) return false;
+  }
+  return true;
+}
+
+/** Missing weeks whose days fall in a window: Monday to Saturday, plus the Sundays on either side they share. */
+function missingWeeksIn(coverage: ReportCoverage, startDate: string, endDate: string) {
+  return coverage.missingWeeks.filter((week) => addDaysToDateKey(week, -1) <= endDate && addDaysToDateKey(week, 6) >= startDate);
+}
+
+function minDate(left: string, right: string) {
+  return left <= right ? left : right;
+}
+
+function maxDate(left: string, right: string) {
+  return left >= right ? left : right;
+}
+
+/**
+ * The range clipped to the days the imported reports cover, and the same days one
+ * period earlier for the change. Values add up covered days only; a window with a
+ * missing week inside is incomplete, and a comparison needs both windows fully
+ * covered. Null when no imported report covers the range.
+ */
+export function coveredWindows(range: OverviewRange, coverage: ReportCoverage) {
+  if (!coverage.coveredFrom || !coverage.coveredThrough) return null;
+  const start = maxDate(range.startDate, coverage.coveredFrom);
+  const end = minDate(range.endDate, coverage.coveredThrough);
+  if (start > end) return null;
+  const base = {
+    start,
+    end,
+    coveredRuns: coverage.coveredRuns,
+    missingWeeks: missingWeeksIn(coverage, start, end),
+    complete: fullyCovered(coverage.coveredRuns, start, end),
+  };
+  const comparison = range.comparison;
+  if (!comparison) return { ...base, comparison: null };
+  const currentEnd = minDate(comparison.currentEnd, end);
+  if (start > currentEnd) return { ...base, comparison: null };
+  const previousStart = addDaysToDateKey(start, -range.days);
+  const previousEnd = addDaysToDateKey(currentEnd, -range.days);
+  return {
+    ...base,
+    comparison: {
+      currentStart: start,
+      currentEnd,
+      previousStart,
+      previousEnd,
+      basis: comparison.basis,
+      currentComplete: fullyCovered(coverage.coveredRuns, start, currentEnd),
+      previousComplete: fullyCovered(coverage.coveredRuns, previousStart, previousEnd),
+    },
+  };
+}
+
+type CoveredWindows = NonNullable<ReturnType<typeof coveredWindows>>;
+
+/** "Sep 21 – Sep 27": the Monday-to-Sunday (UTC) span of a report week. */
+export function reportWeekSpanLabel(reportWeek: string) {
+  return `${shortDateLabel(reportWeek)} – ${shortDateLabel(addDaysToDateKey(reportWeek, 6))}`;
+}
+
+function missingWeeksBasis(weeks: string[]) {
+  if (weeks.length === 1) return `The week of ${reportWeekSpanLabel(weeks[0])} is not imported`;
+  return `${weeks.length} weeks in this period are not imported`;
+}
+
+/** Sum over the covered days of a window; days without a complete report never count, not even as zero. */
+function coveredSum(sums: Map<string, number>, runs: CoveredRun[], startDate: string, endDate: string) {
+  let total = 0;
+  for (const [date, value] of sums) {
+    if (date >= startDate && date <= endDate && isCoveredDate(runs, date)) total += value;
+  }
+  return total;
+}
+
+/** Why a change cannot be shown, or null when both windows are fully covered. */
+function coverageDeltaBlock(windows: CoveredWindows): OverviewDelta | null {
+  const comparison = windows.comparison;
+  if (!comparison) return { kind: "none", reason: "unavailable" };
+  if (!comparison.currentComplete) return { kind: "none", reason: "incomplete", basis: missingWeeksBasis(windows.missingWeeks) };
+  if (!comparison.previousComplete) {
+    return { kind: "none", reason: "no_baseline", basis: "The same days one period earlier are not fully imported" };
+  }
+  return null;
+}
+
+function coveredSummedMetric(input: {
+  key: string;
+  label: string;
+  unit: string;
+  sums: Map<string, number>;
+  windows: CoveredWindows | null;
+  higherIsBetter: boolean | null;
+}): OverviewMetric {
+  const { windows, sums } = input;
+  if (!windows) return unavailableMetric(input.key, input.label, input.unit, input.higherIsBetter);
+  const comparison = windows.comparison;
+  const delta: OverviewDelta = coverageDeltaBlock(windows) ?? (comparison
+    ? percentChange(
+        coveredSum(sums, windows.coveredRuns, comparison.currentStart, comparison.currentEnd),
+        coveredSum(sums, windows.coveredRuns, comparison.previousStart, comparison.previousEnd),
+        comparison.basis,
+      )
+    : { kind: "none", reason: "unavailable" });
+  return {
+    key: input.key,
+    label: input.label,
+    value: coveredSum(sums, windows.coveredRuns, windows.start, windows.end),
+    unit: input.unit,
+    delta,
+    higherIsBetter: input.higherIsBetter,
+  };
+}
+
+function coveredRatioMetric(input: {
+  key: string;
+  label: string;
+  unit: string;
+  numerator: Map<string, number>;
+  denominator: Map<string, number>;
+  windows: CoveredWindows | null;
+  higherIsBetter: boolean | null;
+}): OverviewMetric {
+  const { windows } = input;
+  if (!windows) return unavailableMetric(input.key, input.label, input.unit, input.higherIsBetter);
+  const value = (startDate: string, endDate: string) => ratio(
+    coveredSum(input.numerator, windows.coveredRuns, startDate, endDate),
+    coveredSum(input.denominator, windows.coveredRuns, startDate, endDate),
+  );
+  const comparison = windows.comparison;
+  const delta: OverviewDelta = coverageDeltaBlock(windows) ?? (comparison
+    ? nullableChange(
+        value(comparison.currentStart, comparison.currentEnd),
+        value(comparison.previousStart, comparison.previousEnd),
+        "percent",
+        comparison.basis,
+      )
+    : { kind: "none", reason: "unavailable" });
+  return {
+    key: input.key,
+    label: input.label,
+    value: value(windows.start, windows.end),
+    unit: input.unit,
+    delta,
+    higherIsBetter: input.higherIsBetter,
+  };
+}
+
+/** The currency of the newest real sale; zero rows (such as a week recorded as having no sales) never decide it. */
+function whatnotCurrency(rows: MetricDaily[], sourceId: string) {
+  const sales = rows.filter((row) => row.source_id === sourceId && row.metric_key === "whatnot_sales");
+  const newest = [...sales].sort((left, right) => right.date.localeCompare(left.date));
+  const unit = (newest.find((row) => row.metric_value !== 0) ?? newest[0])?.unit.toLowerCase() ?? null;
+  return unit && /^[a-z]{3}$/u.test(unit) ? unit : "usd";
+}
+
+function whatnotSums(rows: MetricDaily[], sourceId: string) {
+  return {
+    sales: dailySums(rows, "whatnot_sales", sourceId, WHATNOT_ROLLUP),
+    orders: dailySums(rows, "whatnot_orders", sourceId, WHATNOT_ROLLUP),
+    items: dailySums(rows, "whatnot_items_sold", sourceId, WHATNOT_ROLLUP),
+    net: dailySums(rows, "whatnot_net_earnings", sourceId, WHATNOT_ROLLUP),
+    fees: dailySums(rows, "whatnot_fees", sourceId, WHATNOT_ROLLUP),
+    refunds: dailySums(rows, "whatnot_refunds", sourceId, WHATNOT_ROLLUP),
+    tips: dailySums(rows, "whatnot_tips", sourceId, WHATNOT_ROLLUP),
+  };
+}
+
+/**
+ * One value per day from the first to the last covered day in the chart window.
+ * Days inside a missing week are null, so they read as "not imported", never as zero.
+ */
+function coveredDailySeries(sums: Map<string, number>, range: OverviewRange, coverage: ReportCoverage) {
+  if (!coverage.coveredFrom || !coverage.coveredThrough) return [];
+  const start = maxDate(range.sparkline.startDate, coverage.coveredFrom);
+  const end = minDate(range.sparkline.endDate, coverage.coveredThrough);
+  if (start > end) return [];
+  return enumerateDateKeys(start, end).map((date) => ({
+    date,
+    value: isCoveredDate(coverage.coveredRuns, date) ? sums.get(date) ?? 0 : null,
+  }));
+}
+
+/** The card's trend: the most recent unbroken stretch of covered days, so a line never bridges a missing week. */
+function latestCoveredStretch(sums: Map<string, number>, range: OverviewRange, coverage: ReportCoverage): OverviewPoint[] {
+  const series = coveredDailySeries(sums, range, coverage);
+  const points: OverviewPoint[] = [];
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    const point = series[index];
+    if (point.value === null) break;
+    points.unshift({ date: point.date, value: point.value });
+  }
+  return points;
+}
+
+export function whatnotCard(input: {
+  source: Source | null;
+  rows: MetricDaily[];
+  reportWeeks: string[];
+  range: OverviewRange;
+  now: Date;
+}): OverviewPlatformCard {
+  const { source, rows, range } = input;
+  const sourceId = source?.id ?? "";
+  const coverage = whatnotCoverage(input.reportWeeks, input.now);
+  const windows = coveredWindows(range, coverage);
+  const sums = whatnotSums(rows, sourceId);
+  const currency = whatnotCurrency(rows, sourceId);
+  return {
+    key: "whatnot",
+    iconKey: "whatnot",
+    title: "Whatnot",
+    account: source?.account_name ?? null,
+    source,
+    primary: coveredSummedMetric({ key: "sales", label: "Completed sales", unit: currency, sums: sums.sales, windows, higherIsBetter: true }),
+    secondary: [
+      coveredSummedMetric({ key: "orders", label: "Orders", unit: "count", sums: sums.orders, windows, higherIsBetter: true }),
+      coveredSummedMetric({ key: "net_earnings", label: "Net earnings", unit: currency, sums: sums.net, windows, higherIsBetter: true }),
+    ],
+    sparkline: { label: `Daily completed sales, ${range.sparkline.label.toLowerCase()}`, points: latestCoveredStretch(sums.sales, range, coverage) },
+    updatedAt: lastSyncedAt(source),
+    unavailableReason: !source
+      ? "Add Whatnot, then import its weekly orders report."
+      : coverage.coveredRuns.length === 0
+        ? "Import your first Whatnot weekly orders report."
+        : null,
+    coverage,
+  };
+}
+
+export type WhatnotShowRow = {
+  id: string;
+  title: string | null;
+  /** The Pacific day the show ran: its earliest order. */
+  date: string;
+  sales: number;
+  orders: number;
+  items: number;
+};
+
+export type WhatnotWeekStatus = "imported" | "no_sales" | "missing" | "ready";
+
+/** One report week on the Whatnot page: imported, recorded as having no sales, missing between imports, or published and not imported yet. */
+export type WhatnotWeekRow = { reportWeek: string; status: WhatnotWeekStatus };
+
+/**
+ * Every report week from the newest Whatnot has published back to the first one
+ * imported, newest first. A week the seller recorded as having no sales carries
+ * that marker on its rows.
+ */
+export function whatnotWeekRows(weekRows: MetricDaily[], sourceId: string, coverage: ReportCoverage): WhatnotWeekRow[] {
+  const imported = new Map<string, WhatnotWeekStatus>();
+  for (const row of weekRows) {
+    if (row.source_id !== sourceId || row.dimensions.rollup !== WHATNOT_ROLLUP || !isReportWeek(row.dimensions.report_week)) continue;
+    imported.set(row.dimensions.report_week, row.dimensions.recorded_as === "no_sales" ? "no_sales" : "imported");
+  }
+  const missing = new Set(coverage.missingWeeks);
+  const weeks = [...new Set([...imported.keys(), ...missing, ...coverage.pendingWeeks])].sort().reverse();
+  return weeks.map((reportWeek) => ({
+    reportWeek,
+    status: imported.get(reportWeek) ?? (missing.has(reportWeek) ? "missing" : "ready"),
+  }));
+}
+
+export type WhatnotDetail = {
+  range: OverviewRange;
+  source: Source | null;
+  card: OverviewPlatformCard;
+  coverage: ReportCoverage;
+  /** Report weeks with their status, newest first. */
+  weeks: WhatnotWeekRow[];
+  /** The covered part of the selected range, or null when no imported report covers it. */
+  period: { start: string; end: string; missingWeeks: string[] } | null;
+  currency: string;
+  metrics: OverviewMetric[];
+  /** Null on days inside a missing week. */
+  daily: Array<{ date: string; sales: number | null; orders: number | null }>;
+  shows: WhatnotShowRow[];
+  /** Imported report weeks, newest first. */
+  reportWeeks: string[];
+};
+
+/**
+ * Completed sales by show in the covered part of the range; sales outside a show
+ * are one marketplace row. A show's orders complete over the days after it ran,
+ * and each report week stores its share, so rows are summed per Livestream ID.
+ */
+export function whatnotShows(rows: MetricDaily[], sourceId: string, windows: CoveredWindows | null): WhatnotShowRow[] {
+  if (!windows) return [];
+  const shows = new Map<string, WhatnotShowRow>();
+  /** The report week each show's title came from: the newest report names the show, in case it was renamed. */
+  const titleWeeks = new Map<string, string>();
+  for (const row of rows) {
+    if (row.source_id !== sourceId || row.dimensions.rollup !== "show") continue;
+    if (row.date < windows.start || row.date > windows.end || !isCoveredDate(windows.coveredRuns, row.date)) continue;
+    const id = textValue(row.dimensions.livestream_id) ?? "marketplace";
+    const showDate = isAppDateKey(row.dimensions.show_date) ? row.dimensions.show_date : row.date;
+    const week = textValue(row.dimensions.report_week) ?? "";
+    const show = shows.get(id) ?? { id, title: null, date: showDate, sales: 0, orders: 0, items: 0 };
+    const title = textValue(row.dimensions.livestream_title);
+    if (title && week >= (titleWeeks.get(id) ?? "")) {
+      show.title = title;
+      titleWeeks.set(id, week);
+    }
+    if (showDate < show.date) show.date = showDate;
+    if (row.metric_key === "whatnot_show_sales") show.sales += row.metric_value;
+    if (row.metric_key === "whatnot_show_orders") show.orders += row.metric_value;
+    if (row.metric_key === "whatnot_show_items") show.items += row.metric_value;
+    shows.set(id, show);
+  }
+  return [...shows.values()]
+    .map((show) => ({ ...show, sales: Math.round(show.sales * 100) / 100 }))
+    .filter((show) => show.sales !== 0 || show.orders > 0)
+    .sort((left, right) => right.sales - left.sales || right.orders - left.orders || left.date.localeCompare(right.date));
+}
+
+export const WHATNOT_METRIC_KEYS: string[] = [...WHATNOT_DAILY_METRIC_KEYS, ...WHATNOT_SHOW_METRIC_KEYS];
+
+export async function getWhatnotDetail(input: {
+  dataSpace: Pick<DataSpace, "id" | "slug">;
+  rangeKey: DateRangeKey;
+  now?: Date;
+}): Promise<WhatnotDetail> {
+  const now = input.now ?? getDemoNow();
+  const range = overviewRange(input.rangeKey, now);
+  const sources = await listSources({ dataSpaceId: input.dataSpace.id });
+  const source = primarySource(sources, "whatnot");
+  const sourceId = source?.id ?? "";
+  const [weekRows, rows] = source
+    ? await Promise.all([
+        listMetrics({ sourceId: source.id, metricKeys: ["whatnot_net_earnings"], dataSpaceId: input.dataSpace.id }),
+        listMetrics({
+          sourceId: source.id,
+          metricKeys: WHATNOT_METRIC_KEYS,
+          startDate: [range.comparison?.previousStart, range.sparkline.startDate].filter((value): value is string => Boolean(value)).sort()[0],
+          endDate: range.endDate,
+          dataSpaceId: input.dataSpace.id,
+        }),
+      ])
+    : [[], []];
+  const reportWeeks = whatnotReportWeeks(weekRows, sourceId);
+  const coverage = whatnotCoverage(reportWeeks, now);
+  const windows = coveredWindows(range, coverage);
+  const sums = whatnotSums(rows, sourceId);
+  const currency = whatnotCurrency(rows, sourceId);
+  const card = whatnotCard({ source, rows, reportWeeks, range, now });
+  const metric = (key: string, label: string, unit: string, values: Map<string, number>, higherIsBetter: boolean | null) =>
+    coveredSummedMetric({ key, label, unit, sums: values, windows, higherIsBetter });
+  return {
+    range,
+    source,
+    card,
+    coverage,
+    weeks: whatnotWeekRows(weekRows, sourceId, coverage),
+    period: windows ? { start: windows.start, end: windows.end, missingWeeks: windows.missingWeeks } : null,
+    currency,
+    metrics: [
+      metric("sales", "Completed sales", currency, sums.sales, true),
+      metric("orders", "Orders", "count", sums.orders, true),
+      metric("items_sold", "Items sold", "count", sums.items, true),
+      coveredRatioMetric({ key: "average_order_value", label: "Avg. order value", unit: currency, numerator: sums.sales, denominator: sums.orders, windows, higherIsBetter: true }),
+      metric("net_earnings", "Net earnings", currency, sums.net, true),
+      metric("fees", "Fees", currency, sums.fees, false),
+      metric("refunds", "Refunds", currency, sums.refunds, false),
+      metric("tips", "Tips", currency, sums.tips, true),
+    ],
+    daily: coveredDailySeries(sums.sales, range, coverage).map((point) => ({
+      date: point.date,
+      sales: point.value,
+      orders: point.value === null ? null : sums.orders.get(point.date) ?? 0,
+    })),
+    shows: whatnotShows(rows, sourceId, windows),
+    reportWeeks: [...reportWeeks].reverse(),
+  };
+}
+
 const SUMMED_KEYS = ["orders", "net_payment", "signups", "page_views", "sessions", "custom_events"];
 const SNAPSHOT_KEYS = [
   "instagram_followers",
@@ -882,7 +1342,9 @@ const SNAPSHOT_KEYS = [
 ];
 
 /** MoonArq always shows its core platforms (with a setup prompt when missing); other spaces show what they have. */
-const CORE_PLATFORMS: OverviewPlatformKey[] = ["website", "shopify", "instagram", "tiktok", "supabase"];
+const PLATFORM_ORDER: OverviewPlatformKey[] = ["website", "shopify", "whatnot", "instagram", "tiktok", "supabase"];
+/** Shown only once a source exists, even in MoonArq. */
+const OPTIONAL_PLATFORMS = new Set<OverviewPlatformKey>(["whatnot"]);
 
 export function buildPlatformCards(input: {
   dataSpaceSlug: string;
@@ -891,12 +1353,13 @@ export function buildPlatformCards(input: {
   snapshotRows: MetricDaily[];
   range: OverviewRange;
   websiteOverview: WebsiteFunnelOverview | null;
+  whatnot?: { rows: MetricDaily[]; reportWeeks: string[]; now: Date };
 }): OverviewPlatformCard[] {
   const { sources, sumRows, snapshotRows, range } = input;
   const isMoonArq = input.dataSpaceSlug === "moonarq";
   const websiteSource = resolvePrimaryWebsiteSource(sources);
   const cards: OverviewPlatformCard[] = [];
-  for (const key of CORE_PLATFORMS) {
+  for (const key of PLATFORM_ORDER) {
     if (key === "website") {
       if (!websiteSource && !isMoonArq) continue;
       const sessions = zeroFilled(dailySums(sumRows, "sessions", websiteSource?.id ?? ""), range.sparkline.startDate, range.sparkline.endDate);
@@ -906,9 +1369,17 @@ export function buildPlatformCards(input: {
       continue;
     }
     const source = primarySource(sources, key);
-    if (!source && !isMoonArq) continue;
+    if (!source && (!isMoonArq || OPTIONAL_PLATFORMS.has(key))) continue;
     if (key === "shopify") cards.push(shopifyCard(source, sumRows, range));
-    else if (key === "supabase") cards.push(supabaseCard(source, sumRows, snapshotRows, range));
+    else if (key === "whatnot") {
+      cards.push(whatnotCard({
+        source,
+        rows: input.whatnot?.rows ?? [],
+        reportWeeks: input.whatnot?.reportWeeks ?? [],
+        range,
+        now: input.whatnot?.now ?? getDemoNow(),
+      }));
+    } else if (key === "supabase") cards.push(supabaseCard(source, sumRows, snapshotRows, range));
     else cards.push(socialCard({ key, source, rows: snapshotRows, range }));
   }
   return cards;
@@ -983,18 +1454,34 @@ export async function getPlatformOverview(input: {
   const range = overviewRange(input.rangeKey, now);
   const sources = await listSources({ dataSpaceId: input.dataSpace.id });
   const queryStart = [range.comparison?.previousStart, range.sparkline.startDate].filter((value): value is string => Boolean(value)).sort()[0];
-  const [sumRows, snapshotRows, websiteOverview, paidAds] = await Promise.all([
+  const whatnotSource = primarySource(sources, "whatnot");
+  const [sumRows, snapshotRows, websiteOverview, paidAds, whatnotRows, whatnotWeekRows] = await Promise.all([
     listMetrics({ metricKeys: SUMMED_KEYS, startDate: queryStart, endDate: range.endDate, dataSpaceId: input.dataSpace.id }),
     listMetrics({ metricKeys: SNAPSHOT_KEYS, endDate: range.endDate, dataSpaceId: input.dataSpace.id }),
     input.dataSpace.slug === "moonarq"
       ? getWebsiteFunnelOverview({ dataSpaceId: input.dataSpace.id, range: input.rangeKey, demoState: input.demoState, now })
       : Promise.resolve(null),
     getPaidAdsOverview({ dataSpace: input.dataSpace, range, sources, now, fixture: input.adsFixture }),
+    whatnotSource
+      ? listMetrics({ sourceId: whatnotSource.id, metricKeys: [...WHATNOT_DAILY_METRIC_KEYS], startDate: queryStart, endDate: range.endDate, dataSpaceId: input.dataSpace.id })
+      : Promise.resolve([]),
+    // One small series, all time, to know which report weeks were imported.
+    whatnotSource
+      ? listMetrics({ sourceId: whatnotSource.id, metricKeys: ["whatnot_net_earnings"], dataSpaceId: input.dataSpace.id })
+      : Promise.resolve([]),
   ]);
   return {
     range,
     paidAds,
-    cards: buildPlatformCards({ dataSpaceSlug: input.dataSpace.slug, sources, sumRows, snapshotRows, range, websiteOverview }),
+    cards: buildPlatformCards({
+      dataSpaceSlug: input.dataSpace.slug,
+      sources,
+      sumRows,
+      snapshotRows,
+      range,
+      websiteOverview,
+      whatnot: { rows: whatnotRows, reportWeeks: whatnotReportWeeks(whatnotWeekRows, whatnotSource?.id ?? ""), now },
+    }),
     sources,
     websiteOverview,
   };
@@ -1032,7 +1519,8 @@ export function rankedTotals(rows: MetricDaily[], metricKey: string, sourceId: s
 export async function getPlatformDetail(input: {
   dataSpace: Pick<DataSpace, "id" | "slug">;
   rangeKey: DateRangeKey;
-  key: Exclude<OverviewPlatformKey, "website">;
+  /** Website and Whatnot have their own detail services. */
+  key: Exclude<OverviewPlatformKey, "website" | "whatnot">;
   now?: Date;
 }): Promise<PlatformDetail> {
   const now = input.now ?? getDemoNow();

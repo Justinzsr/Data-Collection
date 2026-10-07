@@ -59,6 +59,7 @@ function parseDemoState(value: string | undefined): OverviewDemoState {
 const PLATFORM_PATHS: Record<OverviewPlatformKey, string> = {
   website: "/platforms/website",
   shopify: "/platforms/shopify",
+  whatnot: "/platforms/whatnot",
   instagram: "/platforms/instagram",
   tiktok: "/platforms/tiktok",
   supabase: "/platforms/supabase",

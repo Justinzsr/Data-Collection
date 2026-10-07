@@ -151,6 +151,125 @@ test("live paid delivery shows today, the period with direction, and freshness",
   expect(syncRequests).toEqual([]);
 });
 
+/** Monday (UTC) of the newest Whatnot weekly report published at `now`, so the data falls in the last 30 days. */
+function latestWhatnotReportWeek(now = new Date()) {
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((now.getUTCDay() + 6) % 7)));
+  const published = now.getTime() >= monday.getTime() + 6 * 3_600_000;
+  monday.setUTCDate(monday.getUTCDate() - (published ? 7 : 14));
+  return monday;
+}
+
+function weeksBefore(monday: Date, weeks: number) {
+  return new Date(monday.getTime() - weeks * 7 * 86_400_000);
+}
+
+/** A synthetic Weekly Orders Report: two sales from a show on the previous Sunday that completed on Wednesday, and a tip. */
+function whatnotReportCsv(monday = latestWhatnotReportWeek()) {
+  const day = (hour: number) => new Date(monday.getTime() + 2 * 86_400_000 + hour * 3_600_000).toISOString().replace("T", " ").slice(0, 19);
+  const week = monday.toISOString().slice(0, 10);
+  const header = [
+    "Report Start Date", "Order Placed At UTC", "Transaction Completed at UTC", "Transaction Type", "Order ID",
+    "Listing Title", "Quantity Sold", "Livestream ID", "Livestream Title", "Buyer Name", "Transaction Currency",
+    "Transaction Amount", "Buyer Paid", "Original Item Price", "Coupon Cost", "Post Coupon Price",
+    "Commission Fee", "Payment Processing Fee", "Ledger Transaction ID",
+  ];
+  const lines = [
+    [week, day(-62), day(20), "Order Earnings", `E2E-${week}-1`, "Moon bracelet", "1", "e2e-live", "E2E silver drop", "Synthetic Buyer", "USD", "$40.10", "$52.40", "$48.00", "$0.00", "$48.00", "$3.84", "$1.71", `E2E-${week}-L1`],
+    [week, day(-61), day(21), "Order Earnings", `E2E-${week}-2`, "Star ring", "1", "e2e-live", "E2E silver drop", "Synthetic Buyer", "USD", "$25.00", "$34.00", "$30.00", "$0.00", "$30.00", "$2.40", "$1.20", `E2E-${week}-L2`],
+    [week, "", day(22), "Tips", "", "", "", "", "", "Synthetic Buyer", "USD", "$5.00", "", "", "", "", "", "", `E2E-${week}-L3`],
+  ];
+  return [header, ...lines].map((cells) => cells.join(",")).join("\n");
+}
+
+test("Whatnot is added from Add Source and its weekly report imports", async ({ page, request }) => {
+  const cookie = await dashboardAuthCookie(request);
+  await loginDashboard(page);
+  const createdSourceIds: string[] = [];
+  try {
+    await page.goto("/w/moonarq/dashboard/sources/new?template=whatnot");
+    await expect(page.getByRole("heading", { name: "Configure Whatnot" })).toBeVisible();
+    await page.getByLabel("Public source URL").fill("https://www.whatnot.com/user/moonarq-e2e");
+    await page.getByRole("button", { name: "Check URL" }).click();
+    await expect(page.getByText("URL matches Whatnot", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Review connection" }).click();
+    await expect(page.getByText("Weekly report upload", { exact: true })).toBeVisible();
+    createdSourceIds.push(await saveSourceAndCaptureId(page));
+
+    const setup = page.getByTestId("upload-setup");
+    await expect(setup).toContainText("Import your first Whatnot report");
+    await setup.getByRole("link", { name: "Import a report" }).click();
+    await expect(page).toHaveURL(/\/w\/moonarq\/dashboard\/platforms\/whatnot#import$/);
+    await expect(page.getByRole("heading", { name: "Import your first weekly report" })).toBeVisible();
+
+    const importer = page.getByTestId("whatnot-import");
+    await importer.locator("input[type='file']").setInputFiles({
+      name: "Weekly Orders Report.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(whatnotReportCsv()),
+    });
+    await importer.getByRole("button", { name: "Import report" }).click();
+    await expect(importer.getByRole("status")).toContainText(/Imported 3 transactions for the week of [A-Z][a-z]{2} \d{1,2} – [A-Z][a-z]{2} \d{1,2}\./);
+    await expect(page.getByTestId("whatnot-metrics").locator("[data-metric='sales']")).toContainText("$78.00");
+    await expect(page.getByTestId("whatnot-metrics").locator("[data-metric='orders']")).toContainText("2");
+    await expect(page.getByTestId("whatnot-shows").getByRole("rowheader")).toContainText("E2E silver drop");
+    const weeks = page.getByTestId("whatnot-weeks");
+    await expect(weeks.getByRole("listitem")).toHaveCount(1);
+    await expect(weeks.getByRole("listitem")).toHaveAttribute("data-status", "imported");
+    await expect(page.locator("body")).not.toContainText("Synthetic Buyer");
+
+    // An older week leaves the one between missing; it can be recorded as having no sales.
+    const latest = latestWhatnotReportWeek();
+    const isoWeek = (monday: Date) => monday.toISOString().slice(0, 10);
+    const older = weeksBefore(latest, 2);
+    await importer.locator("input[type='file']").setInputFiles({
+      name: "Older Weekly Orders Report.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(whatnotReportCsv(older)),
+    });
+    await importer.getByRole("button", { name: "Import report" }).click();
+    await expect(importer.getByRole("status")).toContainText(/Imported 3 transactions/);
+    await expect(weeks.getByRole("listitem")).toHaveCount(3);
+    const missing = weeks.locator(`[data-week="${isoWeek(weeksBefore(latest, 1))}"]`);
+    await expect(missing).toHaveAttribute("data-status", "missing");
+    await expect(page.getByText(/A week hasn.t been imported/)).toBeVisible();
+    await missing.getByRole("button", { name: /^No sales that week: / }).click();
+    // The confirmation starts on the choice that changes nothing.
+    await expect(missing.getByRole("button", { name: /^Cancel: / })).toBeFocused();
+    await missing.getByRole("button", { name: /^Record no sales: / }).click();
+    await expect(weeks.getByRole("status")).toContainText("as having no sales.");
+    await expect(missing).toHaveAttribute("data-status", "no_sales");
+    await expect(page.getByText(/A week hasn.t been imported/)).toHaveCount(0);
+
+    // Removing a week asks first, then deletes only that week.
+    const olderRow = weeks.locator(`[data-week="${isoWeek(older)}"]`);
+    await olderRow.getByRole("button", { name: /^Remove the week of/ }).click();
+    await olderRow.getByRole("button", { name: /^Keep: / }).click();
+    await expect(olderRow.getByRole("button", { name: /^Remove the week of/ })).toBeFocused();
+    await expect(olderRow).toHaveAttribute("data-status", "imported");
+    await olderRow.getByRole("button", { name: /^Remove the week of/ }).click();
+    await olderRow.getByRole("button", { name: /^Remove week: / }).click();
+    await expect(weeks.getByRole("status")).toContainText("Removed the week of");
+    await expect(weeks.getByRole("listitem")).toHaveCount(2);
+    await expect(page.getByTestId("whatnot-metrics").locator("[data-metric='sales']")).toContainText("$78.00");
+
+    await page.goto("/w/moonarq/dashboard");
+    const card = page.getByTestId("platform-card-whatnot");
+    await expect(card.getByRole("link", { name: "Whatnot", exact: true })).toHaveAttribute("href", "/w/moonarq/dashboard/platforms/whatnot");
+    await expect(card).toContainText("$78");
+  } finally {
+    await deleteCreatedSources(request, cookie, createdSourceIds);
+  }
+});
+
+test("Whatnot explains how to start before it is added", async ({ page }) => {
+  await loginDashboard(page);
+  await page.goto("/w/moonarq/dashboard/platforms/whatnot");
+  await expect(page.getByRole("heading", { name: "Whatnot", level: 1 })).toBeVisible();
+  await expect(page.getByTestId("whatnot-setup").getByRole("link", { name: "Add Whatnot" })).toHaveAttribute("href", "/w/moonarq/dashboard/sources/new?template=whatnot");
+  await page.goto("/w/moonarq/dashboard");
+  await expect(page.getByTestId("platform-card-whatnot")).toHaveCount(0);
+});
+
 test("old Commerce links open the Shopify page", async ({ page }) => {
   await loginDashboard(page);
   for (const path of ["/w/moonarq/dashboard/commerce", "/dashboard/commerce"]) {

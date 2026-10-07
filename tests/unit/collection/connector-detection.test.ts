@@ -142,7 +142,7 @@ describe("connector detection", () => {
     expect(getInitialSourceStatus(website, true)).toBe("healthy");
     expect(getInitialSourceStatus(website, false)).toBe("demo");
 
-    for (const connector of connectorRegistry.filter((item) => item.key !== "website")) {
+    for (const connector of connectorRegistry.filter((item) => item.key !== "website" && item.setupKind !== "upload")) {
       const expected =
         connector.requiredFields.some((field) => field.required) || connector.key === "supabase"
           ? "needs_credentials"
@@ -150,5 +150,15 @@ describe("connector detection", () => {
       expect(getInitialSourceStatus(connector, true), connector.key).toBe(expected);
       expect(getInitialSourceStatus(connector, false), connector.key).toBe(expected);
     }
+  });
+
+  it("starts report-upload sources ready for their first report", () => {
+    // A demo status would stick after real imports, so with a database they start healthy.
+    for (const connector of connectorRegistry.filter((item) => item.setupKind === "upload")) {
+      expect(connector.requiredFields, connector.key).toEqual([]);
+      expect(getInitialSourceStatus(connector, true), connector.key).toBe("healthy");
+      expect(getInitialSourceStatus(connector, false), connector.key).toBe("demo");
+    }
+    expect(connectorRegistry.filter((item) => item.setupKind === "upload").map((item) => item.key)).toEqual(["whatnot"]);
   });
 });

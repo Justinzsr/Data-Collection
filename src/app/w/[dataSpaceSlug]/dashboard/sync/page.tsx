@@ -113,7 +113,8 @@ export default async function SyncPage({ params }: { params: Promise<{ dataSpace
       return { source, connector, blocked };
     }))
   )
-    .filter(({ connector, blocked }) => !blocked && connector.capabilities.supportsManualSync)
+    // Report-upload sources import files on their own page; there is nothing to fetch.
+    .filter(({ connector, blocked }) => !blocked && connector.capabilities.supportsManualSync && connector.setupKind !== "upload")
     .map(({ source }) => source);
   const now = currentTime();
   const sourceNames = new Map(sources.map((source) => [source.id, source.display_name]));

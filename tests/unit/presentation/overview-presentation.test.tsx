@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { buildPaidAdsOverview, overviewRange } from "@/aggregation/services/platform-overview-service";
 import type { Source } from "@/storage/db/schema";
+import { DailyMetricChart } from "@/presentation/charts/daily-metric-chart";
 import { formatAxisValue, formatMetricValue } from "@/presentation/components/ui/format";
 import { shouldAutoSync } from "@/presentation/overview/ads-auto-sync";
 import { deltaDescription, deltaLabel, deltaTone, MetricDelta } from "@/presentation/overview/metric-delta";
@@ -49,6 +50,7 @@ describe("metric delta", () => {
     expect(deltaLabel({ kind: "points", value: -0.02, basis: "over 7 days" })).toBe("No change");
     expect(deltaLabel({ kind: "none", reason: "partial_day" })).toBe("So far today");
     expect(deltaLabel({ kind: "none", reason: "unavailable" })).toBeNull();
+    expect(deltaLabel({ kind: "none", reason: "incomplete", basis: "The week of Sep 21 – Sep 27 is not imported" })).toBe("Incomplete");
   });
 
   it("describes the change and whether it is good in words, not only color", () => {
@@ -71,6 +73,29 @@ describe("metric delta", () => {
     expect(markup).toContain("+20.0%");
     expect(markup).toContain("Up 20.0% vs previous 7 days, better");
     expect(markup).toContain('data-delta-tone="good"');
+  });
+
+  it("marks a period with a missing report as incomplete, with the reason for screen readers", () => {
+    const delta = { kind: "none", reason: "incomplete", basis: "The week of Sep 21 – Sep 27 is not imported" } as const;
+    expect(deltaDescription(delta)).toBe("Incomplete: The week of Sep 21 – Sep 27 is not imported");
+    const markup = renderToStaticMarkup(<MetricDelta delta={delta} higherIsBetter />);
+    expect(markup).toContain("Incomplete");
+    expect(markup).toContain('<span class="sr-only">: The week of Sep 21 – Sep 27 is not imported</span>');
+  });
+
+  it("shows days without data as not imported, never as zero", () => {
+    const markup = renderToStaticMarkup(
+      <DailyMetricChart
+        title="Daily completed sales"
+        data={[{ date: "2026-09-19", value: 0 }, { date: "2026-09-20", value: null }, { date: "2026-09-28", value: 48 }]}
+        unit="usd"
+        color="var(--chart-7)"
+        missingLabel="Not imported"
+      />,
+    );
+    expect(markup).toContain("Not imported");
+    expect(markup).toContain("$0.00");
+    expect(markup).toContain("$48.00");
   });
 });
 

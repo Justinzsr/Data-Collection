@@ -66,6 +66,12 @@ type MetricReplacementWindow = {
   metricKeys: string[];
   startDate: string;
   endDate: string;
+  /**
+   * Narrows the replacement to rows whose dimensions carry this value, so slices
+   * that share dates (such as report weeks that meet on a Sunday) replace only
+   * their own rows. Every replacement metric must carry the same value.
+   */
+  dimension?: { key: string; value: string };
 };
 
 function validateMetricReplacement(metrics: NormalizedMetric[], window: MetricReplacementWindow) {
@@ -76,7 +82,8 @@ function validateMetricReplacement(metrics: NormalizedMetric[], window: MetricRe
     allowedKeys.size !== window.metricKeys.length ||
     !/^\d{4}-\d{2}-\d{2}$/u.test(window.startDate) ||
     !/^\d{4}-\d{2}-\d{2}$/u.test(window.endDate) ||
-    window.startDate > window.endDate
+    window.startDate > window.endDate ||
+    (window.dimension !== undefined && (!/^[a-z][a-z0-9_]*$/u.test(window.dimension.key) || !window.dimension.value))
   ) {
     throw new Error("Metric replacement window is invalid.");
   }
@@ -90,9 +97,10 @@ function validateMetricReplacement(metrics: NormalizedMetric[], window: MetricRe
       metric.date < window.startDate ||
       metric.date > window.endDate ||
       !Number.isFinite(metric.metricValue) ||
+      (window.dimension !== undefined && metric.dimensions?.[window.dimension.key] !== window.dimension.value) ||
       identities.has(identity)
     ) {
-      throw new Error("A replacement metric is invalid, duplicated, or outside its declared source, type, key, or date window.");
+      throw new Error("A replacement metric is invalid, duplicated, or outside its declared source, type, key, dimension, or date window.");
     }
     identities.add(identity);
   }
@@ -194,12 +202,14 @@ export async function replaceMetricsWindow(
   if (!isRuntimeDatabaseConfigured()) {
     const store = getDemoStore();
     const keys = new Set(window.metricKeys);
+    const { dimension } = window;
     store.metricsDaily = store.metricsDaily.filter((row) => !(
       row.source_id === window.sourceId &&
       row.source_type_key === window.sourceTypeKey &&
       keys.has(row.metric_key) &&
       row.date >= window.startDate &&
-      row.date <= window.endDate
+      row.date <= window.endDate &&
+      (!dimension || row.dimensions[dimension.key] === dimension.value)
     ));
     return upsertMetrics(metrics);
   }
@@ -228,6 +238,8 @@ export async function replaceMetricsWindow(
       if (!rows[0]?.owned) throw new Error("Source lock lease was lost before the metric snapshot could be replaced.");
     };
     await assertLeaseOwner();
+    const params: unknown[] = [window.sourceId, window.sourceTypeKey, window.metricKeys, window.startDate, window.endDate];
+    if (window.dimension) params.push(window.dimension.key, window.dimension.value);
     await queryRows(
       `
         delete from metrics_daily
@@ -235,8 +247,9 @@ export async function replaceMetricsWindow(
           and source_type_key = $2
           and metric_key = any($3::text[])
           and date between $4 and $5
+          ${window.dimension ? "and dimensions ->> $6 = $7" : ""}
       `,
-      [window.sourceId, window.sourceTypeKey, window.metricKeys, window.startDate, window.endDate],
+      params,
       transactionExecutor,
     );
     const result = await upsertMetricRows(metrics, transactionExecutor);

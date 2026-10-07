@@ -28,6 +28,7 @@ import { SnippetCard } from "@/presentation/dashboard/snippet-card";
 import { SyncActionButton } from "@/presentation/dashboard/sync-action-button";
 import { TestConnectionButton } from "@/presentation/dashboard/test-connection-button";
 import { CredentialForm } from "@/presentation/source-onboarding/credential-form";
+import { WhatnotImportPanel } from "@/presentation/platforms/whatnot-import-panel";
 import {
   MetaAdsAccountSelector,
   type MetaAdsAccountCandidate,
@@ -160,6 +161,8 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
   );
   const actionBlockReason = operationBlockReason ?? credentialBlockReason;
   const isOAuthSource = connector.setupKind === "oauth";
+  // Report-upload sources have nothing to test or fetch; data arrives as an uploaded report.
+  const isUploadSource = connector.setupKind === "upload";
   const canTest = !actionBlockReason && connector.capabilities.canTestConnection;
   const canSync = !actionBlockReason && connector.capabilities.supportsManualSync;
   const authorization = authorizationState(source);
@@ -177,7 +180,7 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
               Sources
             </LinkButton>
             {!isOAuthSource && canTest ? <TestConnectionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
-            {!isOAuthSource && canSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
+            {!isOAuthSource && !isUploadSource && canSync ? <SyncActionButton sourceId={source.id} dataSpaceSlug={dataSpace.slug} /> : null}
           </>
         }
       />
@@ -233,7 +236,9 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
               {formatAppDateTime(source.last_success_at)}
               {source.last_success_at ? <span className="block text-xs font-normal text-muted">{formatRelativeTime(source.last_success_at)}</span> : null}
             </StateRow>
-            <StateRow label="Next sync">{formatAppDateTime(source.next_sync_at, "manual only")}</StateRow>
+            {isUploadSource
+              ? <StateRow label="Next sync">None; data arrives as uploaded reports</StateRow>
+              : <StateRow label="Next sync">{formatAppDateTime(source.next_sync_at, "manual only")}</StateRow>}
             <StateRow label="Last error"><span className={source.last_error ? "text-negative" : undefined}>{source.last_error ?? "none"}</span></StateRow>
             {source.webhook_url ? <StateRow label="Webhook URL"><span className="break-all font-mono text-xs text-tint-text">{source.webhook_url}</span></StateRow> : null}
           </dl>
@@ -252,7 +257,17 @@ export default async function SourceDetailPage({ params }: { params: Promise<{ d
           {operationBlockReason ? <Callout tone="warning" className="mt-4">{operationBlockReason}</Callout> : null}
         </GlassPanel>
 
-        {!isOAuthSource && connector.availability === "live" ? (
+        {isUploadSource && source.source_type_key === "whatnot" ? (
+          <GlassPanel className="self-start p-4 sm:p-5">
+            <h2 className="text-[17px] font-semibold tracking-[-0.018em] text-label">Import the weekly orders report</h2>
+            <p className="mt-1 text-sm text-muted">There is nothing to authorize. Each week, upload the report Whatnot provides.</p>
+            <div className="mt-4 border-t border-separator pt-4">
+              <WhatnotImportPanel sourceId={source.id} dataSpaceSlug={dataSpace.slug} />
+            </div>
+          </GlassPanel>
+        ) : null}
+
+        {!isOAuthSource && !isUploadSource && connector.availability === "live" ? (
           <details className="group glass self-start rounded-3xl">
             <summary className="flex cursor-pointer items-center justify-between gap-4 rounded-3xl p-4 transition hover:bg-fill sm:p-5">
               <div>

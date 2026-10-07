@@ -28,6 +28,8 @@ export interface EnqueueSyncRunInput {
   trigger: SyncTrigger;
   idempotencyKey?: string;
   webhookPayload?: import("@/storage/db/schema").JsonRecord | null;
+  /** A validated, uploaded report (manual trigger) for report-upload connectors. */
+  importPayload?: import("@/storage/db/schema").JsonRecord | null;
 }
 
 export function assertCommerceFactsPersistenceGate(input: {
@@ -159,6 +161,7 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       trigger: input.trigger,
       isDemoMode: source.status === "demo" || !isRuntimeDatabaseConfigured(),
       webhookPayload: input.webhookPayload ?? null,
+      importPayload: input.importPayload ?? null,
     });
     assertLockLease();
     const hasCommerceFacts = syncResult.commerceOrderFacts !== undefined;

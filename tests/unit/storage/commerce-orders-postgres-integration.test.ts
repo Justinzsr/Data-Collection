@@ -11,6 +11,7 @@ import {
 } from "@/storage/db/client";
 import type { CommerceOrder, CommerceOrderLine } from "@/storage/db/schema";
 import { replaceCommerceOrdersWindow } from "@/storage/repositories/commerce-orders-repository";
+import { replaceMetricsWindow, upsertMetrics } from "@/storage/repositories/metrics-repository";
 
 vi.mock("@/storage/repositories/platform-change-events-repository", async (importOriginal) => {
   const actual = await importOriginal<
@@ -288,6 +289,51 @@ describe.skipIf(!enabled)("Commerce order PostgreSQL facts", () => {
     );
     expect(remainingOrders).toEqual([{ id: oldOrderId }]);
     expect(remainingLines).toEqual([{ id: oldLineId }]);
+  });
+
+  it("replaces metrics only within a dimension scope, keeping rows that share its dates", async () => {
+    const metricKey = "integration_scoped_metric";
+    const metric = (date: string, week: string, value: number) => ({
+      date,
+      sourceId,
+      sourceTypeKey: "shopify" as const,
+      metricKey,
+      metricValue: value,
+      unit: "count",
+      dimensions: { rollup: "weekly_report", report_week: week },
+    });
+    const scope = (week: string) => ({
+      sourceId,
+      sourceTypeKey: "shopify" as const,
+      metricKeys: [metricKey],
+      startDate: "2026-09-27",
+      endDate: "2026-10-04",
+      dimension: { key: "report_week", value: week },
+    });
+    const stored = () => queryRows<{ date: string; value: number; week: string }>(
+      `
+        select date::text as date, metric_value::float8 as value, dimensions ->> 'report_week' as week
+        from metrics_daily
+        where source_id = $1 and metric_key = $2
+        order by date, week
+      `,
+      [sourceId, metricKey],
+    );
+    try {
+      // Two weekly slices share Sunday, Sep 27.
+      await upsertMetrics([metric("2026-09-27", "2026-09-21", 11)]);
+      await replaceMetricsWindow([metric("2026-09-27", "2026-09-28", 7), metric("2026-09-30", "2026-09-28", 48)], scope("2026-09-28"), lease);
+      await replaceMetricsWindow([metric("2026-09-30", "2026-09-28", 50)], scope("2026-09-28"), lease);
+      expect(await stored()).toEqual([
+        { date: "2026-09-27", value: 11, week: "2026-09-21" },
+        { date: "2026-09-30", value: 50, week: "2026-09-28" },
+      ]);
+      await expect(replaceMetricsWindow([metric("2026-09-30", "2026-09-21", 1)], scope("2026-09-28"), lease))
+        .rejects.toThrow(/dimension/u);
+      expect(await stored()).toHaveLength(2);
+    } finally {
+      await query("delete from metrics_daily where source_id = $1 and metric_key = $2", [sourceId, metricKey]);
+    }
   });
 
   it("enforces commerce fact truth constraints in PostgreSQL", async () => {

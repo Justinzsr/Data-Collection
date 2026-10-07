@@ -25,7 +25,8 @@ const initialDimension = { width: 640, height: 208 } as const;
 /**
  * A single daily series: bars for amounts that add up per day (spend, orders),
  * a line for running levels (followers). One axis, a hover tooltip, and a table
- * of the same values for anyone who cannot use the chart.
+ * of the same values for anyone who cannot use the chart. A null value is a day
+ * without data: it draws nothing and reads as `missingLabel`, never as zero.
  */
 export function DailyMetricChart({
   title,
@@ -34,19 +35,22 @@ export function DailyMetricChart({
   unit,
   color,
   kind = "bar",
+  missingLabel = "No data",
   testId,
 }: {
   title: string;
   description?: string;
-  data: Array<{ date: string; value: number }>;
+  data: Array<{ date: string; value: number | null }>;
   unit: string;
   color: string;
   kind?: "bar" | "line";
+  missingLabel?: string;
   testId?: string;
 }) {
   const chartData = data.map((point) => ({ ...point, label: dayLabel(point.date) }));
-  const hasData = data.some((point) => point.value !== 0) || (kind === "line" && data.length > 1);
-  const format = (value: unknown) => formatMetricValue(Number(value), unit);
+  const known = data.filter((point) => point.value !== null);
+  const hasData = known.some((point) => point.value !== 0) || (kind === "line" && known.length > 1);
+  const format = (value: unknown) => (value === null || value === undefined ? missingLabel : formatMetricValue(Number(value), unit));
   const axis = (value: unknown) => formatAxisValue(Number(value), unit);
 
   return (
@@ -111,7 +115,7 @@ export function DailyMetricChart({
                 {[...data].reverse().map((point) => (
                   <tr key={point.date}>
                     <th scope="row" className="px-3 py-2 font-medium text-label">{dayLabel(point.date)}</th>
-                    <td className="tabular px-3 py-2 text-right text-label-secondary">{format(point.value)}</td>
+                    <td className={`tabular px-3 py-2 text-right ${point.value === null ? "text-[var(--muted)]" : "text-label-secondary"}`}>{format(point.value)}</td>
                   </tr>
                 ))}
               </tbody>

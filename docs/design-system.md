@@ -68,6 +68,8 @@ Rules:
 - `PlatformIcon` / `IconTile` — app-icon style squircles for platforms and concepts. Their
   gradients are the `--icon-*` tokens (identical in light and dark, like Apple's Settings
   icons) applied through the `.app-icon` class; they are for icons only, never UI state.
+  Bright fills such as `--icon-gold` (Whatnot) take the dark `--icon-glyph-ink` glyph so the
+  symbol stays legible.
 - `formatRelativeTime` / `daysUntil` — server-rendered relative times.
 - `formatMetricValue` / `formatAxisValue` (`format.ts`) — one formatter for counts, percentages,
   ratios, and currencies; `null` always renders as an em dash, never as zero.

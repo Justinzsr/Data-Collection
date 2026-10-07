@@ -49,7 +49,7 @@ test("data explorer and daily report are reachable from the dashboard", async ({
   const sidebar = page.getByRole("navigation", { name: "Primary navigation" });
   await expect(sidebar.getByRole("link", { name: "Data Explorer" })).toHaveAttribute("href", "/w/moonarq/dashboard/data");
   await expect(sidebar.getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/w/moonarq/dashboard/reports/daily");
-  for (const platform of ["Meta Ads", "Website", "Shopify", "Instagram", "TikTok", "Supabase"]) {
+  for (const platform of ["Meta Ads", "Website", "Shopify", "Whatnot", "Instagram", "TikTok", "Supabase"]) {
     await expect(sidebar.getByRole("link", { name: platform, exact: true })).toBeVisible();
   }
   await page.goto("/w/moonarq/dashboard/data");

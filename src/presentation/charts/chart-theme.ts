@@ -14,6 +14,9 @@ const PLATFORM_SERIES: Record<string, string> = {
   vercel_web_analytics_drain: "var(--chart-6)",
   vercel_project: "var(--chart-6)",
   xiaohongshu: "var(--chart-8)",
+  // Whatnot shares Meta Ads' slot: the two never share a chart, and the free
+  // slots (green, red) read as "better" and "worse" beside a change chip.
+  whatnot: "var(--chart-7)",
 };
 
 export function platformSeriesColor(sourceTypeKey: string) {

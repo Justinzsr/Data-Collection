@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { incrementMetric, upsertMetrics, listMetrics, normalizeMetricDailyRow } from "@/storage/repositories/metrics-repository";
+import { incrementMetric, upsertMetrics, listMetrics, normalizeMetricDailyRow, replaceMetricsWindow } from "@/storage/repositories/metrics-repository";
 import { resetDemoStore } from "@/storage/repositories/demo-store";
 import { DEMO_SOURCE_IDS } from "@/storage/seed/demo-data";
 
@@ -49,6 +49,37 @@ describe("metric upserts", () => {
     const rows = (await listMetrics({ metricKeys: ["page_views"] })).filter((row) => row.dimensions.rollup === "daily");
     expect(rows).toHaveLength(1);
     expect(rows[0].metric_value).toBe(2);
+  });
+
+  it("replaces a window only within a dimension scope, keeping rows that share its dates", async () => {
+    const metric = (date: string, week: string, value: number) => ({
+      date,
+      sourceId: DEMO_SOURCE_IDS.website,
+      sourceTypeKey: "website" as const,
+      metricKey: "scoped_metric",
+      metricValue: value,
+      unit: "count",
+      dimensions: { rollup: "weekly_report", report_week: week },
+    });
+    const scope = (week: string) => ({
+      sourceId: DEMO_SOURCE_IDS.website,
+      sourceTypeKey: "website" as const,
+      metricKeys: ["scoped_metric"],
+      startDate: "2026-09-27",
+      endDate: "2026-10-04",
+      dimension: { key: "report_week", value: week },
+    });
+    const lease = { syncRunId: "run", lockKey: "lock" };
+    await upsertMetrics([metric("2026-09-27", "2026-09-21", 11)]);
+    await replaceMetricsWindow([metric("2026-09-27", "2026-09-28", 7), metric("2026-09-30", "2026-09-28", 48)], scope("2026-09-28"), lease);
+    await replaceMetricsWindow([metric("2026-09-30", "2026-09-28", 50)], scope("2026-09-28"), lease);
+    const stored = async () => (await listMetrics({ metricKeys: ["scoped_metric"] }))
+      .map((row) => [row.date, row.dimensions.report_week, row.metric_value])
+      .sort((left, right) => String(left).localeCompare(String(right)));
+    expect(await stored()).toEqual([["2026-09-27", "2026-09-21", 11], ["2026-09-30", "2026-09-28", 50]]);
+    await expect(replaceMetricsWindow([metric("2026-09-30", "2026-09-21", 1)], scope("2026-09-28"), lease)).rejects.toThrow(/dimension/u);
+    await expect(replaceMetricsWindow([], { ...scope("2026-09-28"), dimension: { key: "report week", value: "x" } }, lease)).rejects.toThrow(/window is invalid/u);
+    expect(await stored()).toHaveLength(2);
   });
 
   it("normalizes database-returned metric rows before aggregation services read them", () => {
