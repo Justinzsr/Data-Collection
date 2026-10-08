@@ -14,7 +14,11 @@ import {
   type WhatnotReportRow,
 } from "@/collection/connectors/whatnot/weekly-report";
 import {
+  downloadedGiveaway,
+  downloadedReportCsv,
+  downloadedSale,
   weeklyReportCsv,
+  WHATNOT_DOWNLOADED_WEEK,
   WHATNOT_REPORT_HEADER,
   WHATNOT_TEST_WEEK,
   whatnotSale,
@@ -498,6 +502,77 @@ describe("weekly report metrics", () => {
 
   it("produces identical rows when the same week is imported again, in any row order", () => {
     expect(aggregateWhatnotReport(rowsFor([...lines].reverse()), "source-1")).toEqual(metrics);
+  });
+});
+
+describe("the report as Whatnot's download writes it", () => {
+  const downloaded = parseWhatnotWeeklyReport(downloadedReportCsv([downloadedSale(), downloadedGiveaway()]), {
+    now: new Date("2026-10-07T00:00:00.000Z"),
+  });
+
+  it("reads upper-case, underscored column names and transaction types", () => {
+    if (!downloaded.ok) throw new Error(downloaded.error);
+    expect(downloaded).toMatchObject({ reportWeek: WHATNOT_DOWNLOADED_WEEK, currency: "usd", skippedRows: 0, duplicateRows: 0 });
+    expect(downloaded.rows).toHaveLength(2);
+    expect(downloaded.rows[0]).toMatchObject({
+      type: "order_earnings",
+      buyFormat: "AUCTION",
+      orderId: "900000003",
+      ledgerTransactionId: "700000003",
+      orderPlacedAt: "2026-09-11T03:05:10.000Z",
+      completedAt: "2026-09-15T19:20:45.000Z",
+      quantity: 1,
+      livestreamId: "00000000-0000-4000-8000-000000000001",
+      livestreamTitle: "Test studio show",
+      transactionAmount: 6.83,
+      postCouponPrice: 8,
+      commissionFee: 0.64,
+      paymentProcessingFee: 0.53,
+    });
+    expect(downloaded.rows[1]).toMatchObject({ type: "order_earnings", buyFormat: "GIVEAWAY", transactionAmount: -5.1, postCouponPrice: 0 });
+  });
+
+  it("reads the tax on commission from TAX_ON_COMMISSION_FEE", () => {
+    const taxed = parseWhatnotWeeklyReport(downloadedReportCsv([downloadedSale({ TAX_ON_COMMISSION_FEE: "0.05", TAX_ON_PAYMENT_PROCESSING_FEE: "0.04" })]));
+    if (!taxed.ok) throw new Error(taxed.error);
+    expect(taxed.rows[0]).toMatchObject({ taxOnCommission: 0.05, taxOnPaymentProcessingFee: 0.04 });
+  });
+
+  it("reads every transaction type written with underscores", () => {
+    const parsed = parseWhatnotWeeklyReport(downloadedReportCsv([
+      downloadedSale(),
+      downloadedSale({ TRANSACTION_TYPE: "ORDER_REFUND", TRANSACTION_AMOUNT: "-8.00", LEDGER_TRANSACTION_ID: "700000201" }),
+      downloadedSale({ TRANSACTION_TYPE: "TIPS", ORDER_ID: "", TRANSACTION_AMOUNT: "3.00", LEDGER_TRANSACTION_ID: "700000202" }),
+      downloadedSale({ TRANSACTION_TYPE: "SHIPPING_CHARGE", ORDER_ID: "", TRANSACTION_AMOUNT: "-2.25", LEDGER_TRANSACTION_ID: "700000203" }),
+    ]));
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.rows.map((row) => row.type)).toEqual(["order_earnings", "order_refund", "tips", "shipping_charge"]);
+  });
+
+  it("keeps none of the buyer, shipment, seller, or listing details", () => {
+    if (!downloaded.ok) throw new Error(downloaded.error);
+    const stored = JSON.stringify(downloaded.rows);
+    for (const dropped of ["synthetic_buyer_1", "\"WA\"", "800000001", "55500055", "Test bracelet", "“live”", "TestGiveaway1"]) {
+      expect(stored).not.toContain(dropped);
+    }
+  });
+
+  it("counts a giveaway as shipping paid, not as a sale", () => {
+    if (!downloaded.ok) throw new Error(downloaded.error);
+    const metrics = whatnotWeekMetrics(downloaded.reportWeek, downloaded.rows, "source-1");
+    expect(metricValue(metrics, "whatnot_sales", "2026-09-15")).toBe(8);
+    expect(metricValue(metrics, "whatnot_orders", "2026-09-15")).toBe(1);
+    expect(metricValue(metrics, "whatnot_items_sold", "2026-09-15")).toBe(1);
+    expect(metricValue(metrics, "whatnot_fees", "2026-09-15")).toBeCloseTo(1.17);
+    expect(metricValue(metrics, "whatnot_net_earnings", "2026-09-15")).toBeCloseTo(6.83 - 5.1);
+    expect(metricValue(metrics, "whatnot_show_orders", "2026-09-15")).toBe(1);
+  });
+
+  it("names a column as the file writes it when one of its values can't be read", () => {
+    expect(parseWhatnotWeeklyReport(downloadedReportCsv([downloadedSale({ TRANSACTION_AMOUNT: "6,83" })]))).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Row 2 has an amount that can't be read in TRANSACTION_AMOUNT."),
+    });
   });
 });
 

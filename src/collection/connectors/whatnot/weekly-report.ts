@@ -9,6 +9,11 @@ import { addDaysToDateKey, APP_TIME_ZONE, isAppDateKey, startOfAppDateUtc } from
  * for the transactions completed from Monday 00:00 to Sunday 23:59:59 UTC.
  * https://help.whatnot.com/hc/en-us/articles/36772664621837-Seller-Weekly-Orders-Report
  *
+ * The help article names the columns "Transaction Type", "Order ID", and so on;
+ * the downloaded file writes them upper case with underscores (TRANSACTION_TYPE,
+ * ORDER_ID) and its transaction types the same way (ORDER_EARNINGS). Both read
+ * the same.
+ *
  * Only the fields the metrics read are kept. Buyer name, state, and country,
  * shipment IDs, listing titles and descriptions, SKUs, free-text transaction
  * messages, and the seller's cost of goods are dropped while parsing and never
@@ -38,7 +43,7 @@ export type WhatnotReportRow = {
   orderPlacedAt: string | null;
   completedAt: string;
   orderId: string | null;
-  /** "Auction", "Buy-it-Now", or "Giveaway". */
+  /** "Auction", "Buy-it-Now", or "Giveaway", as the file writes it (the download uses upper case: "GIVEAWAY"). */
   buyFormat: string | null;
   /** Order Earnings rows only; null when blank. */
   quantity: number | null;
@@ -112,6 +117,11 @@ const COLUMN_NAMES: Record<ColumnKey, string> = {
   taxOnCommission: "Tax on Commission",
   taxOnPaymentProcessingFee: "Tax on Payment Processing Fee",
   ledgerTransactionId: "Ledger Transaction ID",
+};
+
+/** Other names a column goes by: the downloaded file calls "Tax on Commission" TAX_ON_COMMISSION_FEE. */
+const COLUMN_ALIASES: Partial<Record<ColumnKey, string[]>> = {
+  taxOnCommission: ["Tax on Commission Fee"],
 };
 
 const REQUIRED_COLUMNS: ColumnKey[] = [
@@ -202,8 +212,9 @@ export function parseCsv(text: string): string[][] {
   return parseCsvRecords(text).map((record) => record.cells);
 }
 
-function headerKey(value: string) {
-  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+/** Names compare without letter case, extra spaces, or underscores: "Order ID" and "ORDER_ID" are one column, "Order Earnings" and "ORDER_EARNINGS" one type. */
+function nameKey(value: string) {
+  return value.replace(/[\s_]+/gu, " ").trim().toLowerCase();
 }
 
 function text(value: string | undefined) {
@@ -381,7 +392,7 @@ export function coveredDateRuns(reportWeeks: string[]): Array<{ from: string; th
 }
 
 function transactionType(value: string | null): WhatnotTransactionType {
-  const normalized = (value ?? "").toLowerCase().replace(/\s+/gu, " ").trim();
+  const normalized = nameKey(value ?? "");
   if (normalized === "order earnings" || normalized === "order earning") return "order_earnings";
   if (normalized === "order refund" || normalized === "order refunds") return "order_refund";
   if (normalized === "tips" || normalized === "tip") return "tips";
@@ -422,13 +433,24 @@ export function parseWhatnotWeeklyReport(textContent: string, options: { now?: D
 
   const positions = new Map<string, number>();
   header.forEach((name, index) => {
-    const key = headerKey(name);
+    const key = nameKey(name);
     if (!positions.has(key)) positions.set(key, index);
   });
-  const column = (key: ColumnKey) => positions.get(headerKey(COLUMN_NAMES[key]));
+  const column = (key: ColumnKey) => {
+    for (const name of [COLUMN_NAMES[key], ...(COLUMN_ALIASES[key] ?? [])]) {
+      const index = positions.get(nameKey(name));
+      if (index !== undefined) return index;
+    }
+    return undefined;
+  };
   const cell = (cells: string[], key: ColumnKey) => {
     const index = column(key);
     return index === undefined ? undefined : cells[index];
+  };
+  /** A column's name as this file writes it, so a message names what the seller sees. */
+  const columnLabel = (key: ColumnKey) => {
+    const index = column(key);
+    return (index === undefined ? "" : header[index].trim()) || COLUMN_NAMES[key];
   };
   const missing = REQUIRED_COLUMNS.filter((key) => column(key) === undefined).map((key) => COLUMN_NAMES[key]);
   if (missing.length > 0) {
@@ -479,7 +501,7 @@ export function parseWhatnotWeeklyReport(textContent: string, options: { now?: D
   const money = (cells: string[], key: ColumnKey, lineNumber: number, strict: boolean) => {
     const value = parseMoney(cell(cells, key));
     if (value === null || !Number.isNaN(value)) return value;
-    if (strict) throw new ReportRowError(`Row ${lineNumber} has an amount that can't be read in ${COLUMN_NAMES[key]}. ${AS_DOWNLOADED}`);
+    if (strict) throw new ReportRowError(`Row ${lineNumber} has an amount that can't be read in ${columnLabel(key)}. ${AS_DOWNLOADED}`);
     return null;
   };
 
