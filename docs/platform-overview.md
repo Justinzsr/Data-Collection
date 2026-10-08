@@ -168,6 +168,10 @@ because the seller pays the shipping. They are not sales or orders.
   marked as such. An imported week can be removed when it was imported by mistake. Both ask for
   confirmation, and both check the week again while holding the source's sync lock, so neither can
   overwrite an import of the same week that finished a moment earlier.
+- **Column names.** This page uses the names in Whatnot's help article ("Transaction Type", "Order
+  ID", "Tax on Commission"). The downloaded file writes them upper case with underscores
+  (`TRANSACTION_TYPE`, `ORDER_ID`, `TAX_ON_COMMISSION_FEE`), and its transaction types and buy
+  formats the same way (`ORDER_EARNINGS`, `GIVEAWAY`). The importer reads both spellings.
 - **One week per file.** An upload must be one Weekly Orders Report, as downloaded: a file whose
   transactions span two report weeks, or a week that has not ended, is refused. The report week
   comes from the completion times; Report Start Date (the week's Monday in UTC) must agree with them.

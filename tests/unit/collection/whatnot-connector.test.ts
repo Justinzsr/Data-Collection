@@ -13,7 +13,16 @@ import { getDemoStore, resetDemoStore } from "@/storage/repositories/demo-store"
 import { createSource } from "@/storage/repositories/sources-repository";
 import { AUTO_LAB_DATA_SPACE_SLUG, DATA_SPACE_IDS } from "@/storage/data-spaces";
 import { DEMO_SOURCE_IDS } from "@/storage/seed/demo-data";
-import { weeklyReportCsv, whatnotSale, WHATNOT_TEST_WEEK, type WhatnotReportLine } from "../fixtures/whatnot-report";
+import {
+  downloadedGiveaway,
+  downloadedReportCsv,
+  downloadedSale,
+  weeklyReportCsv,
+  WHATNOT_DOWNLOADED_WEEK,
+  whatnotSale,
+  WHATNOT_TEST_WEEK,
+  type WhatnotReportLine,
+} from "../fixtures/whatnot-report";
 
 const REPORT = weeklyReportCsv([
   whatnotSale({ "Order ID": "ORD-1", "Ledger Transaction ID": "L-1" }),
@@ -251,6 +260,22 @@ describe("Whatnot connector", () => {
       import: { reportWeek: WHATNOT_TEST_WEEK, transactions: 10, skippedRows: 1, duplicateRows: 1, currency: "usd" },
     });
     expect(JSON.stringify(getDemoStore().rawIngestions.filter((row) => row.source_id === source.id))).not.toContain("Private Person");
+  });
+
+  it("imports the report exactly as Whatnot's download writes it", async () => {
+    const source = await whatnotSource();
+    const csv = downloadedReportCsv([downloadedSale(), downloadedGiveaway()]);
+    const response = await uploadRequest(source.id, new File([csv], "sep_14__20_2026_earnings.csv", { type: "text/csv" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      error: null,
+      import: { reportWeek: WHATNOT_DOWNLOADED_WEEK, transactions: 2, skippedRows: 0, duplicateRows: 0, currency: "usd" },
+    });
+    expect(total(source.id, "whatnot_sales")).toBe(8);
+    expect(total(source.id, "whatnot_orders")).toBe(1);
+    expect(total(source.id, "whatnot_net_earnings")).toBeCloseTo(6.83 - 5.1);
+    expect(JSON.stringify(getDemoStore().rawIngestions.filter((row) => row.source_id === source.id))).not.toContain("synthetic_buyer_1");
   });
 
   it("rejects a wrong file before anything is stored or the source is marked failing", async () => {
