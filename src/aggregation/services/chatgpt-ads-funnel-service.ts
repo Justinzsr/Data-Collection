@@ -109,10 +109,12 @@ export async function getChatgptAdsFunnelSnapshot(input: { dataSpaceId: string; 
   const sources = await loadSources({ dataSpaceId: input.dataSpaceId });
   const candidates = sources.filter((source) => source.source_type_key === "chatgpt_ads" && source.status !== "disabled");
   const source = candidates.length === 1 ? candidates[0] : null;
+  // Both branches use the same cohort and clock; share the report instead of running its aggregate twice.
+  const websitePromise = (dependencies.loadWebsite ?? getWebsiteFunnelOverview)({ dataSpaceId: input.dataSpaceId, range, segment: input.segment ?? "all", comparison: "off", utmSource: "chatgpt", utmMedium: "paid", now });
   const [runs, website, commerce] = await Promise.all([
     source ? (dependencies.loadSyncRuns ?? listSyncRuns)(1, "success", { dataSpaceId: input.dataSpaceId, sourceId: source.id }) : Promise.resolve([]),
-    (dependencies.loadWebsite ?? getWebsiteFunnelOverview)({ dataSpaceId: input.dataSpaceId, range, segment: input.segment ?? "all", comparison: "off", utmSource: "chatgpt", utmMedium: "paid", now }),
-    (dependencies.loadCommerce ?? getWebsiteCommerceFunnelV2Snapshot)({ dataSpaceId: input.dataSpaceId, range, segment: input.segment ?? "all", utmSource: "chatgpt", utmMedium: "paid" }, { now }),
+    websitePromise,
+    (dependencies.loadCommerce ?? getWebsiteCommerceFunnelV2Snapshot)({ dataSpaceId: input.dataSpaceId, range, segment: input.segment ?? "all", utmSource: "chatgpt", utmMedium: "paid" }, { now, loadWebsiteOverview: () => websitePromise }),
   ]);
   const run = runs.filter((candidate) => candidate.source_id === source?.id && candidate.source_type_key === "chatgpt_ads" && candidate.status === "success" && candidate.finished_at)
     .sort((left, right) => (right.finished_at ?? "").localeCompare(left.finished_at ?? ""))[0];

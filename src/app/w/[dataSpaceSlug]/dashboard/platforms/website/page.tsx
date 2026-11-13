@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import { Suspense } from "react";
 import { getChatgptAdsFunnelSnapshot } from "@/aggregation/services/chatgpt-ads-funnel-service";
 import { ChatgptAdsFunnel } from "@/presentation/dashboard/chatgpt-ads-funnel";
 import { notFound, redirect } from "next/navigation";
@@ -8,6 +9,7 @@ import { resolvePrimaryWebsiteSource } from "@/collection/tracking/website-sourc
 import { getDataSpaceBySlug } from "@/storage/repositories/data-spaces-repository";
 import { listSources } from "@/storage/repositories/sources-repository";
 import { LinkButton } from "@/presentation/components/ui/button";
+import { GlassPanel } from "@/presentation/components/ui/panel";
 import { currentTime } from "@/presentation/components/ui/relative-time";
 import {
   buildMoonArqOverviewHref,
@@ -46,6 +48,17 @@ function requiresSanitizedRedirect(
     if (typeof value !== "string") return false;
     return value.trim() !== normalized[key];
   });
+}
+
+async function WebsiteChatgptAdsPanel({ dataSpaceId, range, segment, basePath, dataSpaceSlug }: {
+  dataSpaceId: string;
+  range: MoonArqOverviewQuery["range"];
+  segment: MoonArqOverviewQuery["segment"];
+  basePath: string;
+  dataSpaceSlug: string;
+}) {
+  const snapshot = await getChatgptAdsFunnelSnapshot({ dataSpaceId, range, segment });
+  return <ChatgptAdsFunnel snapshot={snapshot} basePath={basePath} dataSpaceSlug={dataSpaceSlug} />;
 }
 
 export default async function WebsitePlatformPage({
@@ -89,7 +102,6 @@ export default async function WebsitePlatformPage({
   const health = platformHealth(source, currentTime());
   const v2Enabled = process.env[WEBSITE_COMMERCE_FUNNEL_V2_UI_FLAG]?.trim() === "true";
   const hasChatgptAds = sources.some((candidate) => candidate.source_type_key === "chatgpt_ads" && candidate.status !== "disabled");
-  const chatgptAds = hasChatgptAds ? await getChatgptAdsFunnelSnapshot({ dataSpaceId: dataSpace.id, range: query.range, segment: query.segment }) : null;
 
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-[1600px] grid-cols-[minmax(0,1fr)] gap-4">
@@ -114,7 +126,11 @@ export default async function WebsitePlatformPage({
         <StorefrontConversionTrend overview={overview} query={query} basePath={websitePath} />
       </section>
       <StorefrontJourneys overview={overview} />
-      {chatgptAds ? <ChatgptAdsFunnel snapshot={chatgptAds} basePath={basePath} dataSpaceSlug={dataSpace.slug} /> : null}
+      {hasChatgptAds ? (
+        <Suspense fallback={<GlassPanel className="min-w-0 p-4 sm:p-5"><p role="status" className="text-sm text-muted">Loading ChatGPT Ads funnel…</p></GlassPanel>}>
+          <WebsiteChatgptAdsPanel dataSpaceId={dataSpace.id} range={query.range} segment={query.segment} basePath={basePath} dataSpaceSlug={dataSpace.slug} />
+        </Suspense>
+      ) : null}
       <StorefrontBreakdowns overview={overview} query={query} basePath={websitePath} />
       {v2Enabled ? (
         <WebsiteCommerceFunnelV2 dataSpaceSlug={dataSpace.slug} range={query.range} segment={query.segment} />
