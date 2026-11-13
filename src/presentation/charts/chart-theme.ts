@@ -11,6 +11,7 @@ const PLATFORM_SERIES: Record<string, string> = {
   shopify: "var(--chart-5)",
   // Meta Ads stays clear of the green used for "better" changes beside it.
   meta_ads: "var(--chart-7)",
+  chatgpt_ads: "var(--chart-6)",
   vercel_web_analytics_drain: "var(--chart-6)",
   vercel_project: "var(--chart-6)",
   xiaohongshu: "var(--chart-8)",

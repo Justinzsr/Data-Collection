@@ -11,6 +11,7 @@ export type SourceTypeKey =
   | "tiktok"
   | "instagram"
   | "meta_ads"
+  | "chatgpt_ads"
   | "xiaohongshu"
   | "facebook_page"
   | "etsy"

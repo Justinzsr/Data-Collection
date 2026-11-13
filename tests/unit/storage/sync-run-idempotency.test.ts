@@ -8,7 +8,7 @@ vi.mock("@/storage/db/client", () => ({
   queryRows: queryRowsMock,
 }));
 
-import { createOrGetSyncRun } from "@/storage/repositories/sync-runs-repository";
+import { createOrGetSyncRun, listSyncRuns } from "@/storage/repositories/sync-runs-repository";
 
 function persistedRun(overrides: Partial<SyncRun> = {}): SyncRun {
   return {
@@ -73,5 +73,16 @@ describe("database sync-run idempotency", () => {
 
     expect(result).toEqual({ run: inserted, created: true });
     expect(queryRowsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("limits successful history within the selected source and data space", async () => {
+    const existing = persistedRun();
+    queryRowsMock.mockResolvedValueOnce([existing]);
+    expect(await listSyncRuns(1, "success", { dataSpaceId: "space-test", sourceId: existing.source_id! })).toEqual([existing]);
+    const [sql, parameters] = queryRowsMock.mock.calls[0];
+    expect(sql).toContain("s.data_space_id = $2");
+    expect(sql).toContain("r.source_id = $3");
+    expect(sql).toContain("limit $4");
+    expect(parameters).toEqual(["success", "space-test", existing.source_id, 1]);
   });
 });

@@ -64,6 +64,7 @@ const PLATFORM_PATHS: Record<OverviewPlatformKey, string> = {
   instagram: "/platforms/instagram",
   tiktok: "/platforms/tiktok",
   supabase: "/platforms/supabase",
+  chatgpt_ads: "/platforms/chatgpt-ads",
 };
 
 function AddPlatformCard({ href }: { href: string }) {

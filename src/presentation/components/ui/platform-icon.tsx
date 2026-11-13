@@ -35,6 +35,7 @@ const PLATFORM_STYLES: Record<string, PlatformStyle> = {
   tiktok: { icon: Video, fill: "var(--icon-black)", glyph: "[filter:drop-shadow(1.2px_0_0_var(--icon-glyph-split-a))_drop-shadow(-1.2px_0_0_var(--icon-glyph-split-b))]" },
   instagram: { icon: Camera, fill: "var(--icon-sunset)" },
   meta_ads: { icon: Megaphone, fill: "var(--icon-azure)" },
+  chatgpt_ads: { icon: Megaphone, fill: "var(--icon-mint)" },
   xiaohongshu: { icon: BookOpen, fill: "var(--icon-red)" },
   facebook_page: { icon: ThumbsUp, fill: "var(--icon-azure)" },
   etsy: { icon: Store, fill: "var(--icon-orange)" },

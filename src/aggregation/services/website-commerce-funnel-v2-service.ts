@@ -70,6 +70,8 @@ export type CommerceBridgeAggregateInput = {
   startAt: string;
   endExclusive: string;
   segment: WebsiteCommerceSegment;
+  utmSource?: string;
+  utmMedium?: string;
 };
 
 type ServiceDependencies = {
@@ -86,6 +88,9 @@ export type WebsiteCommerceFunnelV2Input = {
   dataSpaceId: string;
   range?: WebsiteCommerceRangeKey;
   segment?: WebsiteCommerceSegment;
+  /** Optional acquisition cohort; order linkage still requires the exact checkout bridge. */
+  utmSource?: string;
+  utmMedium?: string;
 };
 
 type MetaAggregate = {
@@ -590,6 +595,8 @@ export async function getWebsiteCommerceFunnelV2Snapshot(
       segment,
       comparison: "off",
       now,
+      ...(input.utmSource ? { utmSource: input.utmSource } : {}),
+      ...(input.utmMedium ? { utmMedium: input.utmMedium } : {}),
     }),
   ]);
   const websiteSource = exactSource(sources, "website");
@@ -626,6 +633,8 @@ export async function getWebsiteCommerceFunnelV2Snapshot(
       startAt: website.range.startAt,
       endExclusive: website.range.endExclusive,
       segment,
+      ...(input.utmSource ? { utmSource: input.utmSource } : {}),
+      ...(input.utmMedium ? { utmMedium: input.utmMedium } : {}),
     }),
     metaSource
       ? loadMetaMetrics({

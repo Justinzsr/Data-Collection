@@ -123,6 +123,44 @@ describe("connector detection", () => {
     });
   });
 
+  it("detects official ChatGPT Ads URLs without retaining account or secret query parameters", () => {
+    const [result] = detectSource("https://ads.openai.com/overview?act=example-account&api_key=not-a-real-key#settings");
+    expect(result).toMatchObject({
+      sourceTypeKey: "chatgpt_ads",
+      availability: "live",
+      setupKind: "credentials",
+      normalizedUrl: "https://ads.openai.com/",
+      demoAvailable: false,
+    });
+    expect(result.externalAccountId ?? null).toBeNull();
+    expect(result.possibleMetrics).toEqual(expect.arrayContaining([
+      "chatgpt_ads_spend", "chatgpt_ads_clicks", "chatgpt_ads_conversions",
+    ]));
+    expect(JSON.stringify(result)).not.toContain("not-a-real-key");
+
+    for (const input of ["https://ads.openai.com.attacker.example/overview", "http://ads.openai.com/", "https://platform.openai.com/"]) {
+      expect(detectSource(input).some((candidate) => candidate.sourceTypeKey === "chatgpt_ads"), input).toBe(false);
+    }
+  });
+
+  it("lists ChatGPT Ads as an encrypted-credential, read-only polling connector", () => {
+    const connector = getConnector("chatgpt_ads");
+    const sourceType = listSourceTypes().find((candidate) => candidate.key === "chatgpt_ads");
+    expect(sourceType).toMatchObject({
+      availability: "live",
+      enabled: true,
+      setup_kind: "credentials",
+      default_sync_mode: "hourly",
+      capabilities: { supportsPolling: true, supportsManualSync: true, supportsWebhook: false },
+    });
+    expect(connector.requiredFields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "chatgpt_ads_api_key", required: true, secret: true }),
+    ]));
+    expect(sourceType?.supported_metrics).toHaveLength(7);
+    expect(sourceType?.supported_metrics.some((key) => /promotion|credit|cpc|cpm|ctr|roas|cvr/u.test(key))).toBe(false);
+    expect(getInitialSourceStatus(connector, true)).toBe("needs_credentials");
+  });
+
   it("asks for only service_role_key in Supabase admin fallback mode", () => {
     const connector = getConnector("supabase");
     const fields = [...connector.requiredFields, ...connector.optionalFields].map((field) => field.key);

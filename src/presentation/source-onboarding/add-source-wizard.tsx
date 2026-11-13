@@ -84,6 +84,7 @@ type SavedSource = {
 const PLATFORM_PRIORITY = [
   "website",
   "instagram",
+  "chatgpt_ads",
   "tiktok",
   "supabase",
   "xiaohongshu",
@@ -160,6 +161,7 @@ function defaultInputFor(sourceTypeKey: string, dataSpaceSlug: string) {
       : "https://www.tiktok.com/@moonarq";
   }
   if (sourceTypeKey === "website") return dataSpaceSlug === "moonarq" ? "https://moonarqstudio.com" : "";
+  if (sourceTypeKey === "chatgpt_ads") return "https://ads.openai.com/";
   return "";
 }
 
@@ -167,6 +169,7 @@ function inputPlaceholderFor(sourceTypeKey: string) {
   if (sourceTypeKey === "instagram") return "https://www.instagram.com/your-account";
   if (sourceTypeKey === "tiktok") return "https://www.tiktok.com/@your-account";
   if (sourceTypeKey === "shopify") return "https://your-store.myshopify.com";
+  if (sourceTypeKey === "chatgpt_ads") return "https://ads.openai.com/";
   if (sourceTypeKey === "supabase") return "https://your-project.supabase.co";
   if (sourceTypeKey === "website") return "https://your-site.com";
   if (sourceTypeKey === "whatnot") return "https://www.whatnot.com/user/your-shop";

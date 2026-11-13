@@ -3,6 +3,8 @@ import {
   metaSyncIsStale,
   selectedMetaAccountId,
 } from "@/aggregation/services/meta-ads-attribution-service";
+import { aggregateChatgptAdsMetrics } from "@/aggregation/services/chatgpt-ads-funnel-service";
+import { CHATGPT_ADS_METRIC_KEYS } from "@/collection/connectors/chatgpt-ads/connector";
 import { isLocalOverviewFixtureEnabled, paidAdsFixture } from "@/aggregation/services/platform-overview-fixtures";
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
 import { getWebsiteFunnelOverview, type WebsiteFunnelDemoState } from "@/aggregation/services/website-funnel-service";
@@ -73,7 +75,7 @@ export type OverviewRange = {
   sparkline: { startDate: string; endDate: string; label: string };
 };
 
-export type OverviewPlatformKey = "website" | "shopify" | "etsy" | "whatnot" | "instagram" | "tiktok" | "supabase";
+export type OverviewPlatformKey = "website" | "shopify" | "etsy" | "whatnot" | "instagram" | "tiktok" | "supabase" | "chatgpt_ads";
 
 /** For platforms whose data arrives as periodic reports rather than live syncs. */
 export type ReportCoverage = {
@@ -1462,7 +1464,23 @@ export async function getEtsyDetail(input: {
   };
 }
 
-const SUMMED_KEYS = ["orders", "net_payment", "signups", "page_views", "sessions", "custom_events", ...ETSY_METRIC_KEYS];
+function chatgptAdsCard(source: Source | null, rows: MetricDaily[], range: OverviewRange, ambiguous = false): OverviewPlatformCard {
+  const currency = textValue(source?.metadata.account_currency);
+  const timeZone = textValue(source?.metadata.account_timezone);
+  const aggregate = aggregateChatgptAdsMetrics({ rows, sourceId: source?.id ?? "", startDate: range.startDate, endDate: range.endDate, accountId: source?.external_account_id, currency, timeZone });
+  const ready = Boolean(source?.external_account_id && source.last_success_at && aggregate.hasRows && currency && timeZone === APP_TIME_ZONE);
+  const metric = (key: string, label: string, value: number | null, unit: string): OverviewMetric => ({ key, label, value: ready ? value : null, unit, delta: { kind: "none", reason: "unavailable" }, higherIsBetter: null });
+  return {
+    key: "chatgpt_ads", iconKey: "chatgpt_ads", title: "ChatGPT Ads", account: source?.account_name ?? null, source,
+    primary: metric("spend", "Reported ad spend", aggregate.totals.spend, aggregate.currency ?? "currency"),
+    secondary: [metric("clicks", "Ad clicks", aggregate.totals.clicks, "count"), metric("conversions", "Attributed goals", aggregate.totals.conversions, "attributed_goal")],
+    sparkline: { label: "reported daily spend", points: ready ? aggregate.daily.filter((point) => point.spend !== null).map((point) => ({ date: point.date, value: point.spend! })) : [] },
+    updatedAt: source?.last_success_at ?? null,
+    unavailableReason: ambiguous ? "Multiple ChatGPT Ads sources are connected. Choose one account before comparing performance." : ready ? null : "Connect and sync ChatGPT Ads to see account performance. Open details for reporting coverage and the tagged visitor funnel.",
+  };
+}
+
+const SUMMED_KEYS = ["orders", "net_payment", "signups", "page_views", "sessions", "custom_events", ...ETSY_METRIC_KEYS, ...CHATGPT_ADS_METRIC_KEYS];
 const SNAPSHOT_KEYS = [
   "instagram_followers",
   "instagram_media_reach",
@@ -1475,9 +1493,9 @@ const SNAPSHOT_KEYS = [
 ];
 
 /** MoonArq always shows its core platforms (with a setup prompt when missing); other spaces show what they have. */
-const PLATFORM_ORDER: OverviewPlatformKey[] = ["website", "shopify", "etsy", "whatnot", "instagram", "tiktok", "supabase"];
+const PLATFORM_ORDER: OverviewPlatformKey[] = ["chatgpt_ads", "website", "shopify", "etsy", "whatnot", "instagram", "tiktok", "supabase"];
 /** Shown only once a source exists, even in MoonArq. */
-const OPTIONAL_PLATFORMS = new Set<OverviewPlatformKey>(["etsy", "whatnot"]);
+const OPTIONAL_PLATFORMS = new Set<OverviewPlatformKey>(["etsy", "whatnot", "chatgpt_ads"]);
 
 export function buildPlatformCards(input: {
   dataSpaceSlug: string;
@@ -1493,6 +1511,11 @@ export function buildPlatformCards(input: {
   const websiteSource = resolvePrimaryWebsiteSource(sources);
   const cards: OverviewPlatformCard[] = [];
   for (const key of PLATFORM_ORDER) {
+    if (key === "chatgpt_ads") {
+      const candidates = sources.filter((source) => source.source_type_key === key && source.status !== "disabled");
+      if (candidates.length) cards.push(chatgptAdsCard(candidates.length === 1 ? candidates[0] : null, sumRows, range, candidates.length > 1));
+      continue;
+    }
     if (key === "website") {
       if (!websiteSource && !isMoonArq) continue;
       const sessions = zeroFilled(dailySums(sumRows, "sessions", websiteSource?.id ?? ""), range.sparkline.startDate, range.sparkline.endDate);
@@ -1654,7 +1677,7 @@ export async function getPlatformDetail(input: {
   dataSpace: Pick<DataSpace, "id" | "slug">;
   rangeKey: DateRangeKey;
   /** Website, Etsy, and Whatnot have their own detail services. */
-  key: Exclude<OverviewPlatformKey, "website" | "etsy" | "whatnot">;
+  key: Exclude<OverviewPlatformKey, "website" | "etsy" | "whatnot" | "chatgpt_ads">;
   now?: Date;
 }): Promise<PlatformDetail> {
   const now = input.now ?? getDemoNow();

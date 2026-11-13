@@ -9,6 +9,7 @@ import {
 
 const QUERY_TIMEOUT_MS = 8_000;
 const UUID_V4_SQL = "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+const ECMASCRIPT_TRIM_CHARACTERS_SQL = String.raw`U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'`;
 
 export type CommerceFunnelV2ReportInput = {
   dataSpaceId: string;
@@ -17,6 +18,9 @@ export type CommerceFunnelV2ReportInput = {
   startAt: string;
   endExclusive: string;
   segment: "all" | "ready-made" | "builder";
+  /** Match the first valid page view's session acquisition; never infer paid traffic from a referrer. */
+  utmSource?: string;
+  utmMedium?: string;
 };
 
 export type CommerceFunnelV2MoneyGroup = {
@@ -194,6 +198,7 @@ raw_events as materialized (
     event.session_id,
     event.event_name,
     event.properties,
+    event.attribution_context,
     event.consent_status,
     event.client_context,
     event.occurred_at,
@@ -382,6 +387,53 @@ valid_events as materialized (
   from classified_events
   where property_valid is true
 ),
+first_visit_times as materialized (
+  select session_id, min(occurred_at) as visit_at
+  from valid_events
+  where event_name = 'page_view'
+  group by session_id
+),
+first_visit_attribution_candidates as materialized (
+  select
+    event.session_id,
+    -- Match the production Website reader: a present primary value takes
+    -- precedence even when malformed. Only absent/JSON-null values use aliases.
+    case
+      when event.attribution_context #> '{utm,source}' is not null
+        and event.attribution_context #> '{utm,source}' <> 'null'::jsonb
+        then event.attribution_context #> '{utm,source}'
+      else event.attribution_context #> '{utm,utm_source}'
+    end as raw_utm_source,
+    case
+      when event.attribution_context #> '{utm,medium}' is not null
+        and event.attribution_context #> '{utm,medium}' <> 'null'::jsonb
+        then event.attribution_context #> '{utm,medium}'
+      else event.attribution_context #> '{utm,utm_medium}'
+    end as raw_utm_medium
+  from valid_events event
+  join first_visit_times visit
+    on visit.session_id = event.session_id
+   and visit.visit_at = event.occurred_at
+  where event.event_name = 'page_view'
+),
+first_visit_attribution as materialized (
+  select
+    session_id,
+    lower(nullif(btrim(case when jsonb_typeof(raw_utm_source) = 'string'
+      then raw_utm_source #>> '{}' end, ${ECMASCRIPT_TRIM_CHARACTERS_SQL}), '')) as utm_source,
+    lower(nullif(btrim(case when jsonb_typeof(raw_utm_medium) = 'string'
+      then raw_utm_medium #>> '{}' end, ${ECMASCRIPT_TRIM_CHARACTERS_SQL}), '')) as utm_medium
+  from first_visit_attribution_candidates
+),
+acquisition_sessions as materialized (
+  select session_id
+  from first_visit_attribution
+  group by session_id
+  -- Tied first visits must agree on every requested field. Missing or conflicting
+  -- acquisition values cannot become a paid session because a later page has tags.
+  having ($7::text is null or bool_and((utm_source = $7::text) is true))
+    and ($8::text is null or bool_and((utm_medium = $8::text) is true))
+),
 traffic_sessions as materialized (
   select
     session_id,
@@ -389,6 +441,8 @@ traffic_sessions as materialized (
     bool_or(coalesce(client_context ->> 'device_category' = 'bot', false)) as known_bot,
     bool_and(coalesce(client_context ->> 'traffic_type' = 'production', false)) as production_tagged
   from valid_events
+  where ($7::text is null and $8::text is null)
+    or session_id in (select session_id from acquisition_sessions)
   group by session_id
 ),
 business_sessions as materialized (
@@ -462,6 +516,14 @@ orders_in_range as materialized (
     and commerce_order.source_id = scope.shopify_source_id
     and commerce_order.occurred_at >= $4::timestamptz
     and commerce_order.occurred_at < coalesce(scope.effective_end_at, $4::timestamptz)
+    and (
+      ($7::text is null and $8::text is null)
+      or exists (
+        select 1
+        from sequenced_checkout_candidates checkout
+        where checkout.checkout_event_id_hash = commerce_order.checkout_event_id_hash
+      )
+    )
 ),
 eligible_orders as materialized (
   select commerce_order.*
@@ -805,6 +867,11 @@ function validateInput(input: CommerceFunnelV2ReportInput) {
     || startAt >= endExclusive
     || !["all", "ready-made", "builder"].includes(input.segment)
   ) throw new RangeError("Commerce funnel V2 report scope is invalid.");
+  for (const value of [input.utmSource, input.utmMedium]) {
+    if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 256)) {
+      throw new RangeError("Commerce funnel V2 acquisition filter is invalid.");
+    }
+  }
 }
 
 function undefinedTable(error: unknown) {
@@ -825,6 +892,9 @@ export async function getCommerceFunnelV2ReportAggregate(
   input: CommerceFunnelV2ReportInput,
 ): Promise<CommerceFunnelV2ReportAggregate> {
   validateInput(input);
+  const utmSource = input.utmSource?.trim().toLowerCase() ?? null;
+  const utmMedium = input.utmMedium?.trim().toLowerCase() ?? null;
+  const acquisitionFiltered = utmSource !== null || utmMedium !== null;
   if (input.segment === "builder") {
     return unavailable(
       "Builder cart and checkout remain unmeasured until journey-level continuity is proven.",
@@ -848,6 +918,8 @@ export async function getCommerceFunnelV2ReportAggregate(
           input.startAt,
           input.endExclusive,
           input.segment,
+          utmSource,
+          utmMedium,
         ],
         client,
       );
@@ -923,7 +995,9 @@ export async function getCommerceFunnelV2ReportAggregate(
 
     return {
       state: "ready",
-      reason: "The aggregate-only commerce bridge is ready.",
+      reason: acquisitionFiltered
+        ? "The acquisition cohort includes only first-visit-tagged sessions and their deterministic order bridges. Orders without a usable bridge cannot be assigned to this channel."
+        : "The aggregate-only commerce bridge is ready.",
       coverageStartAt,
       coverageEndAt,
       businessVisits,
@@ -932,17 +1006,17 @@ export async function getCommerceFunnelV2ReportAggregate(
       eligibleCheckoutEvents,
       excludedBotSessions,
       excludedNonProductionSessions,
-      eligibleShopifyOrders,
+      eligibleShopifyOrders: acquisitionFiltered ? null : eligibleShopifyOrders,
       linkedOrdersPlaced,
       activeLinkedOrders,
       cancelledLinkedOrders,
       bridgeMatchedOrders,
-      bridgeMissingOrders,
-      bridgeInvalidOrders,
-      bridgeAmbiguousOrders,
+      bridgeMissingOrders: acquisitionFiltered ? null : bridgeMissingOrders,
+      bridgeInvalidOrders: acquisitionFiltered ? null : bridgeInvalidOrders,
+      bridgeAmbiguousOrders: acquisitionFiltered ? null : bridgeAmbiguousOrders,
       consentBlockedOrders,
       reversedTimestampOrders,
-      preCoverageOrders,
+      preCoverageOrders: acquisitionFiltered ? null : preCoverageOrders,
       linkedOrderLines,
       eligibleOrderLines,
       money,
