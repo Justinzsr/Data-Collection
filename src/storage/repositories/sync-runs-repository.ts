@@ -156,7 +156,7 @@ export async function updateSyncRun(syncRunId: string, patch: Partial<SyncRun>):
   return rows[0] ?? null;
 }
 
-export async function listSyncRuns(limit = 50, status?: SyncRunStatus, options: { dataSpaceId?: string } = {}): Promise<SyncRun[]> {
+export async function listSyncRuns(limit = 50, status?: SyncRunStatus, options: { dataSpaceId?: string; sourceId?: string } = {}): Promise<SyncRun[]> {
   if (!isRuntimeDatabaseConfigured()) {
     const sourceIds = options.dataSpaceId
       ? new Set((await listSources({ dataSpaceId: options.dataSpaceId })).map((source) => source.id))
@@ -164,6 +164,8 @@ export async function listSyncRuns(limit = 50, status?: SyncRunStatus, options: 
     return getDemoStore().syncRuns
       .filter((run) => (sourceIds ? Boolean(run.source_id && sourceIds.has(run.source_id)) : true))
       .filter((run) => (status ? run.status === status : true))
+      .filter((run) => (options.sourceId ? run.source_id === options.sourceId : true))
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
       .slice(0, limit);
   }
   const join = options.dataSpaceId ? "join sources s on s.id = r.source_id" : "";
@@ -176,6 +178,10 @@ export async function listSyncRuns(limit = 50, status?: SyncRunStatus, options: 
   if (options.dataSpaceId) {
     values.push(options.dataSpaceId);
     where.push(`s.data_space_id = $${values.length}`);
+  }
+  if (options.sourceId) {
+    values.push(options.sourceId);
+    where.push(`r.source_id = $${values.length}`);
   }
   values.push(limit);
   return queryRows<SyncRun>(

@@ -42,6 +42,7 @@ export function getPlatformNavItems(dataSpaceSlug = "moonarq"): DashboardNavItem
   if (dataSpaceSlug !== "moonarq") return social;
   return [
     { href: dashboardPath(dataSpaceSlug, "/platforms/ads"), label: "Meta Ads", icon: Megaphone },
+    { href: dashboardPath(dataSpaceSlug, "/platforms/chatgpt-ads"), label: "ChatGPT Ads", icon: Sparkles },
     { href: dashboardPath(dataSpaceSlug, "/platforms/website"), label: "Website", icon: Globe2 },
     { href: dashboardPath(dataSpaceSlug, "/platforms/shopify"), label: "Shopify", icon: ShoppingBag },
     { href: dashboardPath(dataSpaceSlug, "/platforms/etsy"), label: "Etsy", icon: Store },

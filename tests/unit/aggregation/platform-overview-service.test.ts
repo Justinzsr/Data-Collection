@@ -99,6 +99,69 @@ function adRow(metricKey: string, date: string, value: number, dimensions: JsonR
   });
 }
 
+function chatgptSource(patch: Partial<Source> = {}) {
+  return source("chatgpt_ads", {
+    external_account_id: "example-chatgpt-account",
+    account_name: "Example ChatGPT account",
+    ...patch,
+    metadata: { account_currency: "USD", account_timezone: "America/Los_Angeles", ...(patch.metadata ?? {}) },
+  });
+}
+
+function chatgptRow(key: string, value: number, patch: { unit?: string; dimensions?: JsonRecord; sourceId?: string } = {}) {
+  return row({
+    sourceTypeKey: "chatgpt_ads",
+    metricKey: `chatgpt_ads_${key}`,
+    date: "2026-04-22",
+    value,
+    unit: patch.unit ?? (key === "spend" ? "USD" : "count"),
+    sourceId: patch.sourceId,
+    dimensions: {
+      rollup: "account_daily", account_id: "example-chatgpt-account", account_currency: "USD", account_timezone: "America/Los_Angeles",
+      ...(key === "conversions" ? { attribution_time_basis: "ad_event_time", attribution_window_days: 30, view_through_attribution_window_days: 1, conversion_scope: "campaign_goals" } : {}),
+      ...patch.dimensions,
+    },
+  });
+}
+
+function chatgptCard(sources: Source[], rows: MetricDaily[]) {
+  return buildPlatformCards({
+    dataSpaceSlug: "test-space", sources, sumRows: rows, snapshotRows: [], range: overviewRange("7d", NOW), websiteOverview: null,
+  }).find((card) => card.key === "chatgpt_ads");
+}
+
+describe("ChatGPT Ads overview card scope", () => {
+  it("preserves fractional attributed goals and keeps the card absent without a source", () => {
+    expect(chatgptCard([], [])).toBeUndefined();
+    const card = chatgptCard([chatgptSource()], [chatgptRow("spend", 5), chatgptRow("clicks", 10), chatgptRow("conversions", 0.4)]);
+    expect(card?.unavailableReason).toBeNull();
+    expect(card?.primary).toMatchObject({ value: 5, unit: "USD" });
+    expect(card?.secondary.find((metric) => metric.key === "conversions")).toMatchObject({ value: 0.4, unit: "attributed_goal" });
+  });
+
+  it("does not present a single wrong-currency account report as known spend", () => {
+    const card = chatgptCard([chatgptSource()], [chatgptRow("spend", 5, { unit: "EUR", dimensions: { account_currency: "EUR" } })]);
+    expect(card?.primary.value).toBeNull();
+    expect(card?.unavailableReason).not.toBeNull();
+    expect(card?.sparkline.points).toEqual([]);
+  });
+
+  it("does not compare an account report from a different calendar against Pacific dates", () => {
+    const card = chatgptCard([chatgptSource()], [chatgptRow("spend", 5, { dimensions: { account_timezone: "UTC" } }), chatgptRow("clicks", 10, { dimensions: { account_timezone: "UTC" } })]);
+    expect(card?.primary.value).toBeNull();
+    expect(card?.secondary.every((metric) => metric.value === null)).toBe(true);
+    expect(card?.unavailableReason).not.toBeNull();
+  });
+
+  it("requires an explicit single account instead of choosing one of multiple ChatGPT sources", () => {
+    const card = chatgptCard([chatgptSource(), chatgptSource({ id: "other-chatgpt-source", external_account_id: "other-chatgpt-account" })], [chatgptRow("spend", 5), chatgptRow("clicks", 10)]);
+    expect(card?.source).toBeNull();
+    expect(card?.primary.value).toBeNull();
+    expect(card?.secondary.every((metric) => metric.value === null)).toBe(true);
+    expect(card?.unavailableReason).toContain("Multiple ChatGPT Ads sources");
+  });
+});
+
 describe("overview ranges", () => {
   it("compares complete days with the same-length previous window", () => {
     const range = overviewRange("7d", NOW);

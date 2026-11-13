@@ -33,6 +33,7 @@ async function insertEvent(input: {
   eventId?: string;
   sessionId?: string;
   clientContext?: unknown;
+  attributionContext?: unknown;
 }) {
   await query(
     `
@@ -45,7 +46,7 @@ async function insertEvent(input: {
         $1::uuid, $2::uuid, '1.0', 'first_party_tracker', $3::uuid,
         'aggregate-only-fixture', $7::text, $4::text,
         '/build', 'https://fixture.invalid/build', $5::jsonb,
-        '{}'::jsonb, '{"analytics":"granted","marketing":"denied"}'::jsonb,
+        $9::jsonb, '{"analytics":"granted","marketing":"denied"}'::jsonb,
         $8::jsonb,
         $6::timestamptz, $6::timestamptz + interval '1 second',
         $6::timestamptz + interval '1 second'
@@ -63,6 +64,7 @@ async function insertEvent(input: {
         device_category: "desktop",
         traffic_type: "production",
       }),
+      JSON.stringify(input.attributionContext ?? {}),
     ],
   );
 }
@@ -115,7 +117,12 @@ describe.skipIf(!enabled)("commerce funnel V2 PostgreSQL aggregate report", () =
       [shopifySourceId],
     );
 
-    await insertEvent({ eventName: "page_view", occurredAt: "2026-08-01T10:00:00.000Z", properties: {} });
+    await insertEvent({
+      eventName: "page_view",
+      occurredAt: "2026-08-01T10:00:00.000Z",
+      properties: {},
+      attributionContext: { utm: { source: " ChatGPT ", medium: " PAID " } },
+    });
     await insertEvent({
       eventName: "page_view",
       occurredAt: "2026-08-01T10:00:30.000Z",
@@ -272,8 +279,90 @@ describe.skipIf(!enabled)("commerce funnel V2 PostgreSQL aggregate report", () =
         bridgeMatchedOrders: 0,
         bridgeAmbiguousOrders: 1,
       });
+      const paidCohort = await getCommerceFunnelV2ReportAggregate({
+        dataSpaceId,
+        websiteSourceId,
+        shopifySourceId,
+        startAt: "2026-07-09T07:00:00.000Z",
+        endExclusive: "2026-08-08T07:00:00.000Z",
+        segment: "all",
+        utmSource: "chatgpt",
+        utmMedium: "paid",
+      });
+      expect(paidCohort).toMatchObject({ state: "ready", linkedOrdersPlaced: 0, money: [] });
     } finally {
       await query("delete from commerce_orders where id = $1::uuid", [replayOrderId]);
+    }
+  });
+
+  it("attributes only consistent first visits and their strict order bridges to ChatGPT paid traffic", async () => {
+    const sessions = ["late-paid-tags", "wrong-paid-medium", "conflicting-paid-first-visit", "fallback-paid-tags", "malformed-primary-tags", "blank-primary-tags"];
+    const organicCheckout = randomUUID();
+    const organicOrderId = randomUUID();
+    const time = (minute: number) => `2026-08-02T10:${String(minute).padStart(2, "0")}:00.000Z`;
+    const page = (sessionId: string, occurredAt: string, attributionContext: unknown) => insertEvent({
+      sessionId, occurredAt, eventName: "page_view", properties: {}, attributionContext,
+    });
+    try {
+      await page(sessions[0], time(0), { first_referrer: "https://chatgpt.com/" });
+      await page(sessions[0], time(1), { utm: { source: "chatgpt", medium: "paid" } });
+      const items = [{ item_id: "ready-fixture", item_name: "Ready-made fixture", item_category: "Bracelets", price: 9999, quantity: 1 }];
+      for (const [eventName, minute] of [["view_item", 2], ["add_to_cart", 3], ["begin_checkout", 4]] as const) {
+        await insertEvent({
+          eventName,
+          occurredAt: time(minute),
+          sessionId: sessions[0],
+          ...(eventName === "begin_checkout" ? { eventId: organicCheckout } : {}),
+          properties: { currency: "USD", value: 9999, items },
+        });
+      }
+      await query(`
+        insert into commerce_orders (
+          id, source_id, shopify_order_id_hash, occurred_at, test, cancelled_at,
+          currency_code, gross_sales, current_total, net_payment, total_refunded,
+          checkout_event_id_hash, checkout_bridge_state
+        ) values ($1::uuid, $2::uuid, $3::text, $4::timestamptz, false, null,
+          'USD', 9999, 9999, 9999, 0, $5::text, 'matched')
+      `, [organicOrderId, shopifySourceId, hash("organic-cohort-order"), time(5), hash(organicCheckout)]);
+      await page(sessions[1], time(10), { utm: { source: "chatgpt", medium: "organic" } });
+      await page(sessions[2], time(20), { utm: { source: "chatgpt", medium: "paid" } });
+      await page(sessions[2], time(20), { utm: { source: "instagram", medium: "paid" } });
+      await page(sessions[3], time(30), { utm: { utm_source: "CHATGPT", utm_medium: "PAID" } });
+      await page(sessions[4], time(40), { utm: { source: {}, utm_source: "CHATGPT", medium: 7, utm_medium: "PAID" } });
+      await page(sessions[5], time(50), { utm: { source: " ", utm_source: "CHATGPT", medium: "paid" } });
+
+      const report = await getCommerceFunnelV2ReportAggregate({
+        dataSpaceId,
+        websiteSourceId,
+        shopifySourceId,
+        startAt: "2026-07-09T07:00:00.000Z",
+        endExclusive: "2026-08-08T07:00:00.000Z",
+        segment: "all",
+        utmSource: "chatgpt",
+        utmMedium: "paid",
+      });
+      expect(report).toMatchObject({
+        state: "ready",
+        businessVisits: 2,
+        businessIntents: 1,
+        businessCarts: 1,
+        eligibleCheckoutEvents: 1,
+        linkedOrdersPlaced: 1,
+        eligibleShopifyOrders: null,
+        bridgeMissingOrders: null,
+        excludedBotSessions: 0,
+        excludedNonProductionSessions: 0,
+        money: [{ currency: "USD", orders: 1, grossSales: "120.30", netPayment: "120.30" }],
+      });
+      const unfiltered = await getCommerceFunnelV2ReportAggregate({
+        dataSpaceId, websiteSourceId, shopifySourceId,
+        startAt: "2026-07-09T07:00:00.000Z", endExclusive: "2026-08-08T07:00:00.000Z", segment: "all",
+      });
+      expect(unfiltered).toMatchObject({ businessVisits: 7, eligibleShopifyOrders: 2, linkedOrdersPlaced: 2 });
+      expect(JSON.stringify(report)).not.toContain("9999");
+    } finally {
+      await query("delete from commerce_orders where id = $1::uuid", [organicOrderId]);
+      await query("delete from web_events where source_id = $1::uuid and session_id = any($2::text[])", [websiteSourceId, sessions]);
     }
   });
 

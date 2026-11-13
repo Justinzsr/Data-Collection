@@ -8,6 +8,27 @@ MVP:
 - Instagram: official Meta Graph API OAuth and manual sync for isolated source-specific Instagram accounts.
 - TikTok: official TikTok Login Kit OAuth and API v2 sync for data-space-scoped TikTok sources.
 - Shopify: official Admin GraphQL API with a store-owned Dev Dashboard app and encrypted client credentials.
+- ChatGPT Ads: read-only official OpenAI Advertiser API for daily spend, impressions, clicks, campaign-goal conversions, and attributed order value.
+
+## ChatGPT Ads
+
+Create a source at `/w/moonarq/dashboard/sources/new?template=chatgpt_ads` using an official `https://ads.openai.com/` URL. The source stores the canonical Ads Manager origin without query parameters. Account identity comes from the official account API, not a URL query or an inferred account name.
+
+In the selected Ads Manager account, create an **Advertiser API key** under Settings and save it through the source's encrypted credential form. This is separate from an OpenAI model/API-platform key and from the ChatGPT Ads Manager plugin connection. A plugin connection does not grant the deployed DataHub server ongoing API access. Keep the key server-side; never paste real keys into documentation, chat, source metadata, URLs, or public environment variables. Ask the account owner before entering or moving a real credential.
+
+Use Test Connection and then Sync on the source detail page. The first successful report sync binds the source to the API-reported ad account; later syncs reject keys for a different account. An optional expected-account credential can also enforce identity before the first sync. Manual, initial, retry, and hourly scheduled syncs use the shared sync engine, lock lease, raw-payload hashes, and idempotent daily metric replacement. The connector only reads documented endpoints under `https://api.ads.openai.com/v1`; it does not scrape Ads Manager or change campaigns, bids, budgets, or advertising status.
+
+The stored facts are:
+
+- `chatgpt_ads_spend`, `chatgpt_ads_impressions`, and `chatgpt_ads_clicks` for daily delivery.
+- `chatgpt_ads_conversions`, `chatgpt_ads_click_through_conversions`, and `chatgpt_ads_view_through_conversions` for campaign-goal conversion reporting.
+- `chatgpt_ads_purchase_value` for reported `order_created_attributed_sales`, including goal and non-goal order conversions. Missing order values remain unreported.
+
+Spend is reported in the account currency's main units, not the micros used for campaign budgets. Attributed order value is also a decimal currency amount and keeps its separately reported currency. Attribution settings and account timezone remain in the stored dimensions and sync evidence. CTR, CPC, CPM, conversion rate, and ROAS are calculated from compatible aggregate numerators and denominators rather than by adding daily ratios. Platform conversion goals are not necessarily purchases, and platform-attributed order value does not replace Shopify's order, payment, or refund records.
+
+The existing Website Tracker can record `utm_source=chatgpt`, `utm_medium=paid`, and a stable campaign label without a platform whitelist. Include these tags on advertisement destinations so the first-party acquisition and commerce funnel can distinguish ChatGPT traffic. OpenAI platform attribution remains a separate reporting layer; aggregate ad clicks and conversions do not create a person-level Website-to-Shopify identity match. Promotion and credit data are outside this connector's scope.
+
+Official references: [Advertiser API overview](https://developers.openai.com/ads/api-overview), [Insights API](https://learn.chatgpt.com/ads/api-reference/insights), and [conversion reporting and attribution](https://learn.chatgpt.com/ads/reporting#conversion-reporting--attribution).
 
 ## Instagram Meta app profiles
 

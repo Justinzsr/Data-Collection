@@ -1,4 +1,6 @@
 import { ArrowRight } from "lucide-react";
+import { getChatgptAdsFunnelSnapshot } from "@/aggregation/services/chatgpt-ads-funnel-service";
+import { ChatgptAdsFunnel } from "@/presentation/dashboard/chatgpt-ads-funnel";
 import { notFound, redirect } from "next/navigation";
 import { WEBSITE_COMMERCE_FUNNEL_V2_UI_FLAG } from "@/aggregation/services/website-commerce-funnel-v2-service";
 import { getWebsiteFunnelOverview } from "@/aggregation/services/website-funnel-service";
@@ -86,6 +88,8 @@ export default async function WebsitePlatformPage({
   const source = resolvePrimaryWebsiteSource(sources);
   const health = platformHealth(source, currentTime());
   const v2Enabled = process.env[WEBSITE_COMMERCE_FUNNEL_V2_UI_FLAG]?.trim() === "true";
+  const hasChatgptAds = sources.some((candidate) => candidate.source_type_key === "chatgpt_ads" && candidate.status !== "disabled");
+  const chatgptAds = hasChatgptAds ? await getChatgptAdsFunnelSnapshot({ dataSpaceId: dataSpace.id, range: query.range, segment: query.segment }) : null;
 
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-[1600px] grid-cols-[minmax(0,1fr)] gap-4">
@@ -110,6 +114,7 @@ export default async function WebsitePlatformPage({
         <StorefrontConversionTrend overview={overview} query={query} basePath={websitePath} />
       </section>
       <StorefrontJourneys overview={overview} />
+      {chatgptAds ? <ChatgptAdsFunnel snapshot={chatgptAds} basePath={basePath} dataSpaceSlug={dataSpace.slug} /> : null}
       <StorefrontBreakdowns overview={overview} query={query} basePath={websitePath} />
       {v2Enabled ? (
         <WebsiteCommerceFunnelV2 dataSpaceSlug={dataSpace.slug} range={query.range} segment={query.segment} />

@@ -19,6 +19,7 @@ on:
       - "src/collection/connectors/shopify/**"
       - "src/collection/connectors/whatnot/**"
       - "src/collection/connectors/etsy/**"
+      - "src/collection/connectors/chatgpt-ads/**"
       - "src/collection/connectors/*/oauth*.ts"
       - "src/app/api/oauth/**"
       - "src/storage/auth/**"
@@ -30,6 +31,8 @@ on:
       - "src/collection/sync/engine.ts"
       - "src/aggregation/**/website-funnel*"
       - "src/aggregation/services/website-commerce-funnel-v2*"
+      - "src/aggregation/services/chatgpt-ads-funnel-service.ts"
+      - "src/aggregation/services/chatgpt-ads-funnel-types.ts"
       - "src/aggregation/services/outbound-analytics-exposure.ts"
       - "src/aggregation/services/source-data-explorer-service.ts"
       - "src/app/api/events/route.ts"
@@ -49,6 +52,7 @@ on:
       - "src/presentation/dashboard/website-business-pulse.tsx"
       - "src/presentation/dashboard/website-overview-controls.tsx"
       - "src/presentation/dashboard/website-commerce-funnel-v2.tsx"
+      - "src/presentation/dashboard/chatgpt-ads-funnel.tsx"
       - "src/presentation/dashboard/use-website-commerce-funnel-v2-data.ts"
       - "src/collection/tracking/website-display-privacy.ts"
       - "src/collection/tracking/website-event-contract.ts"
@@ -56,12 +60,14 @@ on:
       - "tests/unit/storage/commerce-*"
       - "tests/unit/aggregation/website-funnel*"
       - "tests/unit/aggregation/website-commerce-funnel-v2*"
+      - "tests/unit/aggregation/chatgpt-ads-funnel-service.test.ts"
       - "tests/unit/aggregation/source-data-explorer-exposure.test.ts"
       - "tests/unit/collection/commerce-*"
       - "tests/unit/collection/events-route-exposure.test.ts"
       - "tests/unit/collection/shopify-client-credentials-sync.test.ts"
       - "tests/unit/collection/whatnot-*"
       - "tests/unit/collection/etsy-*"
+      - "tests/unit/collection/chatgpt-ads-connector.test.ts"
       - "tests/unit/collection/*oauth*"
       - "tests/unit/storage/credential-*"
       - "tests/unit/collection/connector-detection.test.ts"
@@ -69,11 +75,13 @@ on:
       - "tests/unit/aggregation/etsy-*"
       - "tests/unit/fixtures/**"
       - "tests/unit/presentation/**"
+      - "tests/unit/presentation/chatgpt-ads-funnel.test.tsx"
       - "e2e/*.ts"
       - "docs/metric-definitions.md"
       - "docs/website-funnel-overview-v1.md"
       - "docs/platform-overview.md"
       - "docs/website-commerce-funnel-v2.md"
+      - "docs/chatgpt-ads-funnel.md"
       - "docs/website-event-contract-v1.md"
 
 permissions:
@@ -275,7 +283,7 @@ jobs:
 
   playwright:
     name: Playwright
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
       PLAYWRIGHT_REUSE_SERVER: "false"

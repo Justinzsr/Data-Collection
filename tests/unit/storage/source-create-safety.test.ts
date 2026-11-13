@@ -90,6 +90,48 @@ describe("source creation safety", () => {
     expect(body.source.metadata.allowed_origins).toEqual(["https://example.com"]);
   });
 
+  it("creates ChatGPT Ads with canonical configuration and requires encrypted credentials before sync", async () => {
+    const response = await createSourceRoute(request({
+      data_space_slug: "moonarq",
+      source_type_key: "chatgpt_ads",
+      display_name: "ChatGPT Ads test source",
+      input_url: "https://ads.openai.com/overview?act=example-account&api_key=not-a-real-key#details",
+      normalized_url: "https://attacker.example/",
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.source).toMatchObject({
+      source_type_key: "chatgpt_ads",
+      status: "needs_credentials",
+      sync_mode: "hourly",
+      input_url: "https://ads.openai.com/",
+      normalized_url: "https://ads.openai.com/",
+      external_account_id: null,
+      supports_webhook: false,
+    });
+    expect(JSON.stringify(body)).not.toContain("not-a-real-key");
+    expect(getDemoStore().credentials).toHaveLength(0);
+  });
+
+  it("rejects nonofficial ChatGPT Ads URLs and unsupported webhook sync", async () => {
+    const before = getDemoStore().sources.length;
+    for (const inputUrl of [undefined, "https://attacker.example/", "http://ads.openai.com/"]) {
+      const response = await createSourceRoute(request({
+        source_type_key: "chatgpt_ads",
+        input_url: inputUrl,
+      }));
+      expect(response.status).toBe(400);
+    }
+    const webhook = await createSourceRoute(request({
+      source_type_key: "chatgpt_ads",
+      input_url: "https://ads.openai.com/",
+      sync_mode: "webhook",
+    }));
+    expect(webhook.status).toBe(400);
+    expect(getDemoStore().sources).toHaveLength(before);
+  });
+
   it("atomically creates a database-backed Website Tracker as healthy", async () => {
     vi.stubEnv("DATABASE_URL", "postgresql://localhost/moonarq_source_lifecycle_test");
     const logged = [

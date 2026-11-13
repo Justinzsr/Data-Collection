@@ -190,9 +190,66 @@ describe("commerce funnel V2 aggregate-only query", () => {
         INPUT.startAt,
         INPUT.endExclusive,
         INPUT.segment,
+        null,
+        null,
       ],
       transactionClient,
     );
+  });
+
+  it("normalizes acquisition filters as parameters and withholds unassignable order diagnostics", async () => {
+    const result = await getCommerceFunnelV2ReportAggregate({
+      ...INPUT,
+      utmSource: "  ChatGPT ",
+      utmMedium: " PAID ",
+    });
+
+    expect(queryRowsMock).toHaveBeenCalledWith(
+      COMMERCE_FUNNEL_V2_REPORT_SQL,
+      [INPUT.dataSpaceId, INPUT.websiteSourceId, INPUT.shopifySourceId, INPUT.startAt, INPUT.endExclusive, INPUT.segment, "chatgpt", "paid"],
+      transactionClient,
+    );
+    expect(result).toMatchObject({
+      state: "ready",
+      businessVisits: 15,
+      eligibleCheckoutEvents: 12,
+      linkedOrdersPlaced: 6,
+      bridgeMatchedOrders: 6,
+      eligibleShopifyOrders: null,
+      bridgeMissingOrders: null,
+      bridgeInvalidOrders: null,
+      bridgeAmbiguousOrders: null,
+      preCoverageOrders: null,
+      money: [expect.objectContaining({ currency: "USD", netPayment: "780.25" })],
+    });
+    expect(result.reason).toContain("Orders without a usable bridge cannot be assigned to this channel");
+  });
+
+  it("limits acquisition to consistent first valid page views and keeps bridge replay detection source-wide", () => {
+    const sql = compactSql(COMMERCE_FUNNEL_V2_REPORT_SQL);
+    const firstVisits = sql.slice(sql.indexOf("first_visit_times as materialized"), sql.indexOf("traffic_sessions as materialized"));
+    expect(firstVisits).toContain("from valid_events where event_name = 'page_view'");
+    expect(firstVisits).toContain("visit.visit_at = event.occurred_at");
+    expect(firstVisits).toContain("bool_and((utm_source = $7::text) is true)");
+    expect(firstVisits).toContain("bool_and((utm_medium = $8::text) is true)");
+    expect(firstVisits).toContain("'{utm,utm_source}'");
+    expect(firstVisits).toContain("'{utm,utm_medium}'");
+    expect(firstVisits).toContain("event.attribution_context #> '{utm,source}' <> 'null'::jsonb then event.attribution_context #> '{utm,source}'");
+    expect(firstVisits).toContain("case when jsonb_typeof(raw_utm_source) = 'string' then raw_utm_source #>> '{}'");
+    expect(COMMERCE_FUNNEL_V2_REPORT_SQL).toContain(String.raw`U&'\0009\000A\000B`);
+    expect(firstVisits).not.toContain("referrer");
+    const orderScope = sql.slice(sql.indexOf("orders_in_range as materialized"), sql.indexOf("eligible_orders as materialized"));
+    expect(orderScope).toContain("from sequenced_checkout_candidates checkout");
+    expect(orderScope).toContain("checkout.checkout_event_id_hash = commerce_order.checkout_event_id_hash");
+    const replayScope = sql.slice(sql.indexOf("bridge_hash_cardinality as materialized"), sql.indexOf("unique_bridge_orders as materialized"));
+    expect(replayScope).toContain("from commerce_orders commerce_order");
+    expect(replayScope).not.toContain("acquisition_sessions");
+    expect(replayScope).not.toContain("eligible_orders");
+  });
+
+  it.each(["", " ", "a".repeat(257)])("rejects invalid acquisition filters before reading aggregates: %s", async (value) => {
+    await expect(getCommerceFunnelV2ReportAggregate({ ...INPUT, utmSource: value })).rejects.toThrow("acquisition filter is invalid");
+    expect(queryRowsMock).not.toHaveBeenCalled();
   });
 
   it("fails closed for builder scope because V1 builder cart-to-checkout continuity is unproven", async () => {

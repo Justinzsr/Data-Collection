@@ -29,6 +29,7 @@ const createSourceSchema = z.strictObject({
     "shopify",
     "tiktok",
     "instagram",
+    "chatgpt_ads",
     "xiaohongshu",
     "facebook_page",
     "etsy",
@@ -98,6 +99,15 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    const chatgptAdsDetection = connector.key === "chatgpt_ads" && body.input_url
+      ? connector.detect(body.input_url)
+      : null;
+    if (connector.key === "chatgpt_ads" && !chatgptAdsDetection) {
+      return Response.json(
+        { error: "ChatGPT Ads sources require an official https://ads.openai.com URL." },
+        { status: 400 },
+      );
+    }
     const websiteDetection = connector.key === "website" && body.input_url
       ? connector.detect(body.input_url)
       : null;
@@ -122,8 +132,8 @@ export async function POST(request: Request) {
       data_space_id: dataSpace.id,
       source_type_key: connector.key,
       display_name: body.display_name ?? connector.displayName,
-      input_url: body.input_url ?? null,
-      normalized_url: shopifyDetection?.normalizedUrl ?? websiteDetection?.normalizedUrl ?? body.normalized_url ?? null,
+      input_url: chatgptAdsDetection?.normalizedUrl ?? body.input_url ?? null,
+      normalized_url: shopifyDetection?.normalizedUrl ?? chatgptAdsDetection?.normalizedUrl ?? websiteDetection?.normalizedUrl ?? body.normalized_url ?? null,
       external_account_id: shopifyDetection?.externalAccountId ?? body.external_account_id ?? null,
       account_name: shopifyDetection?.accountName ?? body.account_name ?? null,
       sync_mode: syncMode,

@@ -47,6 +47,7 @@ export function formatRatio(value: number) {
 /** Short labels for chart axes: whole currency amounts and compact thousands ("$1.2K", "4.5K"). */
 export function formatAxisValue(value: number, unit: string) {
   if (!Number.isFinite(value)) return "";
+  if (unit === "attributed_goal") return new Intl.NumberFormat("en-US", { maximumSignificantDigits: 6 }).format(value);
   if (unit === "percent") return `${Number(value.toFixed(1))}%`;
   if (unit === "ratio") return `${Number(value.toFixed(1))}×`;
   const options: Intl.NumberFormatOptions = {
@@ -67,6 +68,8 @@ export function formatAxisValue(value: number, unit: string) {
 /** Formats a metric value by unit; null renders as an em dash (unavailable, never zero). */
 export function formatMetricValue(value: number | null, unit: string, options: { compact?: boolean } = {}) {
   if (value === null || !Number.isFinite(value)) return "—";
+  // Goal attribution can be fractional; integer count formatting would turn 0.4 into a misleading zero.
+  if (unit === "attributed_goal") return new Intl.NumberFormat("en-US", { maximumSignificantDigits: 12 }).format(value);
   if (unit === "percent") return formatPercent(value);
   if (unit === "ratio") return formatRatio(value);
   if (isCurrencyUnit(unit)) return formatCurrency(value, unit, options);
