@@ -198,11 +198,23 @@ describe("ChatGPT Ads to website and Shopify funnel", () => {
     const deps = dependencies();
     const result = await getChatgptAdsFunnelSnapshot(INPUT, deps);
     expect(deps.loadWebsite).toHaveBeenCalledWith(expect.objectContaining({ dataSpaceId: INPUT.dataSpaceId, range: "7d", utmSource: "chatgpt", utmMedium: "paid", comparison: "off" }));
-    expect(deps.loadCommerce).toHaveBeenCalledWith(expect.objectContaining({ dataSpaceId: INPUT.dataSpaceId, range: "7d", utmSource: "chatgpt", utmMedium: "paid" }), { now: NOW });
+    expect(deps.loadCommerce).toHaveBeenCalledWith(expect.objectContaining({ dataSpaceId: INPUT.dataSpaceId, range: "7d", utmSource: "chatgpt", utmMedium: "paid" }), expect.objectContaining({ now: NOW, loadWebsiteOverview: expect.any(Function) }));
     expect(result.connection.state).toBe("live");
     expect(result.website.stages.map((stage) => stage.count)).toEqual([100, 50, 20, 10, 3]);
     expect(result.website.visitToOrderRatePercent).toBe(3);
     expect(result.website.checkoutToOrderRatePercent).toBe(30);
+  });
+
+  it("reuses the same cohort report for deterministic commerce instead of querying it twice", async () => {
+    const deps = dependencies();
+    const loadCommerce = vi.fn<typeof getWebsiteCommerceFunnelV2Snapshot>(async (_input, dependencies) => {
+      const website = await dependencies!.loadWebsiteOverview!({ dataSpaceId: INPUT.dataSpaceId });
+      expect(website).toBe(await deps.loadWebsite.mock.results[0].value);
+      return measuredCommerce();
+    });
+    await getChatgptAdsFunnelSnapshot(INPUT, { ...deps, loadCommerce });
+    expect(deps.loadWebsite).toHaveBeenCalledTimes(1);
+    expect(loadCommerce).toHaveBeenCalledTimes(1);
   });
 
   it("does not turn a missing Shopify measurement into zero orders or reuse platform conversions as orders", async () => {
