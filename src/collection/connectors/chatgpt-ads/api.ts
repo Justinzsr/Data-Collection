@@ -208,6 +208,7 @@ export async function fetchChatgptAdsInsights(
   endDate: string,
 ): Promise<ChatgptAdsInsightRow[]> {
   const query = new URLSearchParams({ aggregation_level: "ad_account", time_granularity: "daily", limit: "2000" });
+  query.append("includes[]", "zero_impression_items");
   query.append("time_ranges[]", dateRange(startDate, endDate, account.timezone));
   for (const field of ["metadata.readable_time", "metadata.timezone", "ad_account.id", "ad_account.impressions", "ad_account.clicks", "ad_account.spend"]) {
     query.append("fields[]", field);

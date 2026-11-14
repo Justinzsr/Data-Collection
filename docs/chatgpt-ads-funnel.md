@@ -12,6 +12,9 @@ manual, retry and scheduled syncs use the shared engine's source lease, raw
 payload hashes and idempotent daily-window replacement. A 30-day overlapping
 lookback lets delayed spend and attribution be updated. An empty successful
 report does not fabricate daily zeros; failed reports retain the previous data.
+Unsegmented account/day delivery requests include `zero_impression_items` so
+OpenAI can return explicit zero-delivery rows. Those reported zeros are stored;
+missing rows and null or absent metric fields remain unknown.
 
 ## Performance
 

@@ -147,7 +147,29 @@ describe("ChatGPT Ads read-only reports", () => {
     expect(requests[0].url.searchParams.getAll("fields[]")).toContain("ad_account.spend");
     expect(JSON.parse(requests[0].url.searchParams.get("time_ranges[]")!)).toEqual({ type: "date_range", since: "2026-11-12", until: "2026-11-13", timezone: account.timezone });
     expect(requests[1].url.searchParams.get("after")).toBe("cursor-one");
+    expect(requests.every(({ url }) => url.searchParams.getAll("includes[]").join() === "zero_impression_items"
+      && !url.searchParams.has("segments[]"))).toBe(true);
     expect(requests.every(({ url, init }) => !url.toString().includes(API_KEY) && init?.method === "GET")).toBe(true);
+  });
+
+  it("requests official zero-delivery rows and normalizes explicit zeros without filling null or absent metrics", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: URL) => response({
+      object: "list",
+      data: input.searchParams.getAll("includes[]").includes("zero_impression_items") ? [
+        { readable_time: "2026-11-12", ad_account_id: account.id, impressions: 0, clicks: "0", spend: "0" },
+        { readable_time: "2026-11-13", ad_account_id: account.id, impressions: null, spend: null },
+      ] : [],
+      has_more: false,
+      last_id: null,
+    })));
+    const insights = await fetchChatgptAdsInsights(API_KEY, account, "2026-11-12", "2026-11-13");
+    const result = await normalize(snapshot({ insights, conversions: [] }));
+    expect(result.metrics).toHaveLength(3);
+    expect(result.metrics.map(({ date, metricKey, metricValue, unit, dimensions }) => ({ date, metricKey, metricValue, unit, dimensions }))).toEqual([
+      { date: "2026-11-12", metricKey: "chatgpt_ads_clicks", metricValue: 0, unit: "count", dimensions: expect.objectContaining({ account_id: account.id, rollup: "account_daily" }) },
+      { date: "2026-11-12", metricKey: "chatgpt_ads_impressions", metricValue: 0, unit: "count", dimensions: expect.objectContaining({ account_id: account.id, rollup: "account_daily" }) },
+      { date: "2026-11-12", metricKey: "chatgpt_ads_spend", metricValue: 0, unit: "USD", dimensions: expect.objectContaining({ account_id: account.id, rollup: "account_daily" }) },
+    ]);
   });
 
   it("fails incomplete/repeated pagination rather than returning a truncated report", async () => {
