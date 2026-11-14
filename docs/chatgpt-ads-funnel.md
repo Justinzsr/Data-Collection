@@ -15,6 +15,14 @@ report does not fabricate daily zeros; failed reports retain the previous data.
 Unsegmented account/day delivery requests include `zero_impression_items` so
 OpenAI can return explicit zero-delivery rows. Those reported zeros are stored;
 missing rows and null or absent metric fields remain unknown.
+Some observed zero-delivery rows label their timezone as UTC while their epoch
+boundaries cover the verified account's local day. A limited compatibility check
+accepts these only when the row account matches, every supplied delivery metric
+is explicitly zero, and integer epoch boundaries are local midnight to exactly
+the next calendar midnight with a matching readable date (including DST).
+Raw metadata is retained; nonzero or incomplete conflicting-timezone rows still
+fail closed. This is a workaround for an observed API metadata inconsistency,
+not a guarantee that UTC labels may generally be ignored.
 
 ## Performance
 

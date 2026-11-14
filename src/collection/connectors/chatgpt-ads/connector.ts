@@ -13,6 +13,7 @@ import {
   isChatgptAdsSyncSnapshot,
   sanitizeChatgptAdsErrorMessage,
   type ChatgptAdsAccount,
+  type ChatgptAdsInsightRow,
   type ChatgptAdsSyncSnapshot,
 } from "@/collection/connectors/chatgpt-ads/api";
 import type { JsonRecord, Source } from "@/storage/db/schema";
@@ -47,6 +48,37 @@ export function chatgptAdsMetricWindow(credentials: Record<string, string>, time
   return { startDate: start.toISOString().slice(0, 10), endDate };
 }
 
+/** Limited compatibility for observed zero-row UTC metadata, not a timezone override. */
+function isVerifiedAccountDayZeroRow(row: ChatgptAdsInsightRow, account: ChatgptAdsAccount) {
+  if (row.timezone !== "UTC" || row.ad_account_id !== account.id || !isChatgptAdsDate(row.readable_time)) return false;
+  for (const values of [[row.spend, row.ad_account_spend], [row.clicks, row.ad_account_clicks], [row.impressions, row.ad_account_impressions]]) {
+    const present = values.filter((value) => value !== undefined);
+    if (!present.length || present.some((value) => chatgptAdsNumber(value) !== 0)) return false;
+  }
+  if (typeof row.start_time !== "number" || typeof row.end_time !== "number"
+    || !Number.isSafeInteger(row.start_time) || !Number.isSafeInteger(row.end_time)
+    || row.end_time <= row.start_time) return false;
+  const start = new Date(row.start_time * 1_000);
+  const end = new Date(row.end_time * 1_000);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return false;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: account.timezone, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    });
+    const boundaryDate = (value: Date) => {
+      const parts = Object.fromEntries(formatter.formatToParts(value).map((part) => [part.type, part.value]));
+      return parts.hour === "00" && parts.minute === "00" && parts.second === "00"
+        ? `${parts.year}-${parts.month}-${parts.day}` : null;
+    };
+    const nextDay = new Date(`${row.readable_time}T00:00:00.000Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    return boundaryDate(start) === row.readable_time && boundaryDate(end) === nextDay.toISOString().slice(0, 10);
+  } catch {
+    return false;
+  }
+}
+
 function normalizeSnapshot(snapshot: ChatgptAdsSyncSnapshot, source: Source) {
   const metrics: NormalizedMetric[] = [];
   const dailyMetricKeys = new Set<string>();
@@ -70,7 +102,9 @@ function normalizeSnapshot(snapshot: ChatgptAdsSyncSnapshot, source: Source) {
   }
   for (const row of snapshot.insights) {
     if (row.ad_account_id && row.ad_account_id !== snapshot.account.id) throw new Error("ChatGPT Ads insights returned a different account.");
-    if (row.timezone && row.timezone !== snapshot.account.timezone) throw new Error("ChatGPT Ads insights returned a different account time zone.");
+    if (row.timezone && row.timezone !== snapshot.account.timezone && !isVerifiedAccountDayZeroRow(row, snapshot.account)) {
+      throw new Error("ChatGPT Ads insights returned a different account time zone.");
+    }
     const date = isChatgptAdsDate(row.readable_time)
       ? row.readable_time
       : typeof row.start_time === "number" && Number.isFinite(row.start_time)

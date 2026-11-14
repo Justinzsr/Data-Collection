@@ -7,6 +7,7 @@ import {
   fetchChatgptAdsInsights,
   hashChatgptAdsSnapshot,
   type ChatgptAdsAccount,
+  type ChatgptAdsInsightRow,
   type ChatgptAdsSyncSnapshot,
 } from "@/collection/connectors/chatgpt-ads/api";
 import { CHATGPT_ADS_METRIC_KEYS, chatgptAdsConnector, chatgptAdsMetricWindow } from "@/collection/connectors/chatgpt-ads/connector";
@@ -69,6 +70,11 @@ function snapshot(overrides: Partial<ChatgptAdsSyncSnapshot> = {}): ChatgptAdsSy
 
 async function normalize(data: ChatgptAdsSyncSnapshot) {
   return chatgptAdsConnector.normalize([{ fetchedAt: data.fetchedAt, payload: data as unknown as JsonRecord }], source());
+}
+
+function utcZeroRow(overrides: Partial<ChatgptAdsInsightRow> = {}): ChatgptAdsInsightRow {
+  return { readable_time: "2026-11-13", start_time: 1794556800, end_time: 1794643200,
+    timezone: "UTC", ad_account_id: account.id, spend: "0", clicks: "0", impressions: "0", ...overrides };
 }
 
 afterEach(() => {
@@ -310,6 +316,55 @@ describe("ChatGPT Ads normalization and measurement integrity", () => {
     expect(result.metrics).toHaveLength(3);
     expect(result.metrics.every((metric) => metric.date === "2026-11-13")).toBe(true);
     expect(result.metrics.find((metric) => metric.metricKey === "chatgpt_ads_spend")?.metricValue).toBe(20.25);
+  });
+
+  it.each([
+    ["2026-11-13", "2026-11-13T08:00:00Z", "2026-11-14T08:00:00Z", 24],
+    ["2026-11-01", "2026-11-01T07:00:00Z", "2026-11-02T08:00:00Z", 25],
+    ["2026-03-08", "2026-03-08T08:00:00Z", "2026-03-09T07:00:00Z", 23],
+  ])("accepts only validated account-local UTC-labelled zero rows for %s (%s to %s)", async (date, start, end, hours) => {
+    const row = utcZeroRow({ readable_time: String(date), start_time: Date.parse(String(start)) / 1_000, end_time: Date.parse(String(end)) / 1_000 });
+    expect(row.end_time! - row.start_time!).toBe(Number(hours) * 3_600);
+    const result = await normalize(snapshot({ insights: [row], conversions: [], windowStartDate: String(date), windowEndDate: String(date) }));
+    expect(result.metrics).toHaveLength(3);
+    expect(result.metrics.every((metric) => metric.date === date && metric.metricValue === 0
+      && metric.dimensions?.account_timezone === account.timezone)).toBe(true);
+    expect(row.timezone).toBe("UTC");
+  });
+
+  it("accepts explicit prefixed zeros without changing normal metric precedence", async () => {
+    const result = await normalize(snapshot({ insights: [utcZeroRow({ spend: undefined, clicks: undefined, impressions: undefined,
+      ad_account_spend: "0", ad_account_clicks: 0, ad_account_impressions: "0" })], conversions: [] }));
+    expect(result.metrics).toHaveLength(3);
+    expect(result.metrics.every((metric) => metric.metricValue === 0 && metric.date === "2026-11-13")).toBe(true);
+  });
+
+  it.each([
+    ["actual UTC-midnight bucket", { start_time: Date.parse("2026-11-13T00:00:00Z") / 1_000, end_time: Date.parse("2026-11-14T00:00:00Z") / 1_000 }],
+    ["wrong readable date", { readable_time: "2026-11-12" }],
+    ["missing readable date", { readable_time: undefined }],
+    ["multi-day bucket", { end_time: 1794729600 }],
+    ["missing start", { start_time: undefined }], ["missing end", { end_time: undefined }],
+    ["fractional start", { start_time: 1794556800.5 }], ["fractional end", { end_time: 1794643200.5 }],
+    ["non-numeric epoch", { start_time: "1794556800" }], ["out-of-range epoch", { end_time: Number.MAX_SAFE_INTEGER }],
+    ["reversed range", { end_time: 1794470400 }], ["non-midnight end", { end_time: 1794643199 }],
+    ["fall DST forced to 24 hours", { readable_time: "2026-11-01", start_time: Date.parse("2026-11-01T07:00:00Z") / 1_000, end_time: Date.parse("2026-11-02T07:00:00Z") / 1_000 }],
+    ["other timezone label", { timezone: "Etc/UTC" }],
+    ["nonzero spend", { spend: "0.01" }], ["nonzero clicks", { clicks: 1 }], ["nonzero impressions", { impressions: 1 }],
+    ["missing metric", { spend: undefined }], ["null metric", { spend: null }],
+    ["blank metric", { clicks: "" }], ["boolean metric", { impressions: false }],
+    ["missing account ID", { ad_account_id: undefined }],
+    ["flat-zero/prefixed-positive conflict", { ad_account_spend: 1 }],
+    ["flat-zero/prefixed-null conflict", { ad_account_clicks: null }],
+    ["flat-null/prefixed-zero conflict", { spend: null, ad_account_spend: 0 }],
+  ])("rejects UTC zero-row exception for %s", async (_label, overrides) => {
+    await expect(normalize(snapshot({ insights: [utcZeroRow(overrides as Partial<ChatgptAdsInsightRow>)], conversions: [] })))
+      .rejects.toThrow("different account time zone");
+  });
+
+  it("still rejects the wrong account and ordinary nonzero timezone mismatches", async () => {
+    await expect(normalize(snapshot({ insights: [utcZeroRow({ ad_account_id: "adacct_other" })] }))).rejects.toThrow("different account");
+    await expect(normalize(snapshot({ insights: [{ ...snapshot().insights[0], timezone: "UTC" }] }))).rejects.toThrow("different account time zone");
   });
 
   it("rejects duplicate daily rows, dates outside the window and mismatched accounts", async () => {
