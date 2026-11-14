@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatgptAdsFunnelSnapshot } from "@/aggregation/services/chatgpt-ads-funnel-types";
 import { ChatgptAdsFunnel } from "@/presentation/dashboard/chatgpt-ads-funnel";
+import { DailyMetricChart } from "@/presentation/charts/daily-metric-chart";
 import { formatAxisValue, formatMetricValue } from "@/presentation/components/ui/format";
 
 vi.mock("@/presentation/dashboard/sync-action-button", () => ({ SyncActionButton: () => null }));
@@ -20,6 +21,27 @@ function snapshot(): ChatgptAdsFunnelSnapshot {
 }
 
 describe("ChatGPT Ads reporting presentation", () => {
+  it.each([
+    { name: "reported zeros", values: [0, 0], message: "All reported values are 0." },
+    { name: "zeros mixed with missing days", values: [null, 0, null], message: "All reported values are 0." },
+    { name: "missing days only", values: [null, null], message: "No values in this period yet." },
+    { name: "empty period", values: [], message: "No values in this period yet." },
+  ])("distinguishes $name in the daily chart status", ({ values, message }) => {
+    const html = renderToStaticMarkup(<DailyMetricChart title="Daily ad spend" unit="USD" color="var(--tint)"
+      data={values.map((value, index) => ({ date: `2026-11-${String(index + 1).padStart(2, "0")}`, value }))} />);
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    expect(root.querySelector('[role="status"]')?.textContent).toBe(message);
+    if (values.some((value) => value === null)) expect(html).toContain("No data");
+  });
+
+  it("keeps the existing zero-valued multi-point line chart instead of replacing it with a placeholder", () => {
+    const html = renderToStaticMarkup(<DailyMetricChart title="Daily level" unit="count" color="var(--tint)" kind="line"
+      data={[{ date: "2026-11-12", value: 0 }, { date: "2026-11-13", value: 0 }]} />);
+    expect(html).not.toContain("All reported values are 0.");
+    expect(html).not.toContain("No values in this period yet.");
+  });
+
   it("preserves fractional goal attribution in totals, chart values, and small axis values", () => {
     expect(formatMetricValue(0.4, "attributed_goal")).toBe("0.4");
     expect(formatMetricValue(0.0000001, "attributed_goal")).not.toBe("0");
