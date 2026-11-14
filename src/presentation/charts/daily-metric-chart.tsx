@@ -92,7 +92,7 @@ export function DailyMetricChart({
           </ResponsiveContainer>
         ) : (
           <div className="grid h-full place-items-center px-4 text-center" role="status">
-            <p className="text-sm text-label-secondary">No values in this period yet.</p>
+            <p className="text-sm text-label-secondary">{known.length > 0 ? "All reported values are 0." : "No values in this period yet."}</p>
           </div>
         )}
       </div>
