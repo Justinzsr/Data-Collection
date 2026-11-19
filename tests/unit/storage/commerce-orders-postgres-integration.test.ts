@@ -40,6 +40,7 @@ vi.mock("@/storage/repositories/platform-change-events-repository", async (impor
       return { inserted: result.inserted ? 1 : 0 };
     },
   };
+
 });
 
 const enabled = process.env.RUN_COMMERCE_ORDERS_POSTGRES_TEST === "true";
@@ -534,6 +535,56 @@ describe.skipIf(!enabled)("Commerce order PostgreSQL facts", () => {
         await query(`delete from ${table} where source_id = $1`, [atomicSourceId]);
       }
       await query("delete from sources where id = $1", [atomicSourceId]);
+    }
+  });
+  it("rolls back a non-commerce snapshot batch when a later fact fails", async () => {
+    const historySourceId = randomUUID();
+    const connectorIndex = connectorRegistry.findIndex((connector) => connector.key === "shopify");
+    const originalConnector = connectorRegistry[connectorIndex];
+    if (!originalConnector) throw new Error("The snapshot connector fixture was not found.");
+    const functionName = "test_raise_history_snapshot_failure";
+    const triggerName = "test_history_snapshot_failure";
+    try {
+      connectorRegistry[connectorIndex] = {
+        ...originalConnector,
+        requiredFields: [],
+        async sync() {
+          return { rawPayloads: [], recordsFetched: 0, message: "Synthetic snapshot transaction probe." };
+        },
+        async normalize(_raw, source) {
+          return {
+            metrics: [{ date: ATOMIC_DATE, sourceId: source.id, sourceTypeKey: "shopify", metricKey: "net_payment", metricValue: 9, unit: "USD", dimensions: { rollup: "history_daily_probe" } }],
+            replaceMetricWindow: { metricKeys: ["net_payment"], startDate: ATOMIC_DATE, endDate: ATOMIC_DATE },
+            snapshotMetrics: ["marker", "fail"].map((stage) => ({
+              date: ATOMIC_DATE, sourceId: source.id, sourceTypeKey: "shopify" as const,
+              metricKey: "orders", metricValue: 1, unit: "count",
+              dimensions: { rollup: "history_transaction_probe", snapshot_probe: stage },
+            })),
+          };
+        },
+      };
+      await query("insert into sources (id, data_space_id, source_type_key, display_name, status, sync_mode) values ($1, $2, 'shopify', 'Snapshot transaction fixture', 'healthy', 'manual')", [historySourceId, dataSpaceId]);
+      await upsertMetrics([{ date: ATOMIC_DATE, sourceId: historySourceId, sourceTypeKey: "shopify", metricKey: "net_payment", metricValue: 5, unit: "USD", dimensions: { rollup: "history_daily_probe" } }]);
+      await query(`create function ${functionName}() returns trigger language plpgsql as $function$ begin if new.source_id = '${historySourceId}'::uuid and new.dimensions->>'snapshot_probe' = 'fail' then raise exception 'Injected snapshot batch failure.'; end if; return new; end; $function$`);
+      await query(`create trigger ${triggerName} before insert or update on metrics_daily for each row execute function ${functionName}()`);
+      const failed = await enqueueSyncRun({ sourceId: historySourceId, trigger: "manual" });
+      expect(failed.status).toBe("error");
+      expect(await queryRows("select count(*)::int as count from metrics_daily where source_id = $1 and metric_key = 'orders'", [historySourceId])).toEqual([{ count: 0 }]);
+      expect(await queryRows("select metric_value::float8 as value from metrics_daily where source_id = $1 and metric_key = 'net_payment'", [historySourceId])).toEqual([{ value: 5 }]);
+      expect(await queryRows("select count(*)::int as count from source_locks where source_id = $1", [historySourceId])).toEqual([{ count: 0 }]);
+      await query(`drop trigger ${triggerName} on metrics_daily`);
+      await query(`drop function ${functionName}()`);
+      expect((await enqueueSyncRun({ sourceId: historySourceId, trigger: "manual" })).status).toBe("success");
+      expect(await queryRows("select count(*)::int as count from metrics_daily where source_id = $1 and metric_key = 'orders'", [historySourceId])).toEqual([{ count: 2 }]);
+      expect(await queryRows("select metric_value::float8 as value from metrics_daily where source_id = $1 and metric_key = 'net_payment'", [historySourceId])).toEqual([{ value: 9 }]);
+    } finally {
+      connectorRegistry[connectorIndex] = originalConnector;
+      await query(`drop trigger if exists ${triggerName} on metrics_daily`);
+      await query(`drop function if exists ${functionName}()`);
+      for (const table of ["metrics_daily", "connector_events", "source_locks", "sync_runs"]) {
+        await query(`delete from ${table} where source_id = $1`, [historySourceId]);
+      }
+      await query("delete from sources where id = $1", [historySourceId]);
     }
   });
 });

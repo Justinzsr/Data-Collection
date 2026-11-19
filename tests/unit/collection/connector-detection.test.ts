@@ -156,7 +156,11 @@ describe("connector detection", () => {
     expect(connector.requiredFields).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "chatgpt_ads_api_key", required: true, secret: true }),
     ]));
-    expect(sourceType?.supported_metrics).toHaveLength(7);
+    expect(sourceType?.supported_metrics).toEqual(expect.arrayContaining([
+      "chatgpt_ads_spend", "chatgpt_ads_impressions", "chatgpt_ads_clicks",
+      "chatgpt_ads_history_campaign_count", "chatgpt_ads_history_spend",
+      "chatgpt_ads_history_impressions", "chatgpt_ads_history_clicks",
+    ]));
     expect(sourceType?.supported_metrics.some((key) => /promotion|credit|cpc|cpm|ctr|roas|cvr/u.test(key))).toBe(false);
     expect(getInitialSourceStatus(connector, true)).toBe("needs_credentials");
   });

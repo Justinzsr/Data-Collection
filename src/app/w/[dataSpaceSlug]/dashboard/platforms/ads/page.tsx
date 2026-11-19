@@ -1,5 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
+import { getAdsCampaignHistory } from "@/aggregation/services/ads-campaign-history-service";
 import { getInstagramPaidAdsSummary } from "@/aggregation/services/meta-ads-attribution-service";
 import { getPaidAdsOverview, overviewRange, type OverviewMetric } from "@/aggregation/services/platform-overview-service";
 import type { DateRangeKey } from "@/aggregation/services/summary-service";
@@ -13,6 +15,7 @@ import { currentTime } from "@/presentation/components/ui/relative-time";
 import { InstagramPaidAdsPanel } from "@/presentation/dashboard/instagram-paid-ads-panel";
 import { PaidAdsActions, PaidAdsFreshnessLine, paidAdsHasData, paidAdsStatus } from "@/presentation/overview/paid-ads-hero";
 import { PaidAdsCampaignTable, PaidAdsTodayStrip } from "@/presentation/platforms/ads-detail";
+import { AdsCampaignHistory } from "@/presentation/platforms/ads-campaign-history";
 import { MetricTileGrid } from "@/presentation/platforms/metric-tile-grid";
 import { PlatformPageHeader } from "@/presentation/platforms/platform-page-header";
 import { dashboardPath } from "@/presentation/routes/data-space-routes";
@@ -22,6 +25,11 @@ export const dynamic = "force-dynamic";
 
 const RANGES = ["today", "7d", "30d"] as const;
 const GRID_METRICS = ["spend", "impressions", "link_clicks", "ctr", "cpc", "cpm", "purchases", "roas"];
+
+async function CampaignHistory({ dataSpaceId, fixture }: { dataSpaceId: string; fixture: boolean }) {
+  const snapshot = await getAdsCampaignHistory({ dataSpaceId, platform: "meta_ads", fixture });
+  return <AdsCampaignHistory snapshot={snapshot} />;
+}
 
 export default async function AdsPlatformPage({
   params,
@@ -89,6 +97,10 @@ export default async function AdsPlatformPage({
           </>
         )}
       />
+
+      <Suspense fallback={<p className="px-1 text-sm text-label-secondary" role="status">Loading campaign history…</p>}>
+        <CampaignHistory dataSpaceId={dataSpace.id} fixture={fixture} />
+      </Suspense>
 
       {ads.stateMessage && ads.state !== "live" ? (
         <Callout tone={status.tone === "rose" ? "danger" : status.tone === "amber" ? "warning" : "info"} title={status.label} role="status">

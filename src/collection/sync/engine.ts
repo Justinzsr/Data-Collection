@@ -311,7 +311,17 @@ export async function enqueueSyncRun(input: EnqueueSyncRunInput): Promise<SyncRu
       const normalized = await connector.normalize(syncResult.rawPayloads, source);
       assertLockLease();
       validateMetricWindowOwnership(normalized);
-      persistedNormalized = await persistNormalized(normalized);
+      // A report marker and its campaign facts must become visible together.
+      // Share the transaction with daily replacements so a failed history batch
+      // cannot publish half a report or leave the two reporting views apart.
+      persistedNormalized = normalized.snapshotMetrics?.length && isRuntimeDatabaseConfigured()
+        ? await withDatabaseTransaction(async (client) => {
+          assertLockLease();
+          const result = await persistNormalized(normalized, client);
+          assertLockLease();
+          return result;
+        })
+        : await persistNormalized(normalized);
     }
     assertLockLease();
     const { raw, webEventsInserted } = persistedRaw;

@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { JsonRecord } from "@/storage/db/schema";
+import { adsHistoryEpochCoverage, adsHistoryNumber, adsHistoryWindow, createAdsCampaignHistoryReport, type AdsCampaignHistory, type AdsCampaignHistoryReport, type AdsCampaignHistoryRow } from "@/collection/connectors/ads-campaign-history";
 
 const API_BASE = "https://api.ads.openai.com/v1";
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -61,6 +62,7 @@ export type ChatgptAdsSyncSnapshot = {
   windowEndDate: string;
   attribution: typeof CHATGPT_ADS_ATTRIBUTION;
   fetchedAt: string;
+  campaignHistory?: AdsCampaignHistory;
 };
 
 export class ChatgptAdsApiError extends Error {
@@ -263,6 +265,59 @@ export async function fetchChatgptAdsConversions(
   };
 }
 
+export async function fetchChatgptAdsCampaignHistory(apiKey: string, account: ChatgptAdsAccount, fetchedAt: string): Promise<AdsCampaignHistoryReport> {
+  const window = adsHistoryWindow("chatgpt_ads", fetchedAt, account.timezone);
+  const query = new URLSearchParams({ aggregation_level: "campaign", time_granularity: "none", limit: "2000" });
+  query.append("includes[]", "zero_impression_items");
+  query.append("time_ranges[]", dateRange(window.startDate, window.endDate, account.timezone));
+  for (const field of ["metadata.timezone", "campaign.id", "campaign.name", "campaign.spend", "campaign.impressions", "campaign.clicks"]) query.append("fields[]", field);
+  const rows: AdsCampaignHistoryRow[] = [];
+  const evidence: JsonRecord[] = [];
+  const pages: JsonRecord[] = [];
+  const visited = new Set<string>();
+  const metric = (row: JsonRecord, flat: string, prefixed: string, count = false) => {
+    const supplied = [row[flat], row[prefixed]].filter((value) => value !== undefined);
+    if (!supplied.length) throw new Error("ChatGPT Ads history returned an unavailable metric.");
+    const values = supplied.map((value) => adsHistoryNumber(value, count));
+    if (values.some((value) => value !== values[0])) throw new Error("ChatGPT Ads history returned conflicting metric aliases.");
+    return values[0];
+  };
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const body = await apiRequest("/ad_account/insights", apiKey, { query });
+    if (!Array.isArray(body.data) || body.data.some((row) => !isRecord(row)) || typeof body.has_more !== "boolean") throw new Error("ChatGPT Ads history returned an invalid page.");
+    if (body.account_currency !== undefined && body.account_currency !== account.currency_code) throw new Error("ChatGPT Ads history returned a different currency.");
+    pages.push(pickFields(body, ["timezone", "account_currency"]));
+    if (!body.data.length && body.timezone !== undefined && body.timezone !== account.timezone) throw new Error("ChatGPT Ads history returned a different account time zone.");
+    for (const value of body.data) {
+      const row = value as JsonRecord;
+      if (row.ad_account_id !== undefined && row.ad_account_id !== account.id) throw new Error("ChatGPT Ads history returned a different account.");
+      if (row.account_currency !== undefined && row.account_currency !== account.currency_code) throw new Error("ChatGPT Ads history returned a different currency.");
+      const result = {
+        campaignId: typeof row.campaign_id === "string" ? row.campaign_id : "",
+        campaignName: typeof row.campaign_name === "string" ? row.campaign_name : "",
+        spend: metric(row, "spend", "campaign_spend"),
+        impressions: metric(row, "impressions", "campaign_impressions", true),
+        clicks: metric(row, "clicks", "campaign_clicks", true),
+      };
+      for (const label of [body.timezone, row.timezone]) {
+        if (label !== undefined && label !== account.timezone && !(label === "UTC"
+          && result.spend === 0 && result.impressions === 0 && result.clicks === 0
+          && adsHistoryEpochCoverage(row.start_time, row.end_time, window.startDate, window.endDate, account.timezone))) {
+          throw new Error("ChatGPT Ads history returned a different account time zone.");
+        }
+      }
+      rows.push(result);
+      evidence.push(pickFields(row, ["campaign_id", "campaign_name", "ad_account_id", "account_currency", "timezone", "start_time", "end_time", "spend", "impressions", "clicks", "campaign_spend", "campaign_impressions", "campaign_clicks"]));
+    }
+    if (!body.has_more) return { ...createAdsCampaignHistoryReport({ platform: "chatgpt_ads", accountId: account.id, currency: account.currency_code, timeZone: account.timezone, ...window, rows }), evidence: { rows: evidence, pages } };
+    const cursor = body.last_id;
+    if (typeof cursor !== "string" || !cursor || visited.has(cursor)) throw new Error("ChatGPT Ads history pagination did not advance.");
+    visited.add(cursor);
+    query.set("after", cursor);
+  }
+  throw new Error("ChatGPT Ads history exceeded the safe page limit.");
+}
+
 export async function fetchChatgptAdsSnapshot(input: {
   apiKey: string;
   account: ChatgptAdsAccount;
@@ -270,9 +325,14 @@ export async function fetchChatgptAdsSnapshot(input: {
   endDate: string;
   fetchedAt?: string;
 }): Promise<ChatgptAdsSyncSnapshot> {
-  const [insights, conversions] = await Promise.all([
+  const fetchedAt = input.fetchedAt ?? new Date().toISOString();
+  const history = fetchChatgptAdsCampaignHistory(input.apiKey, input.account, fetchedAt)
+    .then((report): AdsCampaignHistory => ({ status: "available", report }))
+    .catch((error: unknown): AdsCampaignHistory => ({ status: "unavailable", error: sanitizeChatgptAdsErrorMessage(error instanceof Error ? error.message : null, input.apiKey) }));
+  const [insights, conversions, campaignHistory] = await Promise.all([
     fetchChatgptAdsInsights(input.apiKey, input.account, input.startDate, input.endDate),
     fetchChatgptAdsConversions(input.apiKey, input.account, input.startDate, input.endDate),
+    history,
   ]);
   return {
     kind: "chatgpt_ads_sync_snapshot",
@@ -284,7 +344,8 @@ export async function fetchChatgptAdsSnapshot(input: {
     windowStartDate: input.startDate,
     windowEndDate: input.endDate,
     attribution: CHATGPT_ADS_ATTRIBUTION,
-    fetchedAt: input.fetchedAt ?? new Date().toISOString(),
+    fetchedAt,
+    campaignHistory,
   };
 }
 
