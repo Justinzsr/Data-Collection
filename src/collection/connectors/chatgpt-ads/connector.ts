@@ -18,6 +18,7 @@ import {
 } from "@/collection/connectors/chatgpt-ads/api";
 import type { JsonRecord, Source } from "@/storage/db/schema";
 import { updateSource } from "@/storage/repositories/sources-repository";
+import { adsCampaignHistoryCursor, adsCampaignHistoryMetrics } from "@/collection/connectors/ads-campaign-history";
 
 export const CHATGPT_ADS_METRIC_KEYS = [
   "chatgpt_ads_spend",
@@ -220,8 +221,8 @@ export const chatgptAdsConnector: ConnectorDefinition = {
     const snapshot = await fetchChatgptAdsSnapshot({ apiKey, account, ...window, fetchedAt });
     return {
       rawPayloads: [{ externalId: `chatgpt_ads:${account.id}:${window.startDate}:${window.endDate}`, fetchedAt, payload: snapshot as unknown as JsonRecord, payloadHash: hashChatgptAdsSnapshot(snapshot), cursor: { accountId: account.id, ...window } }],
-      cursorAfter: { accountId: account.id, currency: account.currency_code, timeZone: account.timezone, ...window, fetchedAt, conversionStatus: snapshot.conversionStatus },
-      recordsFetched: snapshot.insights.length + snapshot.conversions.length,
+      cursorAfter: { accountId: account.id, currency: account.currency_code, timeZone: account.timezone, ...window, fetchedAt, conversionStatus: snapshot.conversionStatus, ...adsCampaignHistoryCursor(snapshot.campaignHistory) },
+      recordsFetched: snapshot.insights.length + snapshot.conversions.length + (snapshot.campaignHistory?.status === "available" ? snapshot.campaignHistory.report.rows.length : 0),
       message: `Synced ${snapshot.insights.length} ChatGPT Ads account/day delivery row(s) and ${snapshot.conversions.length} goal-conversion row(s). Recent spend and attribution may be revised.`,
     };
   },
@@ -229,7 +230,11 @@ export const chatgptAdsConnector: ConnectorDefinition = {
     const latest = rawPayloads.map((raw) => raw.payload).filter(isChatgptAdsSyncSnapshot).sort((left, right) => left.fetchedAt.localeCompare(right.fetchedAt)).at(-1);
     if (!latest) return { metrics: [] };
     accountMatches(latest.account, source, {});
-    return { metrics: normalizeSnapshot(latest, source), replaceMetricWindow: { metricKeys: [...CHATGPT_ADS_METRIC_KEYS], startDate: latest.windowStartDate, endDate: latest.windowEndDate } };
+    return {
+      metrics: normalizeSnapshot(latest, source),
+      snapshotMetrics: adsCampaignHistoryMetrics(latest.campaignHistory, source, { id: latest.account.id, currency: latest.account.currency_code, timeZone: latest.account.timezone }, latest.fetchedAt),
+      replaceMetricWindow: { metricKeys: [...CHATGPT_ADS_METRIC_KEYS], startDate: latest.windowStartDate, endDate: latest.windowEndDate },
+    };
   },
   getMetricDefinitions() {
     return metricDefinitions.filter((definition) => definition.source_type_key === "chatgpt_ads");

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { JsonRecord } from "@/storage/db/schema";
+import { adsHistoryNumber, adsHistoryWindow, createAdsCampaignHistoryReport, type AdsCampaignHistory, type AdsCampaignHistoryReport } from "@/collection/connectors/ads-campaign-history";
 
 export const META_ADS_GRAPH_API_VERSION = "v25.0";
 export const META_ADS_DEFAULT_LOOKBACK_DAYS = 30;
@@ -114,6 +115,7 @@ export type MetaAdsSyncSnapshot = {
   windowStartDate: string;
   windowEndDate: string;
   fetchedAt: string;
+  campaignHistory?: AdsCampaignHistory;
 };
 
 type GraphCollection<T> = {
@@ -246,7 +248,14 @@ async function graphFetch<T>(url: URL, accessToken: string): Promise<T> {
   }
 }
 
-async function fetchPaginated<T>(initialUrl: URL, accessToken: string): Promise<T[]> {
+function validateHistoryPage(page: unknown) {
+  if (!isRecord(page) || !Array.isArray(page.data) || page.data.some((row) => !isRecord(row))
+    || (page.paging !== undefined && (!isRecord(page.paging) || (page.paging.next !== undefined && typeof page.paging.next !== "string")))) {
+    throw new MetaAdsGraphApiError("Meta Ads history returned an invalid page.", { status: 502 });
+  }
+}
+
+async function fetchPaginated<T>(initialUrl: URL, accessToken: string, strict = false): Promise<T[]> {
   const rows: T[] = [];
   const visited = new Set<string>();
   let next: URL | null = initialUrl;
@@ -261,8 +270,13 @@ async function fetchPaginated<T>(initialUrl: URL, accessToken: string): Promise<
     pages += 1;
 
     const page: GraphCollection<T> = await graphFetch<GraphCollection<T>>(safeUrl, accessToken);
+    if (strict) validateHistoryPage(page);
     if (Array.isArray(page.data)) rows.push(...page.data);
     next = page.paging?.next ? stripSensitiveQuery(new URL(page.paging.next, safeUrl)) : null;
+    if (strict && next) {
+      if (next.origin !== initialUrl.origin || next.pathname !== initialUrl.pathname) throw new MetaAdsGraphApiError("Meta Ads history pagination changed reporting scope.", { status: 502 });
+      initialUrl.searchParams.forEach((value, name) => next!.searchParams.set(name, value));
+    }
   }
   return rows;
 }
@@ -339,6 +353,41 @@ export async function fetchMetaAdsInsights(
   return fetchPaginated<MetaAdsInsightRow>(url, accessToken);
 }
 
+export async function fetchMetaAdsCampaignHistory(
+  accessToken: string,
+  config: MetaAdsConfig,
+  account: MetaAdAccount,
+  fetchedAt: string,
+): Promise<AdsCampaignHistoryReport> {
+  const accountId = normalizeMetaAdAccountId(account.id).replace(/^act_/u, "");
+  if (account.account_id !== undefined && account.account_id !== accountId) throw new Error("Meta Ads history account identity does not match.");
+  const currency = account.currency ?? "";
+  const timeZone = account.timezone_name ?? "";
+  const window = adsHistoryWindow("meta_ads", fetchedAt, timeZone);
+  const url = graphUrl(config, `/${normalizeMetaAdAccountId(account.id)}/insights`);
+  url.searchParams.set("fields", "account_id,account_currency,campaign_id,campaign_name,date_start,date_stop,spend,impressions,clicks");
+  url.searchParams.set("level", "campaign");
+  url.searchParams.set("time_increment", "all_days");
+  url.searchParams.set("time_range", JSON.stringify({ since: window.startDate, until: window.endDate }));
+  url.searchParams.set("limit", "100");
+  const rows = await fetchPaginated<JsonRecord>(url, accessToken, true);
+  const report = createAdsCampaignHistoryReport({
+    platform: "meta_ads", accountId, currency, timeZone, ...window,
+    rows: rows.map((row) => {
+      if (row.account_id !== accountId || row.account_currency !== currency) throw new Error("Meta Ads history returned a different account or currency.");
+      if (row.date_start !== window.startDate || row.date_stop !== window.endDate) throw new Error("Meta Ads history returned different reporting coverage.");
+      if (row.timezone !== undefined && row.timezone !== timeZone) throw new Error("Meta Ads history returned a different account time zone.");
+      return {
+        campaignId: typeof row.campaign_id === "string" ? row.campaign_id : "",
+        campaignName: typeof row.campaign_name === "string" ? row.campaign_name : "",
+        spend: adsHistoryNumber(row.spend), impressions: adsHistoryNumber(row.impressions, true), clicks: adsHistoryNumber(row.clicks, true),
+      };
+    }),
+  });
+  const fields = ["account_id", "account_currency", "campaign_id", "campaign_name", "date_start", "date_stop", "timezone", "spend", "impressions", "clicks"];
+  return { ...report, evidence: { rows: rows.map((row) => Object.fromEntries(fields.filter((key) => key in row).map((key) => [key, row[key]]))) } };
+}
+
 export async function fetchMetaAdsSnapshot(input: {
   accessToken: string;
   config: MetaAdsConfig;
@@ -347,9 +396,17 @@ export async function fetchMetaAdsSnapshot(input: {
   endDate: string;
   fetchedAt?: string;
 }): Promise<MetaAdsSyncSnapshot> {
-  const [ads, insights] = await Promise.all([
+  const fetchedAt = input.fetchedAt ?? new Date().toISOString();
+  const history = fetchMetaAdsCampaignHistory(input.accessToken, input.config, input.account, fetchedAt)
+    .then((report): AdsCampaignHistory => ({ status: "available", report }))
+    .catch((error: unknown): AdsCampaignHistory => ({
+      status: "unavailable",
+      error: sanitizeMetaAdsErrorMessage(error instanceof Error ? error.message : null).split(input.accessToken).join("[redacted]").slice(0, 500),
+    }));
+  const [ads, insights, campaignHistory] = await Promise.all([
     fetchMetaAds(input.accessToken, input.config, input.account.id),
     fetchMetaAdsInsights(input.accessToken, input.config, input.account.id, input.startDate, input.endDate),
+    history,
   ]);
   return {
     kind: "meta_ads_sync_snapshot",
@@ -359,7 +416,8 @@ export async function fetchMetaAdsSnapshot(input: {
     graphApiVersion: input.config.graphApiVersion,
     windowStartDate: input.startDate,
     windowEndDate: input.endDate,
-    fetchedAt: input.fetchedAt ?? new Date().toISOString(),
+    fetchedAt,
+    campaignHistory,
   };
 }
 

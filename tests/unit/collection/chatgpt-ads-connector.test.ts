@@ -230,11 +230,12 @@ describe("ChatGPT Ads read-only reports", () => {
       throw new Error("Unexpected route");
     }));
     const result = await chatgptAdsConnector.sync({ source: source(), credentials: { chatgpt_ads_api_key: API_KEY, chatgpt_ads_lookback_days: "3" }, isDemoMode: false, trigger: "manual" });
-    expect(paths.sort()).toEqual(["/v1/ad_account", "/v1/ad_account/insights", "/v1/conversions/insights"]);
-    expect(result.cursorAfter).toEqual({ accountId: account.id, currency: "USD", timeZone: account.timezone, startDate: "2026-11-11", endDate: "2026-11-13", fetchedAt: "2026-11-14T03:00:00.000Z", conversionStatus: "available" });
+    expect(paths.sort()).toEqual(["/v1/ad_account", "/v1/ad_account/insights", "/v1/ad_account/insights", "/v1/conversions/insights"]);
+    expect(result.cursorAfter).toMatchObject({ accountId: account.id, currency: "USD", timeZone: account.timezone, startDate: "2026-11-11", endDate: "2026-11-13", fetchedAt: "2026-11-14T03:00:00.000Z", conversionStatus: "available", historyStatus: "available", historyReportStart: "2025-11-13", historyReportEnd: "2026-11-12" });
     expect(JSON.stringify(result)).not.toContain(API_KEY);
     const normalized = await chatgptAdsConnector.normalize(result.rawPayloads, source());
     expect(normalized.metrics).toEqual([]);
+    expect(normalized.snapshotMetrics).toEqual([expect.objectContaining({ metricKey: "chatgpt_ads_history_campaign_count", metricValue: 0 })]);
     expect(normalized.replaceMetricWindow).toMatchObject({ metricKeys: [...CHATGPT_ADS_METRIC_KEYS], startDate: "2026-11-11", endDate: "2026-11-13" });
     expect(updateSource).not.toHaveBeenCalled();
   });

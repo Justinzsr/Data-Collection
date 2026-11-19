@@ -38,6 +38,29 @@ use sums on matching reported dates; daily percentages are never averaged.
 Fractional attributed goals remain fractional in tiles, charts and daily tables.
 Missing measurements and unknown denominators render as unavailable.
 
+## Available campaign history
+
+Each normal sync also reads a separate official campaign report for spend,
+impressions and ad clicks over the latest 365 completed account-local days,
+ending yesterday. The current day remains in the existing daily view. History
+is an available reporting window, not proof of lifetime coverage. It excludes
+product breakdowns and keeps the account's main currency units.
+
+The independent `chatgpt_ads_history_*` snapshot keys never enter daily-window
+replacement or daily sums. Each successful batch contains three facts per unique
+campaign (`campaign_history_total`) and a campaign-count marker
+(`campaign_history_report`), all with the same content hash and exact reporting
+dates. Read the latest complete batch, never sum snapshots across dates.
+Missing or invalid values, conflicting duplicate campaigns, identity or currency
+conflicts, and incomplete pagination make this optional history unavailable.
+The daily sync can still succeed; its cursor records `historyStatus` and a
+sanitized error, and existing history remains available as stale evidence.
+An empty complete report stores only its zero campaign-count marker; it does not
+invent zero spend. UTC-labelled zero rows are accepted only when all supplied
+metric aliases are explicitly zero and returned integer epochs independently
+prove the exact requested account-local midnight boundaries. Other timezone
+conflicts remain unavailable. Raw response metadata is not rewritten.
+
 Goal attribution is fixed to a 30-day click window, 1-day view window and
 `ad_event_time`. Goal conversions are the account's configured campaign goals,
 not necessarily purchases. Post-click CVR uses click-through goal conversions

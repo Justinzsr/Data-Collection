@@ -25,6 +25,7 @@ import {
   type MetaAdsSyncSnapshot,
 } from "@/collection/connectors/meta-ads/api";
 import type { JsonRecord, Source } from "@/storage/db/schema";
+import { adsCampaignHistoryCursor, adsCampaignHistoryMetrics } from "@/collection/connectors/ads-campaign-history";
 
 export const META_ADS_METRIC_KEYS = [
   "meta_ads_spend",
@@ -486,11 +487,13 @@ export const metaAdsConnector: ConnectorDefinition = {
       ],
       cursorAfter: {
         accountId: account.id,
+        currency: account.currency ?? null,
         accountTimeZone: account.timezone_name ?? null,
         ...window,
         fetchedAt,
+        ...adsCampaignHistoryCursor(snapshot.campaignHistory),
       },
-      recordsFetched: snapshot.ads.length + snapshot.insights.length,
+      recordsFetched: snapshot.ads.length + snapshot.insights.length + (snapshot.campaignHistory?.status === "available" ? snapshot.campaignHistory.report.rows.length : 0),
       message: `Synced ${snapshot.insights.length} Meta Ads ad/day insight row(s) across an overlapping ${lookbackDays(ctx.credentials)}-day window.`,
     };
   },
@@ -503,6 +506,9 @@ export const metaAdsConnector: ConnectorDefinition = {
     if (!latest) return { metrics: [] };
     return {
       metrics: normalizeSnapshot(latest, source),
+      snapshotMetrics: adsCampaignHistoryMetrics(latest.campaignHistory, source, {
+        id: normalizeMetaAdAccountId(latest.account.id).replace(/^act_/u, ""), currency: latest.account.currency ?? "", timeZone: latest.account.timezone_name ?? "",
+      }, latest.fetchedAt),
       replaceMetricWindow: {
         metricKeys: [...META_ADS_METRIC_KEYS],
         startDate: latest.windowStartDate,
