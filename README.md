@@ -1,6 +1,6 @@
-# MoonArq Data Command Center
+# Data Command Center
 
-MoonArq Data Command Center monitors MoonArq's existing sources first:
+Data Command Center monitors existing sources first:
 
 - MoonArq Website / Vercel (`moonarqstudio.com`)
 - MoonArq Supabase
